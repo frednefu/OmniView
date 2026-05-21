@@ -22,9 +22,14 @@ const routes = [
       {
         path: 'switches',
         name: 'Switches',
-        component: () => import('@/views/Placeholder.vue'),
-        props: { title: '交换机管理' },
+        component: () => import('@/views/SwitchList.vue'),
         meta: { title: '交换机管理' },
+      },
+      {
+        path: 'switches/:id',
+        name: 'SwitchDetail',
+        component: () => import('@/views/SwitchDetail.vue'),
+        meta: { title: '交换机详情' },
       },
       {
         path: 'results',
