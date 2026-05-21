@@ -95,7 +95,7 @@ const searchText = ref('')
 function handleSearch() {
   const q = searchText.value.trim()
   if (q) {
-    ElMessage.info('搜索功能即将上线')
+    router.push({ path: '/search', query: { q } })
   }
 }
 

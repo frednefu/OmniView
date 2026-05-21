@@ -34,23 +34,26 @@ const routes = [
       {
         path: 'results',
         name: 'Results',
-        component: () => import('@/views/Placeholder.vue'),
-        props: { title: '扫描结果' },
+        component: () => import('@/views/Results.vue'),
         meta: { title: '扫描结果' },
       },
       {
         path: 'routes',
         name: 'Routes',
-        component: () => import('@/views/Placeholder.vue'),
-        props: { title: '路由表' },
+        component: () => import('@/views/Routes.vue'),
         meta: { title: '路由表' },
       },
       {
         path: 'subnets',
         name: 'Subnets',
-        component: () => import('@/views/Placeholder.vue'),
-        props: { title: '地址段管理' },
+        component: () => import('@/views/SubnetManage.vue'),
         meta: { title: '地址段管理' },
+      },
+      {
+        path: 'search',
+        name: 'Search',
+        component: () => import('@/views/SearchResult.vue'),
+        meta: { title: '搜索' },
       },
       {
         path: 'history',

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, Base
-from app.models import User, Switch, ScanResult, RouteTable, ScanLog
+from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet
 from app.api.router import api_router
 
 
