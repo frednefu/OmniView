@@ -39,11 +39,11 @@
 
 ## 运行环境
 
-- Python 环境：`fred` conda 环境（pandas + pysnmp）
-- SNMP v2c，默认 community `fred7531`
+- Python 环境：conda 环境（pandas + pysnmp）
+- SNMP v2c
 
 ```bash
-/c/Users/Administrator/.conda/envs/fred/python.exe switchReader/switchReader.py
+python switchReader/switchReader.py
 ```
 
 ## 项目结构
@@ -59,6 +59,6 @@ switchReader/
 编辑 `switchReader/switchReader.py` 中的 `SWITCH_CONFIGS` 列表：
 
 ```python
-{"ip": "10.100.221.11", "community": "fred7531"},                     # 标准 MIB
-{"ip": "10.110.112.11", "community": "fred7531", "mib": "huawei"},    # 华为 SDN
+{"ip": "192.168.1.1", "community": "public"},                     # 标准 MIB
+{"ip": "192.168.1.2", "community": "public", "mib": "huawei"},    # 华为 SDN
 ```
