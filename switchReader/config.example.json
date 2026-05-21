@@ -1,0 +1,12 @@
+{
+    "switches": [
+        {"ip": "192.168.1.1", "community": "public", "mib": "huawei"},
+        {"ip": "192.168.1.1", "community": "public"},
+        {"ip": "192.168.1.2", "community": "public"}
+    ],
+    "snmp_port": 161,
+    "snmp_timeout": 3,
+    "snmp_retries": 2,
+    "max_workers": 5,
+    "walk_limit": 10000
+}

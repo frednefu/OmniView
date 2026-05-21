@@ -1,4 +1,7 @@
 import asyncio
+import json
+import os
+import sys
 import pandas as pd
 from pysnmp.hlapi.v1arch import (
     Slim,
@@ -8,53 +11,49 @@ from pysnmp.hlapi.v1arch import (
 from concurrent.futures import ThreadPoolExecutor
 
 # ============================================================
-# 配置
+# 配置：从外部 JSON 文件加载
 # ============================================================
 
+def _load_config():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'config.json')
+    example_path = os.path.join(script_dir, 'config.example.json')
+
+    if not os.path.exists(config_path):
+        print(f"配置文件不存在：{config_path}")
+        print(f"请复制 {config_path} 参考 {example_path} 模板创建。")
+        print(f"  cp {example_path} {config_path}")
+        sys.exit(1)
+
+    with open(config_path, 'r', encoding='utf-8') as f:
+        cfg = json.load(f)
+
+    return {
+        'switches': cfg['switches'],
+        'snmp_port': cfg.get('snmp_port', 161),
+        'snmp_timeout': cfg.get('snmp_timeout', 3),
+        'snmp_retries': cfg.get('snmp_retries', 2),
+        'max_workers': cfg.get('max_workers', 5),
+        'walk_limit': cfg.get('walk_limit', 10000),
+    }
+
+_config = _load_config()
+
 # 交换机列表
-#   ip:        交换机管理 IP 地址
-#   community: SNMP v2c 读团体字（read community string）
-#   mib:       FDB 表优先使用的 MIB 库，可选值:
-#              "huawei"  — 优先使用华为私有 MIB (HUAWEI-L2MAM)，支持 BD 模式
-#              "standard" — 优先使用标准 MIB (Q-BRIDGE)，适用于非华为交换机
-#              省略时默认 "standard"
-SWITCH_CONFIGS = [
-    # -- 华为 SDN 交换机 (CE6881H 等) --
-    {"ip": "10.110.112.11", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.12", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.13", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.14", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.15", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.16", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.17", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.18", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.19", "community": "fred7531", "mib": "huawei"},
-    {"ip": "10.110.112.20", "community": "fred7531", "mib": "huawei"},
+#   每项字段：
+#     ip:        交换机管理 IP 地址
+#     community: SNMP v2c 读团体字（read community string）
+#     mib:       FDB 表优先使用的 MIB 库，可选值:
+#                "huawei"  — 优先使用华为私有 MIB (HUAWEI-L2MAM)，支持 BD 模式
+#                "standard" — 优先使用标准 MIB (Q-BRIDGE)，适用于非华为交换机
+#                省略时默认 "standard"
+SWITCH_CONFIGS = _config['switches']
 
-    # -- 标准交换机 (其他厂商) --
-    {"ip": "10.100.221.11", "community": "fred7531"},
-    {"ip": "10.100.221.12", "community": "fred7531"},
-    {"ip": "10.100.221.13", "community": "fred7531"},
-    {"ip": "10.100.220.62", "community": "fred7531"},
-
-    # -- 测试 / 不可达设备 --
-    {"ip": "1.1.1.100", "community": "fred7531"},
-]
-
-# SNMP 端口，交换机默认 161
-SNMP_PORT = 161
-
-# SNMP 请求超时时间（秒），单次请求超过此时间视为失败
-SNMP_TIMEOUT = 3
-
-# SNMP 请求失败后的重试次数
-SNMP_RETRIES = 2
-
-# 并发扫描的线程数：同时扫描多少台交换机，不宜超过交换机数量
-MAX_WORKERS = 5
-
-# SNMP 表遍历的最大步数，防止异常情况下死循环（正常不会达到此值）
-WALK_LIMIT = 10000
+SNMP_PORT    = _config['snmp_port']
+SNMP_TIMEOUT = _config['snmp_timeout']
+SNMP_RETRIES = _config['snmp_retries']
+MAX_WORKERS  = _config['max_workers']
+WALK_LIMIT   = _config['walk_limit']
 
 # ============================================================
 # SNMP OID 定义

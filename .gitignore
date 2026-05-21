@@ -11,3 +11,6 @@ __pycache__/
 
 # Claude local settings
 .claude/
+
+# Sensitive config (real credentials, use config.example.json as template)
+config.json

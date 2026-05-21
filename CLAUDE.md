@@ -8,30 +8,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Python 环境
 
-必须使用 `fred` conda 环境（含 pandas + pysnmp）：
-
-```
-/c/Users/Administrator/.conda/envs/fred/python.exe
-```
+需要 conda 环境（含 pandas + pysnmp）。
 
 ## 运行
 
 ```bash
-/c/Users/Administrator/.conda/envs/fred/python.exe switchReader/switchReader.py
+python switchReader/switchReader.py
 ```
 
 输出：项目根目录下的 `network_report.xlsx`。
 
-## 添加交换机
+## 交换机配置
 
-编辑 `switchReader/switchReader.py` 中的 `SWITCH_CONFIGS` 列表：
+复制模板文件并填入真实设备信息：
 
-```python
-SWITCH_CONFIGS = [
-    {"ip": "10.100.221.11", "community": "fred7531"},
-    {"ip": "10.100.220.62", "community": "fred7531"},
-]
+```bash
+cp switchReader/config.example.json switchReader/config.json
+# 编辑 switchReader/config.json，填入交换机 IP 和 SNMP community
 ```
+
+`config.json` 格式：
+
+```json
+{
+    "switches": [
+        {"ip": "192.168.1.1", "community": "public", "mib": "huawei"},
+        {"ip": "192.168.1.1", "community": "public"}
+    ],
+    "snmp_port": 161,
+    "snmp_timeout": 3,
+    "snmp_retries": 2,
+    "max_workers": 5,
+    "walk_limit": 10000
+}
+```
+
+`mib` 字段可选：`"huawei"` 使用华为私有 MIB（支持 BD 模式），省略则使用标准 MIB。
 
 ## 架构
 
@@ -94,4 +106,4 @@ bridgePort (dot1dTpFdbPort 的值) → dot1dBasePortIfIndex → ifIndex → ifNa
 
 ### 当前状态
 
-已验证两台三层交换机（10.100.221.11, 10.100.220.62），共输出 278 条记录（含 12 条有 IP 的 ARP 条目 + 266 条纯 MAC 的 FDB 条目）。L2 交换机路径已实现（`_scan_l2_switch`）但尚未有 L2 交换机实测。
+已验证多台三层和华为 SDN 交换机。L2 交换机路径已实现（`_scan_l2_switch`）。
