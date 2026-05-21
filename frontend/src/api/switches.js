@@ -46,3 +46,11 @@ export function downloadTemplate() {
     URL.revokeObjectURL(url)
   })
 }
+
+export function scanAllSwitches() {
+  return api.post('/switches/scan-all').then((r) => r.data)
+}
+
+export function deleteAllSwitches() {
+  return api.delete('/switches/all').then((r) => r.data)
+}

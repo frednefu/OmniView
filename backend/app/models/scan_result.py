@@ -23,5 +23,6 @@ class ScanResult(Base):
     switch_type = Column(String(4), nullable=False)
     scan_log_id = Column(Integer, ForeignKey("scan_logs.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     switch = relationship("Switch", back_populates="scan_results")

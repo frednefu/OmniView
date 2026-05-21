@@ -45,8 +45,16 @@ def _build_switch_config(switch: Switch) -> dict:
 
 
 def _store_host_results(db, switch_id: int, scan_log_id: int, host_data: list):
-    # Collect MAC->IP mappings from existing records across ALL switches
-    # to fill empty IPs in new data before deleting old records for this switch
+    """
+    增量保存扫描结果：
+    - 核心键 (IP, MAC, 物理端口) 不变且追踪字段未变 → 只更新 updated_at，不产生历史
+    - 核心键存在但追踪字段变化 → 插入新行保留历史，产生 modified 记录
+    - 核心键不存在 → 插入新行，产生 added 记录
+    - 旧核心键在新数据中消失 → 产生 deleted 记录（旧数据保留作为历史）
+    """
+    from app.services.history_service import _fields_differ
+
+    # 构建 MAC→IP 回填映射
     mac_ip_map = {}
     existing_rows = db.query(
         ScanResult.mac_address, ScanResult.ip_address
@@ -58,40 +66,61 @@ def _store_host_results(db, switch_id: int, scan_log_id: int, host_data: list):
         if mac and mac not in mac_ip_map:
             mac_ip_map[mac] = ip
 
-    # Snapshot old data for change detection (before DELETE)
+    # 快照旧数据：(IP, MAC, physical_port) → ScanResult
     old_rows = db.query(ScanResult).filter(ScanResult.switch_id == switch_id).all()
     old_by_key = {}
     for r in old_rows:
-        old_by_key[(r.ip_address, r.mac_address)] = r
+        old_by_key[(r.ip_address, r.mac_address, r.physical_port)] = r
 
-    # Delete old data for this switch
-    db.query(ScanResult).filter(ScanResult.switch_id == switch_id).delete()
-
-    # Insert new data
+    now = datetime.now()
     new_by_key = {}
+    handled_old_keys = set()
+
     for entry in host_data:
         ip = _clean(entry.get("IP地址", ""))
         mac = _clean(entry.get("MAC地址", ""))
-        # Fill empty IP from history if available
         if not ip and mac and mac in mac_ip_map:
             ip = mac_ip_map[mac]
+
+        physical_port = _clean(entry.get("物理端口", "") or "")
+        key = (ip, mac, physical_port)
+        old_r = old_by_key.get(key)
+
+        new_vlan_bd = entry.get("VLAN/BD")
+        new_vlan_type = _clean(entry.get("VLAN类型", "") or "")
+        new_virtual_port = _clean(entry.get("虚拟端口", "") or "")
+        new_switch_type = "L3" if entry.get("交换机类型") == "三层" else "L2"
+
+        if old_r and not _fields_differ(old_r, new_vlan_bd, new_vlan_type,
+                                         new_virtual_port, new_switch_type):
+            # 核心键未变且追踪字段相同 → 仅更新时间戳，复用旧行
+            old_r.updated_at = now
+            old_r.scan_log_id = scan_log_id
+            new_by_key[key] = old_r
+            handled_old_keys.add(key)
+            continue
+
+        # 新记录或字段变化 → 插入新行
         sr = ScanResult(
             switch_id=switch_id,
             ip_address=ip,
             mac_address=mac,
-            vlan_bd=entry.get("VLAN/BD"),
-            vlan_type=_clean(entry.get("VLAN类型", "") or ""),
-            physical_port=_clean(entry.get("物理端口", "") or ""),
-            virtual_port=_clean(entry.get("虚拟端口", "") or ""),
-            switch_type="L3" if entry.get("交换机类型") == "三层" else "L2",
+            vlan_bd=new_vlan_bd,
+            vlan_type=new_vlan_type,
+            physical_port=physical_port,
+            virtual_port=new_virtual_port,
+            switch_type=new_switch_type,
             scan_log_id=scan_log_id,
-            created_at=datetime.now(),
+            created_at=now,
+            updated_at=now,
         )
         db.add(sr)
-        new_by_key[(ip, mac)] = sr
+        new_by_key[key] = sr
+        if old_r:
+            handled_old_keys.add(key)
 
-    # Detect changes and write history
-    detect_changes(db, switch_id, scan_log_id, old_by_key, new_by_key)
+    # 变更检测并写入历史
+    detect_changes(db, switch_id, scan_log_id, old_by_key, new_by_key, handled_old_keys)
 
 
 def _store_route_results(db, switch_id: int, scan_log_id: int, route_data: list):

@@ -15,6 +15,21 @@
             <el-icon><Upload /></el-icon>批量导入
           </el-button>
         </el-upload>
+        <el-dropdown trigger="click">
+          <el-button type="warning" plain>
+            批量操作<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item @click="handleScanAll">
+                <el-icon><Refresh /></el-icon>全部扫描
+              </el-dropdown-item>
+              <el-dropdown-item @click="handleDeleteAll" divided>
+                <span style="color: #f56c6c;"><el-icon><Delete /></el-icon>全部删除</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon>添加交换机
         </el-button>
@@ -48,7 +63,7 @@
             <span v-else style="color:#c0c4cc;">未扫描</span>
           </template>
         </el-table-column>
-        <el-table-column label="扫描结果" width="120">
+        <el-table-column label="扫描结果" width="160">
           <template #default="{ row }">
             <template v-if="row.last_hosts_found > 0 || row.last_routes_found > 0">
               <span title="主机数">{{ row.last_hosts_found }} 主机</span>
@@ -122,7 +137,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '@/store/auth'
-import { getSwitches, triggerScan, deleteSwitch, downloadTemplate, importSwitches } from '@/api/switches'
+import { getSwitches, triggerScan, deleteSwitch, downloadTemplate, importSwitches, scanAllSwitches, deleteAllSwitches } from '@/api/switches'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SwitchFormDialog from '@/components/SwitchFormDialog.vue'
 
@@ -200,6 +215,28 @@ function handleCommand(cmd, row) {
   else if (cmd === 'delete') handleDelete(row)
 }
 
+async function handleScanAll() {
+  try {
+    await ElMessageBox.confirm('确认扫描所有启用的交换机？', '全部扫描', { type: 'info' })
+    const result = await scanAllSwitches()
+    ElMessage.success(result.message)
+    fetchList()
+  } catch { /* cancelled */ }
+}
+
+async function handleDeleteAll() {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将删除所有交换机及其关联的扫描数据、历史记录，不可恢复！请确认。',
+      '全部删除',
+      { type: 'error', confirmButtonClass: 'el-button--danger' }
+    )
+    const result = await deleteAllSwitches()
+    ElMessage.success(result.message)
+    fetchList()
+  } catch { /* cancelled */ }
+}
+
 onMounted(fetchList)
 </script>
 
@@ -208,9 +245,13 @@ onMounted(fetchList)
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
-.page-header h2 { margin: 0; }
+.page-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
 .header-actions {
   display: flex;
   gap: 10px;

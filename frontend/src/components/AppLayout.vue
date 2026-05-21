@@ -1,17 +1,30 @@
 <template>
   <el-container class="layout">
-    <el-aside :width="isCollapse ? '64px' : '220px'" class="sidebar">
+    <el-aside :width="isCollapse ? '64px' : '232px'" class="sidebar">
       <div class="logo">
-        <span v-show="!isCollapse">IPAM</span>
-        <span v-show="isCollapse">IP</span>
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="6" fill="url(#logo-grad)"/>
+            <text x="12" y="17" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">IP</text>
+            <defs>
+              <linearGradient id="logo-grad" x1="0" y1="0" x2="24" y2="24">
+                <stop stop-color="#6366f1"/>
+                <stop offset="1" stop-color="#8b5cf6"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <span v-show="!isCollapse" class="logo-text">IPAM</span>
+        <span v-show="isCollapse" class="logo-text-collapsed">IP</span>
       </div>
+
       <el-menu
         :default-active="route.path"
         :collapse="isCollapse"
         router
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409eff"
+        background-color="transparent"
+        text-color="var(--sidebar-text)"
+        active-text-color="var(--sidebar-text-active)"
       >
         <el-menu-item index="/dashboard">
           <el-icon><HomeFilled /></el-icon>
@@ -42,28 +55,47 @@
           <span>用户管理</span>
         </el-menu-item>
       </el-menu>
+
+      <div class="sidebar-footer" v-show="!isCollapse">
+        <div class="version">IPAM v2.0</div>
+      </div>
     </el-aside>
 
     <el-container>
       <el-header class="navbar">
         <div class="navbar-left">
-          <el-button text @click="isCollapse = !isCollapse">
-            <el-icon :size="20"><Fold v-if="!isCollapse" /><Expand v-else /></el-icon>
+          <el-button text class="collapse-btn" @click="isCollapse = !isCollapse">
+            <el-icon :size="18">
+              <Fold v-if="!isCollapse" /><Expand v-else />
+            </el-icon>
           </el-button>
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
+          <el-breadcrumb separator="">
+            <el-breadcrumb-item :to="{ path: '/dashboard' }">
+              <el-icon><HomeFilled /></el-icon>
+            </el-breadcrumb-item>
+            <span class="breadcrumb-sep" v-if="pageTitle">/</span>
             <el-breadcrumb-item v-if="pageTitle">{{ pageTitle }}</el-breadcrumb-item>
           </el-breadcrumb>
         </div>
         <div class="navbar-right">
-          <el-input v-model="searchText" placeholder="搜索 IP 或 MAC..." class="search-input" clearable
-            @keyup.enter="handleSearch">
-            <template #prefix><el-icon><Search /></el-icon></template>
+          <el-input
+            v-model="searchText"
+            placeholder="搜索 IP 或 MAC 地址..."
+            class="search-input"
+            clearable
+            @keyup.enter="handleSearch"
+          >
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
           </el-input>
           <el-dropdown trigger="click">
             <span class="user-info">
-              <el-avatar :size="32" icon="UserFilled" />
+              <el-avatar :size="34" class="user-avatar">
+                {{ authStore.user?.username?.charAt(0)?.toUpperCase() }}
+              </el-avatar>
               <span class="username">{{ authStore.user?.username }}</span>
+              <el-icon class="arrow-icon"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -79,7 +111,7 @@
         </div>
       </el-header>
 
-      <el-main>
+      <el-main class="main-content">
         <router-view v-slot="{ Component }">
           <transition name="fade-page" mode="out-in">
             <component :is="Component" />
@@ -113,7 +145,6 @@ const pageTitle = computed(() => {
     '/profile': '个人设置',
     '/search': '搜索结果',
   }
-  // 处理动态路由 /switches/:id
   const base = '/' + route.path.split('/')[1]
   return titles[route.path] || titles[base] || ''
 })
@@ -135,66 +166,141 @@ function handleLogout() {
 .layout {
   height: 100vh;
 }
+
+/* ═══════════════ 侧边栏 ═══════════════ */
 .sidebar {
-  background-color: #304156;
+  background: var(--sidebar-bg);
   overflow-y: auto;
-  transition: width 0.3s;
+  overflow-x: hidden;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
 }
+
 .logo {
   height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 20px;
-  font-weight: bold;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  gap: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0 16px;
 }
+
+.logo-icon {
+  flex-shrink: 0;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 2px;
+}
+
+.logo-text-collapsed {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 16px;
+  text-align: center;
+}
+
+.version {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.25);
+  letter-spacing: 0.5px;
+}
+
+/* ═══════════════ 顶栏 ═══════════════ */
 .navbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #fff;
-  border-bottom: 1px solid #e6e6e6;
-  padding: 0 20px;
+  background: var(--color-bg-card);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 24px;
+  height: 56px;
   gap: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
+
 .navbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-shrink: 0;
 }
+
+.collapse-btn {
+  color: var(--color-text-secondary);
+  padding: 6px;
+}
+
+.breadcrumb-sep {
+  color: var(--color-text-muted);
+  margin: 0 4px;
+  font-size: 13px;
+}
+
 .navbar-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
+
 .search-input {
-  width: 280px;
+  width: 300px;
 }
+
+.search-input :deep(.el-input__wrapper) {
+  background: var(--color-bg);
+  border-radius: 8px;
+  padding: 1px 12px;
+}
+
 .user-info {
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
-}
-.username {
-  font-size: 14px;
-  color: #303133;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
 }
 
-/* 页面过渡动画 */
-.fade-page-enter-active,
-.fade-page-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+.user-info:hover {
+  background: var(--color-bg);
 }
-.fade-page-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
+
+.user-avatar {
+  background: linear-gradient(135deg, var(--color-primary), #8b5cf6);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
 }
-.fade-page-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
+
+.username {
+  font-size: 14px;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.arrow-icon {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+/* ═══════════════ 主内容区 ═══════════════ */
+.main-content {
+  background: var(--color-bg);
+  padding: 24px;
+  min-height: 0;
+  overflow-y: auto;
 }
 </style>

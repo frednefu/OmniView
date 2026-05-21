@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from math import ceil
 
 from app.database import get_db
@@ -10,6 +11,15 @@ from app.schemas.scan import ScanResultOut, RouteTableOut, PaginatedResponse
 from app.api.deps import get_current_user
 
 router = APIRouter(prefix="/results", tags=["扫描结果"])
+
+
+def _latest_ids_subquery(db):
+    """获取每个 (IP, MAC, switch_id) 组合中最新的 scan_result id。"""
+    return (
+        db.query(func.max(ScanResult.id).label("max_id"))
+        .group_by(ScanResult.ip_address, ScanResult.mac_address, ScanResult.switch_id)
+        .subquery()
+    )
 
 
 def _enrich_result(row: ScanResult) -> dict:
@@ -38,7 +48,11 @@ def list_results(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    base = db.query(ScanResult)
+    # 只查询每个 (IP, MAC, switch) 组合中最新的记录
+    latest = _latest_ids_subquery(db)
+    base = db.query(ScanResult).filter(
+        ScanResult.id.in_(db.query(latest.c.max_id))
+    )
     if switch_id:
         base = base.filter(ScanResult.switch_id == switch_id)
     if mac:

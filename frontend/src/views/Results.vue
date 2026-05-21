@@ -86,7 +86,21 @@ onMounted(fetchData)
 </script>
 
 <style scoped>
-.results-page h2 { margin: 0 0 16px; }
-.filter-bar { margin-bottom: 12px; }
-.pagination-wrap { margin-top: 16px; display: flex; justify-content: flex-end; }
+.results-page h2 {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 700;
+}
+.filter-bar {
+  margin-bottom: 16px;
+  background: var(--color-bg-card);
+  padding: 16px 16px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+.pagination-wrap {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
 </style>

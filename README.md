@@ -16,12 +16,12 @@
 ## 功能
 
 - **仪表盘** — 交换机/子网/IP/MAC 统计、地址段利用率图表 (ECharts)、可用 IP 查询
-- **交换机管理** — CRUD、批量导入(Excel/CSV)、模板下载、SNMP 连接测试、扫描状态/结果展示
+- **交换机管理** — CRUD、批量导入(Excel/CSV)、模板下载、SNMP 连接测试、扫描状态/结果展示、全部扫描/全部删除
 - **SNMP 扫描** — 自动识别 L2/L3 交换机，支持标准 MIB 和华为私有 MIB，ARP+FDB 数据合并，空 IP 自动回填
-- **扫描结果** — 主机信息（IP/MAC/VLAN/端口/交换机来源）翻页列表、路由表翻页列表
+- **扫描结果** — 主机信息（IP/MAC/VLAN/端口/交换机来源）翻页列表（自动去重显示最新）、路由表翻页列表
 - **地址段管理** — CRUD、IP 可用性计算、利用率统计
 - **搜索** — IP 或 MAC 快速查找，关联交换机信息
-- **历史记录** — IP↔MAC 变更追踪，每次 SNMP 扫描自动检测新增/删除/修改，支持按 IP/MAC/交换机/日期范围过滤，变更字段新旧值对比
+- **历史记录** — 以 (IP, MAC, 物理端口) 为复合键增量保存，字段无变化时只更新时间戳不产生历史，变化时自动记录新增/删除/修改，支持按 IP/MAC/交换机/日期范围过滤，变更字段新旧值对比
 - **用户认证** — JWT + bcrypt，admin/user 角色
 
 ## 快速开始
@@ -67,8 +67,8 @@ npm run dev
 │   │   ├── database.py          # SQLAlchemy engine
 │   │   ├── models/              # User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History
 │   │   ├── schemas/             # Pydantic 请求/响应
-│   │   ├── api/                 # auth, switches, results, scan_logs, dashboard, subnets, search
-│   │   ├── services/            # scanner_service, subnet_service
+│   │   ├── api/                 # auth, switches, results, history, scan_logs, dashboard, subnets, search
+│   │   ├── services/            # scanner_service, subnet_service, history_service
 │   │   └── utils/               # security (JWT, bcrypt)
 │   ├── seed.py                  # 默认用户初始化
 │   └── requirements.txt
@@ -93,6 +93,8 @@ npm run dev
 | CRUD | /api/switches | 交换机管理 |
 | POST | /api/switches/test | SNMP 连接测试 |
 | POST | /api/switches/{id}/scan | 触发扫描 |
+| POST | /api/switches/scan-all | 全部扫描（所有启用交换机） |
+| DELETE | /api/switches/all | 删除所有交换机及关联数据 |
 | GET | /api/switches/template | 下载导入模板 |
 | POST | /api/switches/import | 批量导入交换机 |
 | GET | /api/results | 扫描结果（分页+过滤） |

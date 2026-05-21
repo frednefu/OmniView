@@ -199,14 +199,26 @@ onMounted(async () => {
 
 <style scoped>
 .info-card {
-  margin: 16px 0;
+  margin: 20px 0;
+  border-radius: var(--radius-md);
 }
+
 .tabs-card {
-  margin-top: 16px;
+  margin-top: 20px;
 }
+
+.tabs-card :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.tabs-card :deep(.el-tabs__item) {
+  font-weight: 500;
+  font-size: 14px;
+}
+
 .pagination-wrap {
   display: flex;
   justify-content: center;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 </style>

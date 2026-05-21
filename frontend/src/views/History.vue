@@ -185,12 +185,31 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.history-page h2 { margin: 0 0 16px; }
-.filter-bar { margin-bottom: 12px; }
-.pagination-wrap { margin-top: 16px; display: flex; justify-content: flex-end; }
+.history-page h2 {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 700;
+}
+.filter-bar {
+  margin-bottom: 16px;
+  background: var(--color-bg-card);
+  padding: 16px 16px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+.pagination-wrap {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
 
-/* 行颜色编码 - 使用深度选择器穿透 scoped */
-:deep(.row-added) { background-color: #f0f9eb !important; }
-:deep(.row-deleted) { background-color: #fef0f0 !important; }
-:deep(.row-modified) { background-color: #fdf6ec !important; }
+/* 行颜色编码 */
+:deep(.row-added) { background-color: var(--color-success-bg) !important; }
+:deep(.row-deleted) { background-color: var(--color-danger-bg) !important; }
+:deep(.row-modified) { background-color: var(--color-warning-bg) !important; }
+
+/* 行 hover 保持颜色但有过渡 */
+:deep(.row-added:hover td) { background-color: #d1fae5 !important; }
+:deep(.row-deleted:hover td) { background-color: #fee2e2 !important; }
+:deep(.row-modified:hover td) { background-color: #fef3c7 !important; }
 </style>

@@ -241,6 +241,45 @@ async def trigger_switch_scan(
     return ScanLogOut.model_validate(scan_log)
 
 
+@router.post("/scan-all")
+async def scan_all_switches(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """扫描所有启用的交换机。"""
+    switches = db.query(Switch).filter(Switch.is_active == True).all()
+    if not switches:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="没有可扫描的交换机")
+    started = 0
+    skipped = 0
+    for sw in switches:
+        running = db.query(ScanLog).filter(
+            ScanLog.switch_id == sw.id,
+            ScanLog.status == ScanStatus.running,
+        ).first()
+        if running:
+            skipped += 1
+            continue
+        await trigger_scan(sw, TriggerType.manual)
+        started += 1
+    return {"message": f"已触发 {started} 台交换机扫描" + (f"，{skipped} 台正在扫描中跳过" if skipped else ""),
+            "started": started, "skipped": skipped}
+
+
+@router.delete("/all")
+def delete_all_switches(
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """删除所有交换机及其关联数据。"""
+    count = db.query(Switch).count()
+    if count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="没有可删除的交换机")
+    db.query(Switch).delete()
+    db.commit()
+    return {"message": f"已删除 {count} 台交换机及关联数据", "deleted": count}
+
+
 @router.post("/test", response_model=SwitchTestResponse)
 async def test_switch_connection(
     body: SwitchTestRequest,

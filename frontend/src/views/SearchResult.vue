@@ -28,7 +28,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <div style="margin-top:12px;color:#909399;">
+    <div class="result-count">
       共 {{ results.length }} 条记录
     </div>
   </div>
@@ -75,9 +75,16 @@ watch(() => route.query.q, (val) => {
 
 <style scoped>
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 .page-header h2 {
   margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.result-count {
+  margin-top: 12px;
+  color: var(--color-text-muted);
+  font-size: 13px;
 }
 </style>

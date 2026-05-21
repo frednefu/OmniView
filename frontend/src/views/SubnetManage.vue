@@ -169,9 +169,11 @@ onMounted(fetchSubnets)
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 .page-header h2 {
   margin: 0;
+  font-size: 22px;
+  font-weight: 700;
 }
 </style>
