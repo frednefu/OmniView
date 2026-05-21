@@ -7,8 +7,9 @@ from app.models.switch import Switch
 from app.models.scan_log import ScanLog, ScanStatus, TriggerType
 from app.schemas.switch import SwitchCreate, SwitchUpdate, SwitchOut
 from app.schemas.scan import ScanLogOut, PaginatedResponse
+from app.schemas.switch import SwitchCreate, SwitchUpdate, SwitchOut, SwitchTestRequest, SwitchTestResponse
 from app.api.deps import get_current_user, require_admin
-from app.services.scanner_service import trigger_scan
+from app.services.scanner_service import trigger_scan, test_snmp_connection
 
 router = APIRouter(prefix="/switches", tags=["交换机"])
 
@@ -81,7 +82,7 @@ def delete_switch(switch_id: int, db: Session = Depends(get_db), admin=Depends(r
 
 
 @router.post("/{switch_id}/scan", response_model=ScanLogOut)
-def trigger_switch_scan(
+async def trigger_switch_scan(
     switch_id: int,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
@@ -90,7 +91,6 @@ def trigger_switch_scan(
     if not sw:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交换机不存在")
 
-    # Check for existing running scan
     running = db.query(ScanLog).filter(
         ScanLog.switch_id == switch_id,
         ScanLog.status == ScanStatus.running,
@@ -98,6 +98,15 @@ def trigger_switch_scan(
     if running:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该交换机正在扫描中")
 
-    scan_log_id = trigger_scan(sw, TriggerType.manual, "")
+    scan_log_id = await trigger_scan(sw, TriggerType.manual)
     scan_log = db.query(ScanLog).get(scan_log_id)
     return ScanLogOut.model_validate(scan_log)
+
+
+@router.post("/test", response_model=SwitchTestResponse)
+async def test_switch_connection(
+    body: SwitchTestRequest,
+    current_user=Depends(get_current_user),
+):
+    result = await test_snmp_connection(body.ip_address, body.community)
+    return result

@@ -37,15 +37,25 @@
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="$emit('update:visible', false)">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="handleSubmit">保存</el-button>
+      <div class="footer-left">
+        <el-button :loading="testing" @click="handleTest">
+          <el-icon><Connection /></el-icon>测试连接
+        </el-button>
+        <span v-if="testResult" :class="testResult.ok ? 'test-ok' : 'test-fail'">
+          {{ testResult.message }}
+        </span>
+      </div>
+      <div>
+        <el-button @click="$emit('update:visible', false)">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleSubmit">保存</el-button>
+      </div>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
 import { ref, reactive } from 'vue'
-import { createSwitch, updateSwitch } from '@/api/switches'
+import { createSwitch, updateSwitch, testSwitchConnection } from '@/api/switches'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({
@@ -56,6 +66,8 @@ const emit = defineEmits(['update:visible', 'saved'])
 
 const formRef = ref()
 const submitting = ref(false)
+const testing = ref(false)
+const testResult = ref(null)
 const form = reactive({
   name: '',
   ip_address: '',
@@ -74,6 +86,7 @@ const rules = {
 }
 
 function initForm() {
+  testResult.value = null
   Object.assign(form, {
     name: props.editData?.name || '',
     ip_address: props.editData?.ip_address || '',
@@ -84,6 +97,24 @@ function initForm() {
     snmp_retries: props.editData?.snmp_retries ?? 2,
     scan_interval: props.editData?.scan_interval ?? 3600,
   })
+}
+
+async function handleTest() {
+  if (!form.ip_address || !form.community) {
+    ElMessage.warning('请先填写 IP 地址和 SNMP 团体字')
+    return
+  }
+  testing.value = true
+  testResult.value = null
+  try {
+    const res = await testSwitchConnection({
+      ip_address: form.ip_address,
+      community: form.community,
+      snmp_port: form.snmp_port,
+    })
+    testResult.value = res
+  } catch { /* handled by interceptor */ }
+  finally { testing.value = false }
 }
 
 async function handleSubmit() {
@@ -111,5 +142,18 @@ async function handleSubmit() {
   margin-left: 8px;
   color: #909399;
   font-size: 12px;
+}
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.test-ok {
+  color: #67c23a;
+  font-size: 13px;
+}
+.test-fail {
+  color: #f56c6c;
+  font-size: 13px;
 }
 </style>

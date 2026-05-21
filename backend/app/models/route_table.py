@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, Integer, String, DateTime, ForeignKey, Index, func
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -10,7 +10,7 @@ class RouteTable(Base):
         Index("idx_rt_switch", "switch_id"),
     )
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     switch_id = Column(Integer, ForeignKey("switches.id", ondelete="CASCADE"), nullable=False)
     target_network = Column(String(45), nullable=False)
     subnet_mask = Column(String(45), nullable=False)

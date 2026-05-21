@@ -41,3 +41,14 @@ class SwitchOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SwitchTestRequest(BaseModel):
+    ip_address: str
+    community: str
+    snmp_port: int = 161
+
+
+class SwitchTestResponse(BaseModel):
+    ok: bool
+    message: str

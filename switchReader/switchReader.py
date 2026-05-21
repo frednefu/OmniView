@@ -173,6 +173,32 @@ def parse_ip_from_arp_index(oid_str):
     return None
 
 
+def _bytes_to_ip(val):
+    """Convert 4-byte SNMP value to dotted decimal IP string.
+    Handles pysnmp OctetString, raw bytes, and already-formatted strings.
+    """
+    if val is None:
+        return ''
+    # pysnmp OctetString / IpAddress — try .asOctets() first
+    if hasattr(val, 'asOctets'):
+        raw = val.asOctets()
+        if len(raw) == 4:
+            return '.'.join(str(b) for b in raw)
+        try:
+            return raw.decode('ascii')
+        except UnicodeDecodeError:
+            return ':'.join(f'{b:02x}' for b in raw)
+    if isinstance(val, bytes):
+        if len(val) == 4:
+            return '.'.join(str(b) for b in val)
+        try:
+            return val.decode('ascii')
+        except UnicodeDecodeError:
+            return ':'.join(f'{b:02x}' for b in val)
+    s = str(val)
+    return s
+
+
 def _format_mac(octet_parts):
     """十进制数字列表 → 'xx:xx:xx:xx:xx:xx'"""
     return ':'.join(f'{int(p):02x}' for p in octet_parts)
@@ -462,19 +488,19 @@ async def _get_route_table(slim, ip, community):
 
     routes = []
     for oid_str, dest_val in dest_raw.items():
-        net = _safe_str(dest_val)
+        net = _bytes_to_ip(dest_val)
         idx = _route_oid_index_to_net(oid_str, OID_ROUTE_DEST)
         if idx is None:
             continue
 
         mask_oid = f'{OID_ROUTE_MASK}.{idx}'
         mask_val = mask_raw.get(mask_oid)
-        mask_str = _safe_str(mask_val) if mask_val is not None else ''
+        mask_str = _bytes_to_ip(mask_val) if mask_val is not None else ''
         cidr = _subnet_mask_to_cidr(mask_str) if mask_str else None
 
         nexthop_oid = f'{OID_ROUTE_NEXTHOP}.{idx}'
         nexthop_val = nexthop_raw.get(nexthop_oid)
-        nexthop_str = _safe_str(nexthop_val) if nexthop_val is not None else ''
+        nexthop_str = _bytes_to_ip(nexthop_val) if nexthop_val is not None else ''
 
         ifindex_oid = f'{OID_ROUTE_IFINDEX}.{idx}'
         ifidx_val = ifindex_raw.get(ifindex_oid)

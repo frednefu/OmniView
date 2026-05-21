@@ -146,13 +146,43 @@ async function fetchLogs() {
   } finally { loadingLogs.value = false }
 }
 
+let pollTimer = null
+
 async function handleScan() {
   scanning.value = true
   try {
-    await triggerScan(switchId())
+    const log = await triggerScan(switchId())
     ElMessage.success('扫描已触发')
-    fetchLogs()
+    activeTab.value = 'logs'
+    await fetchLogs()
+    startPolling()
   } finally { scanning.value = false }
+}
+
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    await fetchLogs()
+    const running = logs.value.some(l => l.status === 'running')
+    if (!running) {
+      stopPolling()
+      await fetchResults()
+      await fetchRoutes()
+      const latest = logs.value[0]
+      if (latest && latest.status === 'success') {
+        ElMessage.success(`扫描完成，发现 ${latest.hosts_found} 台主机、${latest.routes_found} 条路由`)
+      } else if (latest && latest.status === 'failed') {
+        ElMessage.error(`扫描失败: ${latest.error_message || '未知错误'}`)
+      }
+    }
+  }, 1500)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
 }
 
 watch(activeTab, (tab) => {

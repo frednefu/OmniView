@@ -23,3 +23,7 @@ export function deleteSwitch(id) {
 export function triggerScan(id) {
   return api.post(`/switches/${id}/scan`).then((r) => r.data)
 }
+
+export function testSwitchConnection(data) {
+  return api.post('/switches/test', data).then((r) => r.data)
+}

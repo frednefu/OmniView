@@ -31,3 +31,9 @@ frontend/dist/
 backend/__pycache__/
 backend/app/__pycache__/
 backend/*.pyc
+
+# Database files (local dev)
+*.db
+
+# switchReader
+switchReader/__pycache__/
