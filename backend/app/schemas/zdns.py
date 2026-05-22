@@ -11,7 +11,7 @@ class ZDNSDeviceCreate(BaseModel):
     username: str
     password: str
     port: int = 20120
-    scan_interval: int = 3600
+    scan_interval: int = 86400
 
 
 class ZDNSDeviceUpdate(BaseModel):

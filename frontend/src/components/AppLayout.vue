@@ -60,7 +60,7 @@
         </el-menu-item>
         <el-menu-item index="/scan-logs">
           <el-icon><Tickets /></el-icon>
-          <span>扫描记录</span>
+          <span>扫描日志</span>
         </el-menu-item>
         <el-menu-item index="/history">
           <el-icon><Clock /></el-icon>
@@ -159,7 +159,7 @@ const pageTitle = computed(() => {
     '/results': '扫描结果',
     '/routes': '路由表',
     '/subnets': '地址段管理',
-    '/scan-logs': '扫描记录',
+    '/scan-logs': '扫描日志',
     '/history': '历史记录',
     '/users': '用户管理',
     '/profile': '个人设置',

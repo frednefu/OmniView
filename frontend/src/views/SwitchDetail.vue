@@ -66,29 +66,6 @@
               layout="total, prev, pager, next" @current-change="fetchRoutes" size="small" />
           </div>
         </el-tab-pane>
-
-        <el-tab-pane label="扫描日志" name="logs">
-          <el-table :data="logs" stripe v-loading="loadingLogs" size="small">
-            <el-table-column prop="id" label="ID" width="60" />
-            <el-table-column prop="status" label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag :type="statusTag(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="triggered_by" label="触发" width="80">
-              <template #default="{ row }">{{ row.triggered_by === 'manual' ? '手动' : '定时' }}</template>
-            </el-table-column>
-            <el-table-column prop="hosts_found" label="主机数" width="80" />
-            <el-table-column prop="routes_found" label="路由数" width="80" />
-            <el-table-column prop="started_at" label="开始时间" width="160">
-              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
-            </el-table-column>
-            <el-table-column prop="completed_at" label="完成时间" width="160">
-              <template #default="{ row }">{{ formatTime(row.completed_at) }}</template>
-            </el-table-column>
-            <el-table-column prop="error_message" label="错误" min-width="200" show-overflow-tooltip />
-          </el-table>
-        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -99,7 +76,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
 import { getSwitch, triggerScan } from '@/api/switches'
-import { getResults, getRoutes, getScanLogs } from '@/api/results'
+import { getResults, getRoutes } from '@/api/results'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
@@ -110,18 +87,14 @@ const scanning = ref(false)
 
 const results = ref([])
 const routes = ref([])
-const logs = ref([])
 const loadingResults = ref(false)
 const loadingRoutes = ref(false)
-const loadingLogs = ref(false)
 const rPage = ref(1); const rSize = ref(50); const resultsTotal = ref(0)
 const rtPage = ref(1); const rtSize = ref(50); const routesTotal = ref(0)
 
 const switchId = () => route.params.id
 
 function formatTime(t) { if (!t) return ''; const d = new Date(t); if (isNaN(d.getTime())) return t; return d.toLocaleString('zh-CN', { hour12: false }) }
-function statusTag(s) { return s === 'success' ? 'success' : s === 'failed' ? 'danger' : 'warning' }
-function statusText(s) { return s === 'success' ? '成功' : s === 'failed' ? '失败' : '扫描中' }
 
 async function fetchSwitch() {
   sw.value = await getSwitch(switchId())
@@ -145,57 +118,17 @@ async function fetchRoutes() {
   } finally { loadingRoutes.value = false }
 }
 
-async function fetchLogs() {
-  loadingLogs.value = true
-  try {
-    const res = await getScanLogs({ switch_id: switchId(), size: 50 })
-    logs.value = res.items
-  } finally { loadingLogs.value = false }
-}
-
-let pollTimer = null
-
 async function handleScan() {
   scanning.value = true
   try {
-    const log = await triggerScan(switchId())
-    ElMessage.success('扫描已触发')
-    activeTab.value = 'logs'
-    await fetchLogs()
-    startPolling()
+    await triggerScan(switchId())
+    ElMessage.success('扫描已触发，请到"扫描日志"页面查看进度')
   } finally { scanning.value = false }
-}
-
-function startPolling() {
-  stopPolling()
-  pollTimer = setInterval(async () => {
-    await fetchLogs()
-    const running = logs.value.some(l => l.status === 'running')
-    if (!running) {
-      stopPolling()
-      await fetchResults()
-      await fetchRoutes()
-      const latest = logs.value[0]
-      if (latest && latest.status === 'success') {
-        ElMessage.success(`扫描完成，发现 ${latest.hosts_found} 台主机、${latest.routes_found} 条路由`)
-      } else if (latest && latest.status === 'failed') {
-        ElMessage.error(`扫描失败: ${latest.error_message || '未知错误'}`)
-      }
-    }
-  }, 1500)
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
 }
 
 watch(activeTab, (tab) => {
   if (tab === 'hosts') fetchResults()
   if (tab === 'routes') fetchRoutes()
-  if (tab === 'logs') fetchLogs()
 })
 
 onMounted(async () => {

@@ -11,7 +11,7 @@ class F5DeviceCreate(BaseModel):
     username: str
     password: str
     port: int = 443
-    scan_interval: int = 3600
+    scan_interval: int = 86400
 
 
 class F5DeviceUpdate(BaseModel):

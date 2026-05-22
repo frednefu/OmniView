@@ -1,7 +1,7 @@
 <template>
   <div class="scan-logs-page">
     <div class="page-header">
-      <h2>扫描记录</h2>
+      <h2>扫描日志</h2>
       <el-button type="danger" plain @click="handleClear" :disabled="!total">
         <el-icon><Delete /></el-icon> 清除全部
       </el-button>
@@ -31,7 +31,7 @@
 
     <el-table :data="items" v-loading="loading" stripe style="width:100%">
       <template #empty>
-        <el-empty description="暂无扫描记录" :image-size="80" />
+        <el-empty description="暂无扫描日志" :image-size="80" />
       </template>
       <el-table-column label="时间" width="170">
         <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
@@ -86,7 +86,7 @@
 
     <!-- 清除确认对话框 -->
     <el-dialog v-model="clearDialogVisible" title="确认清除" width="420px">
-      <p>确定要清除<span v-if="filters.source_type">{{ sourceLabel(filters.source_type) }}的</span>全部扫描记录吗？此操作不可恢复。</p>
+      <p>确定要清除<span v-if="filters.source_type">{{ sourceLabel(filters.source_type) }}的</span>全部扫描日志吗？此操作不可恢复。</p>
       <template #footer>
         <el-button @click="clearDialogVisible = false">取消</el-button>
         <el-button type="danger" @click="confirmClear" :loading="clearing">确定清除</el-button>

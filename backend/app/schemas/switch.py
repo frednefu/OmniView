@@ -11,7 +11,7 @@ class SwitchCreate(BaseModel):
     snmp_port: int = 161
     snmp_timeout: int = 3
     snmp_retries: int = 2
-    scan_interval: int = 3600
+    scan_interval: int = 86400
 
 
 class SwitchUpdate(BaseModel):
@@ -65,7 +65,7 @@ class SwitchImportRow(BaseModel):
     community: str
     mib_type: str = "standard"
     snmp_port: int = 161
-    scan_interval: int = 3600
+    scan_interval: int = 86400
 
 
 class SwitchImportResult(BaseModel):

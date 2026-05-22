@@ -95,7 +95,7 @@ const routes = [
         path: 'scan-logs',
         name: 'ScanLogs',
         component: () => import('@/views/ScanLogs.vue'),
-        meta: { title: '扫描记录' },
+        meta: { title: '扫描日志' },
       },
       {
         path: 'history',

@@ -110,7 +110,7 @@ def download_template(current_user=Depends(get_current_user)):
     headers = ["名称", "IP地址", "SNMP团体字", "MIB类型", "SNMP端口", "扫描间隔(秒)"]
     ws.append(headers)
     # Example row
-    ws.append(["示例-核心交换机", "192.168.1.1", "public", "huawei", 161, 3600])
+    ws.append(["示例-核心交换机", "192.168.1.1", "public", "huawei", 161, 86400])
     # Column widths
     widths = [20, 16, 16, 12, 12, 14]
     for i, w in enumerate(widths, 1):
@@ -148,7 +148,7 @@ async def import_switches(
                 "community": r.get("SNMP团体字", "").strip(),
                 "mib_type": r.get("MIB类型", "standard").strip() or "standard",
                 "snmp_port": int(r.get("SNMP端口", 161) or 161),
-                "scan_interval": int(r.get("扫描间隔(秒)", 3600) or 3600),
+                "scan_interval": int(r.get("扫描间隔(秒)", 86400) or 86400),
             })
     else:
         wb = openpyxl.load_workbook(io.BytesIO(content))
@@ -162,7 +162,7 @@ async def import_switches(
                 "community": str(row[2]).strip() if row[2] else "",
                 "mib_type": str(row[3] or "standard").strip() or "standard",
                 "snmp_port": int(row[4] or 161) if row[4] else 161,
-                "scan_interval": int(row[5] or 3600) if row[5] else 3600,
+                "scan_interval": int(row[5] or 86400) if row[5] else 86400,
             })
 
     created = 0
