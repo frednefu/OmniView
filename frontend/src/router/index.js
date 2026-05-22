@@ -32,6 +32,18 @@ const routes = [
         meta: { title: '交换机详情' },
       },
       {
+        path: 'vcenters',
+        name: 'VCenters',
+        component: () => import('@/views/VCenterList.vue'),
+        meta: { title: 'vCenter 管理' },
+      },
+      {
+        path: 'vcenters/:id',
+        name: 'VCenterDetail',
+        component: () => import('@/views/VCenterDetail.vue'),
+        meta: { title: 'vCenter 详情' },
+      },
+      {
         path: 'results',
         name: 'Results',
         component: () => import('@/views/Results.vue'),

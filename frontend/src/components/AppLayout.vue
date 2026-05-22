@@ -34,6 +34,10 @@
           <el-icon><Monitor /></el-icon>
           <span>交换机管理</span>
         </el-menu-item>
+        <el-menu-item index="/vcenters">
+          <el-icon><Cloudy /></el-icon>
+          <span>vCenter 管理</span>
+        </el-menu-item>
         <el-menu-item index="/results">
           <el-icon><List /></el-icon>
           <span>扫描结果</span>
@@ -137,6 +141,7 @@ const pageTitle = computed(() => {
   const titles = {
     '/dashboard': '仪表盘',
     '/switches': '交换机管理',
+    '/vcenters': 'vCenter 管理',
     '/results': '扫描结果',
     '/routes': '路由表',
     '/subnets': '地址段管理',
