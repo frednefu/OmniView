@@ -1,9 +1,10 @@
 """IP availability calculation using Python ipaddress stdlib."""
 import ipaddress
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from app.models.scan_result import ScanResult
+from app.models.switch import Switch
 
 
 def _ip_to_int(ip: str) -> int:
@@ -120,4 +121,53 @@ def get_available_ips(db: Session, subnet_id: int, limit: int = 50) -> dict:
         "subnet_cidr": sn.subnet_cidr,
         "available_ips": free,
         "total_free": total_free,
+    }
+
+
+def get_occupied_ips(db: Session, subnet_id: int, page: int = 1, size: int = 50) -> dict:
+    """返回子网内已占用的 IP 清单（IP/MAC/交换机/VLAN），带分页。"""
+    from app.models.subnet import Subnet
+
+    sn = db.query(Subnet).get(subnet_id)
+    if not sn:
+        return {"subnet_cidr": "", "subnet_name": "", "occupied": [], "total": 0}
+
+    try:
+        net = ipaddress.IPv4Network(sn.subnet_cidr, strict=False)
+    except ValueError:
+        return {"subnet_cidr": sn.subnet_cidr, "subnet_name": sn.name, "occupied": [], "total": 0}
+
+    net_int = int(net.network_address)
+    broad_int = int(net.broadcast_address)
+
+    rows = (
+        db.query(ScanResult.ip_address, ScanResult.mac_address, ScanResult.vlan_bd, Switch.name)
+        .join(Switch, ScanResult.switch_id == Switch.id, isouter=True)
+        .filter(
+            ScanResult.ip_address != "",
+            ScanResult.ip_address.isnot(None),
+        )
+        .all()
+    )
+
+    occupied = []
+    for ip, mac, vlan, switch_name in rows:
+        ip_int = _ip_to_int(ip)
+        if net_int < ip_int < broad_int:
+            occupied.append({
+                "ip": ip,
+                "mac": mac,
+                "switch_name": switch_name or "",
+                "vlan": str(vlan) if vlan else "",
+            })
+
+    total = len(occupied)
+    start = (page - 1) * size
+    paged = sorted(occupied, key=lambda x: _ip_to_int(x["ip"]))[start:start + size]
+
+    return {
+        "subnet_cidr": sn.subnet_cidr,
+        "subnet_name": sn.name,
+        "occupied": paged,
+        "total": total,
     }
