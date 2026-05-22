@@ -32,7 +32,7 @@
 - **vCenter 管理** — CRUD、连接测试、pyVmomi 扫描采集虚拟机清单（16 个字段：数据中心/集群/ESXi/资源池/文件夹/名称/电源/IP/MAC/网络/VLAN/OS/CPU/内存/备注），支持多字段搜索（名称/IP/MAC/OS/集群/主机/网络/文件夹）
 - **VM 清单** — 独立 `vm_inventory` 表，按 vCenter/VM 名称/IP 搜索过滤，分页展示
 - **F5 负载均衡管理** — CRUD、连接测试、iControl REST API 扫描采集虚拟服务器+Pool成员+iRules，自动构建域名→VS IP:端口→Pool 内网 IP:端口的应用映射清单，支持搜索（域名/VS名称/IP/端口/Pool/成员IP/iRule），定时扫描，历史变更追踪（source_type=f5）
-- **F5 原始数据** — 虚拟服务器、Pool 成员（含 up/down 状态）、iRules（含 TCL 脚本内容）三个 Tab 可分别查看原始采集数据
+- **F5 原始数据** — 虚拟服务器、Pool 成员（含 up/down 状态）、iRules（含 TCL 脚本内容）三个 Tab 各自支持搜索和分页
 
 ## 快速开始
 
@@ -134,9 +134,9 @@ npm run dev
 | POST | /api/f5/{id}/scan | 触发 F5 扫描 |
 | POST | /api/f5/scan-all | 全部扫描（所有启用 F5） |
 | DELETE | /api/f5/all | 删除所有 F5 设备及关联数据 |
-| GET | /api/f5/{id}/virtual-servers | F5 虚拟服务器清单 |
-| GET | /api/f5/{id}/pool-members | F5 Pool 成员清单 |
-| GET | /api/f5/{id}/rules | F5 iRules 清单 |
+| GET | /api/f5/{id}/virtual-servers | F5 虚拟服务器清单（分页+搜索） |
+| GET | /api/f5/{id}/pool-members | F5 Pool 成员清单（分页+搜索） |
+| GET | /api/f5/{id}/rules | F5 iRules 清单（分页+搜索） |
 | GET | /api/f5/{id}/application-map | F5 应用映射清单（核心接口） |
 
 ## 交换机配置

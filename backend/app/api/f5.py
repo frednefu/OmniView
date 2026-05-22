@@ -69,7 +69,7 @@ def delete_all(
 @router.get("")
 def list_devices(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=500),
     search: str = Query("", max_length=128),
     is_active: bool = Query(None),
     db: Session = Depends(get_db),
@@ -187,7 +187,8 @@ async def trigger_scan(
 def list_virtual_servers(
     device_id: int,
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=500),
+    search: str = Query("", max_length=256),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -195,6 +196,13 @@ def list_virtual_servers(
     if not dev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="F5 设备不存在")
     q = db.query(F5VirtualServer).filter(F5VirtualServer.f5_device_id == device_id)
+    if search:
+        q = q.filter(
+            (F5VirtualServer.name.contains(search)) |
+            (F5VirtualServer.vs_ip.contains(search)) |
+            (F5VirtualServer.destination.contains(search)) |
+            (F5VirtualServer.pool_name.contains(search))
+        )
     total = q.count()
     pages = ceil(total / size) if total > 0 else 0
     items = q.order_by(F5VirtualServer.id).offset((page - 1) * size).limit(size).all()
@@ -210,7 +218,8 @@ def list_virtual_servers(
 def list_pool_members(
     device_id: int,
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=500),
+    search: str = Query("", max_length=256),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -218,6 +227,12 @@ def list_pool_members(
     if not dev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="F5 设备不存在")
     q = db.query(F5PoolMember).filter(F5PoolMember.f5_device_id == device_id)
+    if search:
+        q = q.filter(
+            (F5PoolMember.pool_name.contains(search)) |
+            (F5PoolMember.member_name.contains(search)) |
+            (F5PoolMember.member_ip.contains(search))
+        )
     total = q.count()
     pages = ceil(total / size) if total > 0 else 0
     items = q.order_by(F5PoolMember.id).offset((page - 1) * size).limit(size).all()
@@ -233,7 +248,8 @@ def list_pool_members(
 def list_rules(
     device_id: int,
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=500),
+    search: str = Query("", max_length=256),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -241,6 +257,11 @@ def list_rules(
     if not dev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="F5 设备不存在")
     q = db.query(F5Rule).filter(F5Rule.f5_device_id == device_id)
+    if search:
+        q = q.filter(
+            (F5Rule.rule_name.contains(search)) |
+            (F5Rule.rule_content.contains(search))
+        )
     total = q.count()
     pages = ceil(total / size) if total > 0 else 0
     items = q.order_by(F5Rule.id).offset((page - 1) * size).limit(size).all()
