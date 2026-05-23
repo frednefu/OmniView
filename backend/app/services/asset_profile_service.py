@@ -16,7 +16,7 @@ from collections import defaultdict
 from sqlalchemy.orm import Session
 
 from app.models.zdns import ZDNSDomainMap
-from app.models.f5 import F5VirtualServer, F5PoolMember, F5ApplicationMap
+from app.models.f5 import F5VirtualServer, F5ApplicationMap
 from app.models.vm_inventory import VMInventory
 from app.models.scan_result import ScanResult
 
@@ -93,6 +93,10 @@ def build_asset_profile(db: Session) -> list[dict]:
     ).distinct().all():
         f5_domain_set.add(d)
 
+    # 区分 F5 VS 伪域名（pool 模式下无法确定真实域名，以 VS 名称占位）
+    # VS 名称特征：不含 "."，如 vs_202_118_223_70_443
+    vs_pseudo_domains: set[str] = {d for d in f5_domain_set if '.' not in d}
+
     all_domains = zdns_domain_set | f5_domain_set
     if not all_domains:
         return []
@@ -141,19 +145,10 @@ def build_asset_profile(db: Session) -> list[dict]:
             })
 
     # ═══════════════════════════════════════════════════════════════
-    # 4. F5 Pool Member 数据：pool_name → [(member_ip, member_port)]
+    # 4. F5 ApplicationMap：构建 (vs_ip, vs_port) → members 映射
+    #    仅使用 application_map 的域名→成员关联，不 fallback 到裸 pool 数据
+    #    pool 模式下无法确定域名→成员归属，避免跨域污染
     # ═══════════════════════════════════════════════════════════════
-    f5_pm_list = db.query(F5PoolMember).all()
-    members_by_pool: dict[str, list[dict]] = defaultdict(list)
-    for pm in f5_pm_list:
-        if pm.pool_name:
-            members_by_pool[pm.pool_name].append({
-                "member_ip": pm.member_ip,
-                "member_port": pm.member_port,
-                "member_state": pm.member_state,
-            })
-
-    # 同时构建 (vs_ip, vs_port) → members 映射（从 application_map）
     f5_app_list = db.query(F5ApplicationMap).all()
     members_by_vs: dict[tuple, list[dict]] = defaultdict(list)
     for am in f5_app_list:
@@ -213,9 +208,11 @@ def build_asset_profile(db: Session) -> list[dict]:
         source: str = "",
     ) -> dict:
         """构建一行资产数据。vm 为 None 时 VM 相关字段为空。"""
+        # VS 伪域名（pool 模式无法对应真实域名）→ 显示"不确定"
+        display_domain = "不确定" if domain in vs_pseudo_domains else domain
         if vm is None:
             return {
-                "域名": domain,
+                "域名": display_domain,
                 "来源": source,
                 "公网IP": pub_ip,
                 "端口": port,
@@ -236,7 +233,7 @@ def build_asset_profile(db: Session) -> list[dict]:
             sw_macs = switch_ip_to_mac.get(fallback_ip_for_mac, [])
             vm_mac = ", ".join(sw_macs) if sw_macs else ""
         return {
-            "域名": domain,
+            "域名": display_domain,
             "来源": source,
             "公网IP": pub_ip,
             "端口": port,
@@ -307,13 +304,12 @@ def build_asset_profile(db: Session) -> list[dict]:
                 vs_port_str = str(vs_port) if vs_port is not None else ""
                 pool_name = vs["pool_name"]
 
-                # 从 application_map 获取成员，按域名过滤防止跨域污染
+                # 仅从 application_map 获取按域名过滤的成员，不 fallback 到 pool
+                # pool 模式无法确定域名→成员归属，避免跨域数据污染
                 members = [
                     m for m in members_by_vs.get((pub_ip, vs_port), [])
                     if m["domain_name"] == domain
                 ]
-                if not members:
-                    members = members_by_pool.get(pool_name, [])
 
                 if not members:
                     # 有 VS 但无成员：尝试用 VS IP 查 VM

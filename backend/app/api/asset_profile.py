@@ -24,7 +24,7 @@ def _get_cached_profile(db: Session) -> list[dict]:
 @router.get("", response_model=AssetProfileResponse)
 def get_asset_profile(
     page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=200),
+    size: int = Query(50, ge=1, le=10000),
     search: str = Query("", description="全局搜索（匹配所有字段）"),
     sort_by: str = Query("", description="排序字段名（如：公网IP、虚拟机名称 等）"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
