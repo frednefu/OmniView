@@ -15,7 +15,7 @@ import logging
 from collections import defaultdict
 from sqlalchemy.orm import Session
 
-from app.models.zdns import ZDNSDomainMap, ZDNSRecord
+from app.models.zdns import ZDNSDomainMap
 from app.models.f5 import F5VirtualServer, F5PoolMember, F5ApplicationMap
 from app.models.vm_inventory import VMInventory
 from app.models.scan_result import ScanResult
@@ -77,43 +77,50 @@ def build_asset_profile(db: Session) -> list[dict]:
     """构建完整资产画像数据，返回行列表。"""
 
     # ═══════════════════════════════════════════════════════════════
-    # 1. 收集域名（ZDNS 主 + F5 辅）
+    # 1. 收集域名（仅 ZDNSDomainMap + F5ApplicationMap，排除通配符）
     # ═══════════════════════════════════════════════════════════════
-    zdns_map_domains = set()
+    zdns_domain_set: set[str] = set()
+    f5_domain_set: set[str] = set()
     for (d,) in db.query(ZDNSDomainMap.domain_name).filter(
         ZDNSDomainMap.domain_name != "",
+        ZDNSDomainMap.domain_name.notlike("*%"),
         ~ZDNSDomainMap.domain_name.contains("in-addr.arpa"),
     ).distinct().all():
-        zdns_map_domains.add(d)
+        zdns_domain_set.add(d)
 
-    zdns_rec_domains = set()
-    for (d,) in db.query(ZDNSRecord.full_domain).filter(
-        ZDNSRecord.full_domain != "",
-        ~ZDNSRecord.full_domain.contains("in-addr.arpa"),
-    ).distinct().all():
-        zdns_rec_domains.add(d)
-
-    f5_domains = set()
     for (d,) in db.query(F5ApplicationMap.domain_name).filter(
         F5ApplicationMap.domain_name != "",
     ).distinct().all():
-        f5_domains.add(d)
+        f5_domain_set.add(d)
 
-    all_domains = zdns_map_domains | zdns_rec_domains | f5_domains
+    all_domains = zdns_domain_set | f5_domain_set
     if not all_domains:
         return []
 
     # ═══════════════════════════════════════════════════════════════
-    # 2. ZDNS 域名 → 公网IP 映射
+    # 2. ZDNS 域名 → IP 映射（不限定内外网，所有 IP 都纳入）
     # ═══════════════════════════════════════════════════════════════
     domain_public_ips: dict[str, list[str]] = defaultdict(list)
     zdns_rows = db.query(ZDNSDomainMap.domain_name, ZDNSDomainMap.ip_address).filter(
-        ZDNSDomainMap.network_type == "外网",
+        ZDNSDomainMap.ip_address != "",
         ZDNSDomainMap.domain_name.in_(all_domains),
     ).all()
     for domain, ip in zdns_rows:
         if ip and ip not in domain_public_ips[domain]:
             domain_public_ips[domain].append(ip)
+
+    # 补充 F5 域名的 VS IP（ZDNS 无 IP 或域名仅存在于 F5 时，从 ApplicationMap 获取）
+    f5_domains_needing_ip = {d for d in f5_domain_set if not domain_public_ips.get(d)}
+    if f5_domains_needing_ip:
+        f5_ips = db.query(
+            F5ApplicationMap.domain_name, F5ApplicationMap.vs_ip
+        ).filter(
+            F5ApplicationMap.vs_ip != "",
+            F5ApplicationMap.domain_name.in_(f5_domains_needing_ip),
+        ).distinct().all()
+        for domain, ip in f5_ips:
+            if ip and ip not in domain_public_ips[domain]:
+                domain_public_ips[domain].append(ip)
 
     # 全局公网 IP 集合
     all_public_ips = set()
@@ -203,11 +210,13 @@ def build_asset_profile(db: Session) -> list[dict]:
         vm: dict | None = None,
         fallback_ip_for_mac: str = "",
         member_state: str = "",
+        source: str = "",
     ) -> dict:
         """构建一行资产数据。vm 为 None 时 VM 相关字段为空。"""
         if vm is None:
             return {
                 "域名": domain,
+                "来源": source,
                 "公网IP": pub_ip,
                 "端口": port,
                 "内网服务IP": internal_ip,
@@ -228,6 +237,7 @@ def build_asset_profile(db: Session) -> list[dict]:
             vm_mac = ", ".join(sw_macs) if sw_macs else ""
         return {
             "域名": domain,
+            "来源": source,
             "公网IP": pub_ip,
             "端口": port,
             "内网服务IP": internal_ip,
@@ -244,23 +254,39 @@ def build_asset_profile(db: Session) -> list[dict]:
     def _dedup_key(row: dict) -> tuple:
         return tuple(str(v) for v in row.values())
 
-    def _emit(rows_list: list, seen: set, row: dict):
-        """去重添加行。"""
-        key = _dedup_key(row)
-        if key not in seen:
-            seen.add(key)
-            rows_list.append(row)
-
     # ═══════════════════════════════════════════════════════════════
     # 8. 组装行数据
     # ═══════════════════════════════════════════════════════════════
     rows: list[dict] = []
     seen_row_keys = set()
 
+    def _emit_row(*args, **kwargs):
+        """构建行并去重添加。自动计算融合来源。"""
+        domain_val = args[0] if args else kwargs.get("domain", "")
+        vm = args[5] if len(args) > 5 and args[5] is not None else None
+        fallback_ip = kwargs.get("fallback_ip_for_mac", "")
+
+        src_parts = []
+        if domain_val in zdns_domain_set:
+            src_parts.append("ZDNS")
+        if domain_val in f5_domain_set:
+            src_parts.append("F5")
+        if vm is not None:
+            src_parts.append("vCenter")
+        if fallback_ip and switch_ip_to_mac.get(fallback_ip):
+            src_parts.append("Switch")
+
+        kwargs["source"] = ",".join(src_parts)
+        row = _make_row(*args, **kwargs)
+        key = _dedup_key(row)
+        if key not in seen_row_keys:
+            seen_row_keys.add(key)
+            rows.append(row)
+
     for domain in all_domains:
         public_ips = domain_public_ips.get(domain, [])
         if not public_ips:
-            _emit(rows, seen_row_keys, _make_row(domain, "", "", "", "", None))
+            _emit_row(domain, "", "", "", "", None)
             continue
 
         for pub_ip in public_ips:
@@ -270,10 +296,10 @@ def build_asset_profile(db: Session) -> list[dict]:
                 # 无 F5 VS：尝试通过交换机→vCenter 查找 VM（用公网 IP）
                 matched_vms = _find_vms_by_ip(pub_ip, vm_by_ip, vm_by_mac, switch_ip_to_mac)
                 if not matched_vms:
-                    _emit(rows, seen_row_keys, _make_row(domain, pub_ip, "", "", "", None))
+                    _emit_row(domain, pub_ip, "", "", "", None)
                 else:
                     for vm in matched_vms:
-                        _emit(rows, seen_row_keys, _make_row(domain, pub_ip, "", pub_ip, "", vm, fallback_ip_for_mac=pub_ip))
+                        _emit_row(domain, pub_ip, "", pub_ip, "", vm, fallback_ip_for_mac=pub_ip)
                 continue
 
             for vs in vs_entries:
@@ -281,7 +307,11 @@ def build_asset_profile(db: Session) -> list[dict]:
                 vs_port_str = str(vs_port) if vs_port is not None else ""
                 pool_name = vs["pool_name"]
 
-                members = members_by_vs.get((pub_ip, vs_port), [])
+                # 从 application_map 获取成员，按域名过滤防止跨域污染
+                members = [
+                    m for m in members_by_vs.get((pub_ip, vs_port), [])
+                    if m["domain_name"] == domain
+                ]
                 if not members:
                     members = members_by_pool.get(pool_name, [])
 
@@ -289,10 +319,10 @@ def build_asset_profile(db: Session) -> list[dict]:
                     # 有 VS 但无成员：尝试用 VS IP 查 VM
                     matched_vms = _find_vms_by_ip(pub_ip, vm_by_ip, vm_by_mac, switch_ip_to_mac)
                     if not matched_vms:
-                        _emit(rows, seen_row_keys, _make_row(domain, pub_ip, vs_port_str, "", "", None))
+                        _emit_row(domain, pub_ip, vs_port_str, "", "", None)
                     else:
                         for vm in matched_vms:
-                            _emit(rows, seen_row_keys, _make_row(domain, pub_ip, vs_port_str, pub_ip, "", vm, fallback_ip_for_mac=pub_ip))
+                            _emit_row(domain, pub_ip, vs_port_str, pub_ip, "", vm, fallback_ip_for_mac=pub_ip)
                     continue
 
                 for member in members:
@@ -303,15 +333,15 @@ def build_asset_profile(db: Session) -> list[dict]:
                     member_state = member.get("member_state", "")
 
                     if not member_ip:
-                        _emit(rows, seen_row_keys, _make_row(domain, pub_ip, vs_port_str, "", member_port_str, None, member_state=member_state))
+                        _emit_row(domain, pub_ip, vs_port_str, "", member_port_str, None, member_state=member_state)
                         continue
 
                     matched_vms = _find_vms_by_ip(member_ip, vm_by_ip, vm_by_mac, switch_ip_to_mac)
                     if not matched_vms:
-                        _emit(rows, seen_row_keys, _make_row(domain, pub_ip, vs_port_str, member_ip, member_port_str, None, member_state=member_state))
+                        _emit_row(domain, pub_ip, vs_port_str, member_ip, member_port_str, None, member_state=member_state)
                     else:
                         for vm in matched_vms:
-                            _emit(rows, seen_row_keys, _make_row(domain, pub_ip, vs_port_str, member_ip, member_port_str, vm, fallback_ip_for_mac=member_ip, member_state=member_state))
+                            _emit_row(domain, pub_ip, vs_port_str, member_ip, member_port_str, vm, fallback_ip_for_mac=member_ip, member_state=member_state)
 
     return rows
 
@@ -353,6 +383,26 @@ def compute_stats(rows: list[dict]) -> dict:
     }
 
 
+def get_network_names(rows: list[dict]) -> list[str]:
+    """从行数据中提取去重排序的网络名称列表（供筛选下拉框使用）。"""
+    names = set()
+    for r in rows:
+        n = r.get("网络", "")
+        if n:
+            names.add(n)
+    return sorted(names)
+
+
+def get_source_names(rows: list[dict]) -> list[str]:
+    """从行数据中提取去重排序的来源组合列表（供筛选下拉框使用）。"""
+    names = set()
+    for r in rows:
+        s = r.get("来源", "")
+        if s:
+            names.add(s)
+    return sorted(names)
+
+
 def filter_sort_paginate(
     rows: list[dict],
     search: str = "",
@@ -360,6 +410,9 @@ def filter_sort_paginate(
     sort_dir: str = "asc",
     page: int = 1,
     size: int = 50,
+    status: str = "",
+    network: str = "",
+    source: str = "",
 ) -> dict:
     """对资产行数据进行搜索过滤、排序和分页。"""
     # 搜索过滤
@@ -370,6 +423,18 @@ def filter_sort_paginate(
             if any(q in str(v).lower() for v in r.values()):
                 filtered.append(r)
         rows = filtered
+
+    # 状态过滤
+    if status:
+        rows = [r for r in rows if r.get("状态", "").lower() == status.lower()]
+
+    # 网络名称过滤（vCenter 网络）
+    if network:
+        rows = [r for r in rows if r.get("网络", "") == network]
+
+    # 来源过滤（精确匹配）
+    if source:
+        rows = [r for r in rows if r.get("来源", "") == source]
 
     # 排序
     sort_key = ""

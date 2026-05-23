@@ -72,7 +72,7 @@
       </el-col>
     </el-row>
 
-    <!-- ═══════════ 搜索栏 ═══════════ -->
+    <!-- ═══════════ 搜索与筛选 ═══════════ -->
     <div class="toolbar">
       <el-input
         v-model="search"
@@ -84,6 +84,17 @@
       >
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
+      <el-select v-model="filterSource" clearable filterable placeholder="来源" style="width:200px" @change="page=1;fetchData()">
+        <el-option v-for="s in sourceNames" :key="s" :label="s" :value="s" />
+      </el-select>
+      <el-select v-model="filterStatus" clearable placeholder="状态类型" style="width:110px" @change="page=1;fetchData()">
+        <el-option label="在线" value="up" />
+        <el-option label="离线" value="down" />
+        <el-option label="禁用" value="user-down" />
+      </el-select>
+      <el-select v-model="filterNetwork" clearable filterable placeholder="网络名称" style="width:160px" @change="page=1;fetchData()">
+        <el-option v-for="n in networkNames" :key="n" :label="n" :value="n" />
+      </el-select>
       <span class="total-hint">共 {{ total }} 条资产记录</span>
     </div>
 
@@ -95,9 +106,24 @@
 
       <el-table-column type="index" width="50" label="#" />
 
-      <el-table-column prop="域名" label="域名" min-width="200" sortable="custom" show-overflow-tooltip />
+      <el-table-column prop="域名" label="域名" min-width="180" sortable="custom" show-overflow-tooltip />
 
-      <el-table-column prop="公网IP" label="公网IP" width="150" sortable="custom" />
+      <el-table-column prop="来源" label="来源" width="260" sortable="custom">
+        <template #default="{ row }">
+          <span style="display:flex;flex-wrap:wrap;gap:2px;">
+            <template v-for="s in (row.来源 || '').split(',').filter(Boolean)" :key="s">
+              <el-tag v-if="s==='ZDNS'" type="primary" size="small">ZDNS</el-tag>
+              <el-tag v-else-if="s==='F5'" type="success" size="small">F5</el-tag>
+              <el-tag v-else-if="s==='vCenter'" type="warning" size="small">vCenter</el-tag>
+              <el-tag v-else-if="s==='Switch'" type="danger" size="small">Switch</el-tag>
+              <el-tag v-else size="small">{{ s }}</el-tag>
+            </template>
+          </span>
+          <span v-if="!row.来源" style="color:#c0c4cc;">-</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column prop="公网IP" label="公网IP" width="200" sortable="custom" />
 
       <el-table-column prop="端口" label="端口" width="80" sortable="custom">
         <template #default="{ row }">{{ row.端口 || '-' }}</template>
@@ -145,7 +171,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { getAssetProfile } from '@/api/asset'
 
 const items = ref([])
@@ -166,6 +192,11 @@ const stats = reactive({
 
 const sortBy = ref('')
 const sortDir = ref('asc')
+const filterStatus = ref('')
+const filterNetwork = ref('')
+const filterSource = ref('')
+const networkNames = ref([])
+const sourceNames = ref([])
 
 function statusClass(state) {
   const s = (state || '').toLowerCase()
@@ -199,10 +230,15 @@ async function fetchData() {
       search: search.value,
       sort_by: sortBy.value,
       sort_dir: sortDir.value,
+      status: filterStatus.value,
+      network: filterNetwork.value,
+      source: filterSource.value,
     })
     items.value = data.rows
     total.value = data.total
     Object.assign(stats, data.stats)
+    if (data.network_names) networkNames.value = data.network_names
+    if (data.source_names) sourceNames.value = data.source_names
   } catch {
     /* handled */
   } finally {

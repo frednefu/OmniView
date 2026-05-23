@@ -6,6 +6,7 @@ from typing import List, Optional
 class AssetProfileRow(BaseModel):
     """资产画像单行数据"""
     域名: str = ""
+    来源: str = ""
     公网IP: str = ""
     端口: str = ""
     内网服务IP: str = ""
@@ -36,3 +37,5 @@ class AssetProfileResponse(BaseModel):
     page: int = 1
     size: int = 50
     stats: AssetProfileStats = AssetProfileStats()
+    network_names: List[str] = []
+    source_names: List[str] = []
