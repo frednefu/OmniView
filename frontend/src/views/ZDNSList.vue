@@ -55,6 +55,12 @@
             {{ row.last_record_count || 0 }} / {{ row.last_zone_count || 0 }}
           </template>
         </el-table-column>
+        <el-table-column label="IP扫描耗时" width="100">
+          <template #default="{ row }">
+            <span v-if="row.last_ip_scan_duration" style="color:#909399;">{{ row.last_ip_scan_duration }}s</span>
+            <span v-else style="color:#c0c4cc;">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="is_active" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'" size="small">

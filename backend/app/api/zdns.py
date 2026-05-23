@@ -253,18 +253,67 @@ def _label_ip_status(status: str) -> str:
     return "待定"
 
 
+def _compute_ip_status_batch(db, items) -> list[dict]:
+    """为 domain-map 行批量计算 IP 显示状态，返回 dict 列表。"""
+    from app.models.scan_result import ScanResult
+    from app.models.f5 import F5PoolMember, F5ApplicationMap
+
+    all_ips = list(set(r.ip_address for r in items if r.ip_address))
+    switch_ips: set[str] = set()
+    f5_states: dict[str, str] = {}
+    if all_ips:
+        sr_rows = db.query(ScanResult.ip_address).filter(
+            ScanResult.ip_address.in_(all_ips)
+        ).distinct().all()
+        switch_ips = {r[0] for r in sr_rows}
+        pm_rows = db.query(F5PoolMember.member_ip, F5PoolMember.member_state).filter(
+            F5PoolMember.member_ip.in_(all_ips),
+            F5PoolMember.member_state != "",
+        ).distinct().all()
+        for ip, state in pm_rows:
+            if ip not in f5_states:
+                f5_states[ip] = state
+        am_rows = db.query(F5ApplicationMap.member_ip, F5ApplicationMap.member_state).filter(
+            F5ApplicationMap.member_ip.in_(all_ips),
+            F5ApplicationMap.member_state != "",
+        ).distinct().all()
+        for ip, state in am_rows:
+            if ip not in f5_states:
+                f5_states[ip] = state
+
+    results = []
+    for r in items:
+        d = ZDNSDomainMapOut.model_validate(r).model_dump()
+        ip = r.ip_address
+        if not ip:
+            d["ip_status"] = ""
+        elif ip in switch_ips:
+            d["ip_status"] = "在线"
+        elif ip in f5_states:
+            d["ip_status"] = _label_ip_status(f5_states[ip])
+        elif r.ip_status == "online":
+            d["ip_status"] = "在线"
+        elif r.ip_status == "offline":
+            d["ip_status"] = "离线"
+        else:
+            d["ip_status"] = "待定"
+        results.append(d)
+    return results
+
+
 @router.get("/{device_id}/domain-map")
 def list_domain_map(
     device_id: int,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=500),
     search: str = Query("", max_length=256),
+    record_type: str = Query("", max_length=10),
+    view_name: str = Query("", max_length=128),
+    is_enabled: str = Query("", max_length=8),
+    ip_status: str = Query("", max_length=8),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from app.models.scan_result import ScanResult
-    from app.models.f5 import F5PoolMember, F5ApplicationMap
-
     dev = db.query(ZDNSDevice).get(device_id)
     if not dev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ZDNS 设备不存在")
@@ -276,56 +325,27 @@ def list_domain_map(
             (ZDNSDomainMap.view_name.contains(search)) |
             (ZDNSDomainMap.zone_name.contains(search))
         )
+    if record_type:
+        q = q.filter(ZDNSDomainMap.record_type == record_type)
+    if view_name:
+        q = q.filter(ZDNSDomainMap.view_name == view_name)
+    if is_enabled:
+        q = q.filter(ZDNSDomainMap.is_enabled == is_enabled)
+
+    if ip_status:
+        # IP 状态过滤需先计算所有行的状态再过滤
+        all_rows = q.order_by(ZDNSDomainMap.id).all()
+        all_with_status = _compute_ip_status_batch(db, all_rows)
+        filtered = [r for r in all_with_status if r["ip_status"] == ip_status]
+        total = len(filtered)
+        pages = ceil(total / size) if total > 0 else 0
+        start = (page - 1) * size
+        results = filtered[start:start + size]
+        return {"items": results, "total": total, "page": page, "size": size, "pages": pages}
+
     total = q.count()
     pages = ceil(total / size) if total > 0 else 0
     items = q.order_by(ZDNSDomainMap.id).offset((page - 1) * size).limit(size).all()
+    results = _compute_ip_status_batch(db, items)
 
-    # 批量计算当前页 IP 的显示状态
-    page_ips = list(set(r.ip_address for r in items if r.ip_address))
-    switch_ips: set[str] = set()
-    f5_states: dict[str, str] = {}
-    if page_ips:
-        # 交换机 scan_results 中存在的 IP → 在线
-        sr_rows = db.query(ScanResult.ip_address).filter(
-            ScanResult.ip_address.in_(page_ips)
-        ).distinct().all()
-        switch_ips = {r[0] for r in sr_rows}
-        # F5 Pool Members 中的 IP 状态
-        pm_rows = db.query(F5PoolMember.member_ip, F5PoolMember.member_state).filter(
-            F5PoolMember.member_ip.in_(page_ips),
-            F5PoolMember.member_state != "",
-        ).distinct().all()
-        for ip, state in pm_rows:
-            if ip not in f5_states:
-                f5_states[ip] = state
-        # F5 Application Map 中的 IP 状态（Pool Member 优先）
-        am_rows = db.query(F5ApplicationMap.member_ip, F5ApplicationMap.member_state).filter(
-            F5ApplicationMap.member_ip.in_(page_ips),
-            F5ApplicationMap.member_state != "",
-        ).distinct().all()
-        for ip, state in am_rows:
-            if ip not in f5_states:
-                f5_states[ip] = state
-
-    # 为每行计算 ip_status 显示值
-    results = []
-    for r in items:
-        d = ZDNSDomainMapOut.model_validate(r)
-        ip = r.ip_address
-        if not ip:
-            d.ip_status = ""
-        elif ip in switch_ips:
-            d.ip_status = "在线"
-        elif ip in f5_states:
-            d.ip_status = _label_ip_status(f5_states[ip])
-        elif r.ip_status == "online":
-            d.ip_status = "在线"
-        elif r.ip_status == "offline":
-            d.ip_status = "离线"
-        else:
-            d.ip_status = "待定"
-        results.append(d)
-
-    return PaginatedResponse(
-        items=results, total=total, page=page, size=size, pages=pages,
-    )
+    return {"items": results, "total": total, "page": page, "size": size, "pages": pages}

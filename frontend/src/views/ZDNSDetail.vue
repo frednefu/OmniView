@@ -7,9 +7,14 @@
         </el-button>
         <h2>{{ device?.name || 'ZDNS 详情' }}</h2>
       </div>
-      <el-button v-if="authStore.isAdmin" type="primary" @click="handleScan" :loading="scanning">
-        <el-icon><Refresh /></el-icon>立即扫描
-      </el-button>
+      <div class="header-right" v-if="authStore.isAdmin">
+        <el-button type="primary" @click="handleScan" :loading="scanning">
+          <el-icon><Refresh /></el-icon>立即扫描
+        </el-button>
+        <el-button type="warning" @click="handleIPScan" :loading="ipScanning">
+          <el-icon><Connection /></el-icon>IP扫描
+        </el-button>
+      </div>
     </div>
 
     <el-descriptions v-if="device" :column="3" border size="small" class="info-card">
@@ -31,6 +36,15 @@
           <span v-if="device.last_scan_duration" style="color:#909399;font-size:12px;">耗时 {{ device.last_scan_duration }}s</span>
         </div>
       </el-descriptions-item>
+      <el-descriptions-item label="IP扫描状态">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <el-tag v-if="device.last_ip_scan_status === 'success'" type="success" size="small">成功</el-tag>
+          <el-tag v-else-if="device.last_ip_scan_status === 'failed'" type="danger" size="small">失败</el-tag>
+          <el-tag v-else-if="device.last_ip_scan_status === 'running'" type="warning" size="small">扫描中</el-tag>
+          <span v-else style="color:#c0c4cc;">未扫描</span>
+          <span v-if="device.last_ip_scan_duration" style="color:#909399;font-size:12px;">耗时 {{ device.last_ip_scan_duration }}s</span>
+        </div>
+      </el-descriptions-item>
     </el-descriptions>
 
     <div v-if="device?.last_scan_error" style="margin-top:12px;">
@@ -42,8 +56,25 @@
         <!-- ═══════════ 域名清单（核心 Tab） ═══════════ -->
         <el-tab-pane label="域名清单" name="domainmap">
           <div class="filter-bar">
-            <el-input v-model="searchMap" placeholder="搜索域名、IP、视图、区..." clearable style="width:380px"
+            <el-input v-model="searchMap" placeholder="搜索域名、IP、视图、区..." clearable style="width:280px"
               @keyup.enter="fetchDomainMap" @clear="fetchDomainMap" />
+            <el-select v-model="filterRecordType" clearable placeholder="记录类型" style="width:100px" @change="fetchDomainMap">
+              <el-option label="全部" value="" />
+              <el-option label="A" value="A" />
+              <el-option label="AAAA" value="AAAA" />
+            </el-select>
+            <el-select v-model="filterIsEnabled" clearable placeholder="启用" style="width:90px" @change="fetchDomainMap">
+              <el-option label="全部" value="" />
+              <el-option label="是" value="yes" />
+              <el-option label="否" value="no" />
+            </el-select>
+            <el-select v-model="filterIPStatus" clearable placeholder="IP状态" style="width:100px" @change="fetchDomainMap">
+              <el-option label="全部" value="" />
+              <el-option label="在线" value="在线" />
+              <el-option label="离线" value="离线" />
+              <el-option label="禁用" value="禁用" />
+              <el-option label="待定" value="待定" />
+            </el-select>
             <el-button type="primary" @click="fetchDomainMap">查询</el-button>
           </div>
           <el-table :data="domainMap" stripe v-loading="loadingMap" max-height="520" style="width:100%">
@@ -140,7 +171,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
-import { getZDNSDevice, triggerZDNSScan, getZDNSDomainMap, getZDNSRecords } from '@/api/zdns'
+import { getZDNSDevice, triggerZDNSScan, triggerZDNSIPScan, getZDNSDomainMap, getZDNSRecords } from '@/api/zdns'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
@@ -148,12 +179,16 @@ const authStore = useAuthStore()
 const device = ref(null)
 const activeTab = ref('domainmap')
 const scanning = ref(false)
+const ipScanning = ref(false)
 
 // 域名清单
 const domainMap = ref([])
 const loadingMap = ref(false)
 const pageMap = ref(1); const sizeMap = ref(50); const totalMap = ref(0)
 const searchMap = ref('')
+const filterRecordType = ref('')
+const filterIsEnabled = ref('')
+const filterIPStatus = ref('')
 
 // DNS 记录
 const records = ref([])
@@ -168,7 +203,13 @@ async function fetchDevice() {
 async function fetchDomainMap() {
   loadingMap.value = true
   try {
-    const res = await getZDNSDomainMap(route.params.id, { page: pageMap.value, size: sizeMap.value, search: searchMap.value })
+    const params = {
+      page: pageMap.value, size: sizeMap.value, search: searchMap.value,
+      record_type: filterRecordType.value,
+      is_enabled: filterIsEnabled.value,
+      ip_status: filterIPStatus.value,
+    }
+    const res = await getZDNSDomainMap(route.params.id, params)
     domainMap.value = res.items
     totalMap.value = res.total
   } finally { loadingMap.value = false }
@@ -207,6 +248,17 @@ async function handleScan() {
   finally { scanning.value = false }
 }
 
+async function handleIPScan() {
+  try {
+    await ElMessageBox.confirm('确认对此 ZDNS 设备执行 IP 可达性扫描？', '确认 IP 扫描')
+    ipScanning.value = true
+    await triggerZDNSIPScan(route.params.id)
+    ElMessage.success('IP 扫描已触发，请稍后刷新查看结果')
+    setTimeout(() => fetchDevice(), 3000)
+  } catch { /* cancelled */ }
+  finally { ipScanning.value = false }
+}
+
 onMounted(() => { fetchDevice(); fetchDomainMap() })
 </script>
 
@@ -226,6 +278,10 @@ onMounted(() => { fetchDevice(); fetchDomainMap() })
   margin: 0;
   font-size: 22px;
   font-weight: 700;
+}
+.header-right {
+  display: flex;
+  gap: 8px;
 }
 .filter-bar {
   display: flex;
