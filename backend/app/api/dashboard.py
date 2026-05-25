@@ -20,7 +20,8 @@ from app.models.history import History
 from app.schemas.subnet import (
     DashboardStats, AssetDashboardStats, VCenterStats, VCenterResourceStat,
     F5Stats, ZDNSStats, ZDNSRecordTypeStat, QAXStats,
-    SourceScanStat, DistributionItem, SubnetUtilization, AvailableIpResponse,
+    SourceScanStat, DistributionItem, DatastoreTypeStat,
+    SubnetUtilization, AvailableIpResponse,
     SubnetOccupiedResponse, SubnetOccupiedIp,
     AssetDomainItem, AssetServiceItem, AssetDetailResponse,
 )
@@ -282,6 +283,23 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
     ds_total_capacity = round(float(ds_summary[0] or 0.0), 1)
     ds_total_free = round(float(ds_summary[1] or 0.0), 1)
 
+    # Datastore 按存储类型分组
+    ds_type_rows = db.query(
+        Datastore.storage_type,
+        func.count(Datastore.id),
+        func.coalesce(func.sum(Datastore.capacity_gb), 0.0),
+        func.coalesce(func.sum(Datastore.free_gb), 0.0),
+    ).filter(Datastore.storage_type != "").group_by(Datastore.storage_type).all()
+    datastore_by_type = [
+        DatastoreTypeStat(
+            storage_type=row[0],
+            count=row[1],
+            capacity_gb=round(float(row[2] or 0.0), 1),
+            free_gb=round(float(row[3] or 0.0), 1),
+        )
+        for row in ds_type_rows
+    ]
+
     vcenter = VCenterStats(
         vcenter_count=vcenter_count,
         vm_total=vm_total,
@@ -296,6 +314,7 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
         esxi_cpu_types=esxi_cpu_types,
         datastore_total_capacity_gb=ds_total_capacity,
         datastore_total_free_gb=ds_total_free,
+        datastore_by_type=datastore_by_type,
     )
 
     # ── F5 ──

@@ -58,6 +58,13 @@ class VCenterResourceStat(BaseModel):
     memory_gb: float
 
 
+class DatastoreTypeStat(BaseModel):
+    storage_type: str
+    count: int
+    capacity_gb: float
+    free_gb: float
+
+
 class VCenterStats(BaseModel):
     vcenter_count: int = 0
     vm_total: int = 0
@@ -72,6 +79,7 @@ class VCenterStats(BaseModel):
     esxi_cpu_types: List[DistributionItem] = []
     datastore_total_capacity_gb: float = 0.0
     datastore_total_free_gb: float = 0.0
+    datastore_by_type: List[DatastoreTypeStat] = []
 
 
 class F5Stats(BaseModel):

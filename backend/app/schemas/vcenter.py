@@ -106,6 +106,8 @@ class DatastoreOut(BaseModel):
     ds_type: str
     capacity_gb: float
     free_gb: float
+    mounted_host_count: int = 0
+    storage_type: str = ""
     created_at: datetime
 
     class Config:

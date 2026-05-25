@@ -251,7 +251,7 @@
       </el-col>
       <el-col :span="12">
         <el-card shadow="hover" class="chart-card">
-          <template #header><strong>存储容量概览</strong></template>
+          <template #header><strong>存储容量（按类型）</strong></template>
           <div v-if="dsStorageEmpty" class="empty-chart"><el-empty description="暂无存储数据" :image-size="50" /></div>
           <div v-else ref="dsStorageRef" class="chart-box"></div>
         </el-card>
@@ -433,7 +433,7 @@ const router = useRouter()
 // ── 状态 ──
 const stats = reactive({
   switch_count: 0, total_ips: 0, total_macs: 0, subnet_count: 0,
-  vcenter: { vcenter_count: 0, vm_total: 0, vm_powered_on: 0, vm_powered_off: 0, total_cpu_cores: 0, total_memory_gb: 0, per_vcenter: [], os_distribution: [], cpu_cores_distribution: [], memory_distribution: [], esxi_cpu_types: [], datastore_total_capacity_gb: 0, datastore_total_free_gb: 0 },
+  vcenter: { vcenter_count: 0, vm_total: 0, vm_powered_on: 0, vm_powered_off: 0, total_cpu_cores: 0, total_memory_gb: 0, per_vcenter: [], os_distribution: [], cpu_cores_distribution: [], memory_distribution: [], esxi_cpu_types: [], datastore_total_capacity_gb: 0, datastore_total_free_gb: 0, datastore_by_type: [] },
   f5: { device_count: 0, vs_count: 0, pool_count: 0, rule_count: 0, app_map_count: 0, pool_member_up: 0, pool_member_down: 0 },
   zdns: { device_count: 0, record_count: 0, domain_map_count: 0, ipv4_count: 0, ipv6_count: 0, internal_count: 0, external_count: 0, record_types: [] },
   qax: { device_count: 0, server_count: 0, os_distribution: [] },
@@ -472,7 +472,7 @@ const vcOSEmpty = computed(() => stats.vcenter.os_distribution.length === 0)
 const vcCpuEmpty = computed(() => stats.vcenter.cpu_cores_distribution.length === 0)
 const vcMemEmpty = computed(() => stats.vcenter.memory_distribution.length === 0)
 const esxiCpuEmpty = computed(() => stats.vcenter.esxi_cpu_types.length === 0)
-const dsStorageEmpty = computed(() => stats.vcenter.datastore_total_capacity_gb === 0)
+const dsStorageEmpty = computed(() => stats.vcenter.datastore_by_type.length === 0)
 
 // ── 子网已占用 IP 对话框 ──
 const occupiedDialogVisible = ref(false)
@@ -904,29 +904,28 @@ function renderEsxiCpu() {
 function renderDsStorage() {
   if (dsStorageEmpty.value || !dsStorageRef.value) return
   if (!dsStorageChart) dsStorageChart = echarts.init(dsStorageRef.value)
-  const total = stats.vcenter.datastore_total_capacity_gb
-  const free = stats.vcenter.datastore_total_free_gb
-  const used = +(total - free).toFixed(1)
+  const data = stats.vcenter.datastore_by_type
+  const names = data.map(d => `${d.storage_type} (${d.count}个)`)
+  const capacity = data.map(d => d.capacity_gb)
+  const free = data.map(d => d.free_gb)
+
   dsStorageChart.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: {c} GB ({d}%)' },
-    series: [{
-      type: 'pie', radius: ['55%', '78%'], center: ['50%', '55%'],
-      avoidLabelOverlap: false,
-      itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
-      label: { show: false },
-      emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
-      data: [
-        { value: used, name: '已用', itemStyle: { color: '#f59e0b' } },
-        { value: +free.toFixed(1), name: '可用', itemStyle: { color: '#10b981' } },
-      ],
-    }],
-    graphic: [{
-      type: 'text', left: 'center', top: '40%',
-      style: { text: total.toFixed(0) + ' GB', textAlign: 'center', fontSize: 18, fontWeight: 700, fill: '#1e293b' },
-    }, {
-      type: 'text', left: 'center', top: '55%',
-      style: { text: '总容量', textAlign: 'center', fontSize: 11, fill: '#94a3b8' },
-    }],
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: function (params) {
+        const el = data[params[0].dataIndex]
+        const used = +(el.capacity_gb - el.free_gb).toFixed(1)
+        return `<b>${el.storage_type}</b>（${el.count} 个）<br/>总容量: <b>${el.capacity_gb} GB</b><br/>已用: <b style="color:#f59e0b">${used} GB</b> | 可用: <b style="color:#10b981">${el.free_gb} GB</b>`
+      }
+    },
+    legend: { data: ['总容量', '可用'], itemWidth: 12, itemHeight: 12, textStyle: { fontSize: 12, color: '#64748b' }, bottom: 0 },
+    grid: { left: '3%', right: '4%', top: '3%', bottom: '12%', containLabel: true },
+    xAxis: { type: 'value', name: 'GB', nameTextStyle: { color: '#94a3b8' }, axisLabel: { fontSize: 10, color: '#94a3b8' }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
+    yAxis: { type: 'category', data: names, axisLabel: { fontSize: 11, color: '#64748b' }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e2e8f0' } } },
+    series: [
+      { name: '总容量', type: 'bar', data: capacity, barWidth: 14, itemStyle: { color: '#6366f1', borderRadius: [0, 4, 4, 0] } },
+      { name: '可用', type: 'bar', data: free, barWidth: 14, itemStyle: { color: '#10b981', borderRadius: [0, 4, 4, 0] } },
+    ],
   }, { notMerge: true })
 }
 

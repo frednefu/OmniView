@@ -138,7 +138,15 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="ds_type" label="类型" width="100" />
+          <el-table-column prop="ds_type" label="类型" width="90" />
+          <el-table-column label="存储类别" width="110" align="center">
+            <template #default="{ row }">
+              <el-tag :type="storageTagType(row.storage_type)" size="small" effect="plain">
+                {{ row.storage_type || '-' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="mounted_host_count" label="挂载主机数" width="105" align="center" />
           <el-table-column label="总容量(GB)" width="120" align="right">
             <template #default="{ row }">{{ row.capacity_gb?.toFixed(1) || '-' }}</template>
           </el-table-column>
@@ -201,6 +209,13 @@ function usageColor(row) {
   if (pct > 80) return '#ef4444'
   if (pct > 60) return '#f59e0b'
   return '#10b981'
+}
+
+function storageTagType(type) {
+  if (type === '共享NAS') return 'warning'
+  if (type === '共享存储') return ''
+  if (type === '本地存储') return 'success'
+  return 'info'
 }
 
 async function fetchHosts() {

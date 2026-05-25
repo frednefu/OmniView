@@ -322,12 +322,27 @@ def _collect_datastores(content):
                 capacity_gb = round(summary.capacity / (1024 ** 3), 1) if summary and summary.capacity else 0.0
                 free_gb = round(summary.freeSpace / (1024 ** 3), 1) if summary and summary.freeSpace else 0.0
 
+                host_count = 0
+                try:
+                    host_count = len(ds.host) if ds.host else 0
+                except Exception:
+                    pass
+                if host_count > 1:
+                    if ds_type and "NFS" in ds_type.upper():
+                        storage_type = "共享NAS"
+                    else:
+                        storage_type = "共享存储"
+                else:
+                    storage_type = "本地存储"
+
                 datastores.append({
                     "datastore_name": ds_name,
                     "status": ds_status,
                     "ds_type": ds_type,
                     "capacity_gb": capacity_gb,
                     "free_gb": free_gb,
+                    "mounted_host_count": host_count,
+                    "storage_type": storage_type,
                 })
             except Exception:
                 logger.exception("采集 Datastore %s 失败", getattr(ds, "name", "未知"))
