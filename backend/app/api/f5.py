@@ -42,12 +42,13 @@ async def scan_all(
     skipped = 0
     for dev in devices:
         if dev.last_scan_status == "running":
-            skipped += 1
-            continue
+            dev.last_scan_status = None
+            dev.last_scan_error = "上次扫描意外中断，已自动重置"
+            db.commit()
         await trigger_f5_scan(dev)
         started += 1
-    return {"message": f"已触发 {started} 个 F5 扫描" + (f"，{skipped} 个正在扫描中跳过" if skipped else ""),
-            "started": started, "skipped": skipped}
+    return {"message": f"已触发 {started} 个 F5 扫描",
+            "started": started}
 
 
 @router.delete("/all")
@@ -180,6 +181,25 @@ async def trigger_scan(
         db.commit()
     scan_log_id = await trigger_f5_scan(dev)
     return {"message": "扫描已触发", "scan_log_id": scan_log_id}
+
+
+# ─── 取消扫描 ───
+
+@router.post("/{device_id}/cancel-scan")
+def cancel_scan(
+    device_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    dev = db.query(F5Device).get(device_id)
+    if not dev:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="F5 设备不存在")
+    if dev.last_scan_status != "running":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前没有正在进行的扫描")
+    dev.last_scan_status = None
+    dev.last_scan_error = "用户手动取消"
+    db.commit()
+    return {"message": "扫描已取消"}
 
 
 # ─── 虚拟服务器清单 ───

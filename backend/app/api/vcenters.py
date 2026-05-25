@@ -165,12 +165,13 @@ async def scan_all(
     skipped = 0
     for vc in vcenters:
         if vc.last_scan_status == "running":
-            skipped += 1
-            continue
+            vc.last_scan_status = None
+            vc.last_scan_error = "上次扫描意外中断，已自动重置"
+            db.commit()
         await trigger_vcenter_scan(vc)
         started += 1
-    return {"message": f"已触发 {started} 个 vCenter 扫描" + (f"，{skipped} 个正在扫描中跳过" if skipped else ""),
-            "started": started, "skipped": skipped}
+    return {"message": f"已触发 {started} 个 vCenter 扫描",
+            "started": started}
 
 
 @router.delete("/all")
@@ -298,9 +299,30 @@ async def trigger_scan(
     if not vc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="vCenter 不存在")
     if vc.last_scan_status == "running":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该 vCenter 正在扫描中")
+        vc.last_scan_status = None
+        vc.last_scan_error = "上次扫描意外中断，已自动重置"
+        db.commit()
     scan_log_id = await trigger_vcenter_scan(vc)
     return {"message": "扫描已触发", "scan_log_id": scan_log_id}
+
+
+# ─── 取消扫描 ───
+
+@router.post("/{vcenter_id}/cancel-scan")
+def cancel_scan(
+    vcenter_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    vc = db.query(VCenter).get(vcenter_id)
+    if not vc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="vCenter 不存在")
+    if vc.last_scan_status != "running":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前没有正在进行的扫描")
+    vc.last_scan_status = None
+    vc.last_scan_error = "用户手动取消"
+    db.commit()
+    return {"message": "扫描已取消"}
 
 
 # ─── 该 vCenter 的 VM 清单 ───

@@ -117,8 +117,9 @@ npm run dev
 | GET | /api/auth/me | 当前用户信息 |
 | CRUD | /api/switches | 交换机管理 |
 | POST | /api/switches/test | SNMP 连接测试 |
-| POST | /api/switches/{id}/scan | 触发扫描 |
-| POST | /api/switches/scan-all | 全部扫描（所有启用交换机） |
+| POST | /api/switches/{id}/scan | 触发扫描（遇卡住的 running 自动重置） |
+| POST | /api/switches/{id}/cancel-scan | 取消扫描（手动重置卡住的 running） |
+| POST | /api/switches/scan-all | 全部扫描（所有启用交换机，自动重置卡住状态） |
 | DELETE | /api/switches/all | 删除所有交换机及关联数据 |
 | GET | /api/switches/template | 下载导入模板 |
 | POST | /api/switches/import | 批量导入交换机 |
@@ -144,8 +145,9 @@ npm run dev
 | PUT | /api/users/{id}/reset-password | 重置用户密码（管理员） |
 | CRUD | /api/vcenters | vCenter 管理 |
 | POST | /api/vcenters/test | vCenter 连接测试 |
-| POST | /api/vcenters/{id}/scan | 触发 vCenter 扫描 |
-| POST | /api/vcenters/scan-all | 全部扫描（所有启用 vCenter） |
+| POST | /api/vcenters/{id}/scan | 触发 vCenter 扫描（遇卡住的 running 自动重置） |
+| POST | /api/vcenters/{id}/cancel-scan | 取消 vCenter 扫描（手动重置卡住的 running） |
+| POST | /api/vcenters/scan-all | 全部扫描（所有启用 vCenter，自动重置卡住状态） |
 | DELETE | /api/vcenters/all | 删除所有 vCenter 及关联 VM 数据 |
 | GET | /api/vcenters/vms | 全局 VM 清单（分页+过滤） |
 | GET | /api/vcenters/{id}/vms | 某 vCenter 的 VM 清单（分页+过滤） |
@@ -154,8 +156,9 @@ npm run dev
 | GET | /api/vcenters/{id}/datastores | 存储器清单 |
 | CRUD | /api/f5 | F5 设备管理 |
 | POST | /api/f5/test | F5 连接测试 |
-| POST | /api/f5/{id}/scan | 触发 F5 扫描 |
-| POST | /api/f5/scan-all | 全部扫描（所有启用 F5） |
+| POST | /api/f5/{id}/scan | 触发 F5 扫描（遇卡住的 running 自动重置） |
+| POST | /api/f5/{id}/cancel-scan | 取消 F5 扫描（手动重置卡住的 running） |
+| POST | /api/f5/scan-all | 全部扫描（所有启用 F5，自动重置卡住状态） |
 | DELETE | /api/f5/all | 删除所有 F5 设备及关联数据 |
 | GET | /api/f5/{id}/virtual-servers | F5 虚拟服务器清单（分页+搜索） |
 | GET | /api/f5/{id}/pool-members | F5 Pool 成员清单（分页+搜索） |
@@ -163,16 +166,19 @@ npm run dev
 | GET | /api/f5/{id}/application-map | F5 应用映射清单（核心接口） |
 | CRUD | /api/zdns | ZDNS 设备管理 |
 | POST | /api/zdns/test | ZDNS 连接测试 |
-| POST | /api/zdns/{id}/scan | 触发 ZDNS 扫描 |
-| POST | /api/zdns/scan-all | 全部扫描（所有启用 ZDNS） |
+| POST | /api/zdns/{id}/scan | 触发 ZDNS 扫描（遇卡住的 running 自动重置） |
+| POST | /api/zdns/{id}/cancel-scan | 取消 ZDNS 扫描（手动重置卡住的 running） |
+| POST | /api/zdns/{id}/cancel-ip-scan | 取消 ZDNS IP 扫描（手动重置卡住的 IP running） |
+| POST | /api/zdns/scan-all | 全部扫描（所有启用 ZDNS，自动重置卡住状态） |
 | DELETE | /api/zdns/all | 删除所有 ZDNS 设备及关联数据 |
 | GET | /api/zdns/{id}/records | ZDNS DNS 记录清单（分页+搜索） |
 | GET | /api/zdns/{id}/domain-map | ZDNS 域名→IP 映射清单（核心接口，分页+搜索+过滤） |
 | POST | /api/zdns/{id}/ip-scan | 触发 ZDNS IP 可达性扫描（ping 探测） |
 | CRUD | /api/qax | 椒图设备管理 |
 | POST | /api/qax/test | 椒图连接测试 |
-| POST | /api/qax/{id}/scan | 触发椒图扫描 |
-| POST | /api/qax/scan-all | 全部扫描（所有启用椒图） |
+| POST | /api/qax/{id}/scan | 触发椒图扫描（遇卡住的 running 自动重置） |
+| POST | /api/qax/{id}/cancel-scan | 取消椒图扫描（手动重置卡住的 running） |
+| POST | /api/qax/scan-all | 全部扫描（所有启用椒图，自动重置卡住状态） |
 | DELETE | /api/qax/all | 删除所有椒图设备及关联数据 |
 | GET | /api/qax/{id}/servers | 椒图服务器清单（分页+搜索） |
 | GET | /api/qax/{id}/servers/{sid}/ports | 某服务器的端口列表 |

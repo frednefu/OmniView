@@ -241,11 +241,36 @@ async def trigger_switch_scan(
         ScanLog.status == ScanStatus.running,
     ).first()
     if running:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该交换机正在扫描中")
+        running.status = ScanStatus.failed
+        running.error_message = "上次扫描意外中断，已自动重置"
+        db.commit()
 
     scan_log_id = await trigger_scan(sw, TriggerType.manual)
     scan_log = db.query(ScanLog).get(scan_log_id)
     return ScanLogOut.model_validate(scan_log)
+
+
+# ─── 取消扫描 ───
+
+@router.post("/{switch_id}/cancel-scan")
+def cancel_scan(
+    switch_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    sw = db.query(Switch).get(switch_id)
+    if not sw:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交换机不存在")
+    running = db.query(ScanLog).filter(
+        ScanLog.switch_id == switch_id,
+        ScanLog.status == ScanStatus.running,
+    ).first()
+    if not running:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前没有正在进行的扫描")
+    running.status = ScanStatus.failed
+    running.error_message = "用户手动取消"
+    db.commit()
+    return {"message": "扫描已取消"}
 
 
 @router.post("/scan-all")
@@ -258,19 +283,19 @@ async def scan_all_switches(
     if not switches:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="没有可扫描的交换机")
     started = 0
-    skipped = 0
     for sw in switches:
         running = db.query(ScanLog).filter(
             ScanLog.switch_id == sw.id,
             ScanLog.status == ScanStatus.running,
         ).first()
         if running:
-            skipped += 1
-            continue
+            running.status = ScanStatus.failed
+            running.error_message = "上次扫描意外中断，已自动重置"
+            db.commit()
         await trigger_scan(sw, TriggerType.manual)
         started += 1
-    return {"message": f"已触发 {started} 台交换机扫描" + (f"，{skipped} 台正在扫描中跳过" if skipped else ""),
-            "started": started, "skipped": skipped}
+    return {"message": f"已触发 {started} 台交换机扫描",
+            "started": started}
 
 
 @router.delete("/all")

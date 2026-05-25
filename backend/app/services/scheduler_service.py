@@ -75,7 +75,9 @@ def _scan_job(switch_id: int):
             ScanLog.status == ScanStatus.running,
         ).first()
         if running:
-            return
+            running.status = ScanStatus.failed
+            running.error_message = "上次扫描意外中断，已自动重置"
+            db.commit()
 
         scan_log_id = _create_scan_log(db, "switch", switch_id, sw.name)
 
@@ -92,8 +94,12 @@ def _vcenter_scan_job(vcenter_id: int):
     db = SessionLocal()
     try:
         vc = db.query(VCenter).get(vcenter_id)
-        if not vc or not vc.is_active or vc.last_scan_status == "running":
+        if not vc or not vc.is_active:
             return
+        if vc.last_scan_status == "running":
+            vc.last_scan_status = None
+            vc.last_scan_error = "上次扫描意外中断，已自动重置"
+            db.commit()
 
         scan_log_id = _create_scan_log(db, "vcenter", vcenter_id, vc.name)
 
@@ -189,8 +195,12 @@ def _f5_scan_job(f5_device_id: int):
     db = SessionLocal()
     try:
         dev = db.query(F5Device).get(f5_device_id)
-        if not dev or not dev.is_active or dev.last_scan_status == "running":
+        if not dev or not dev.is_active:
             return
+        if dev.last_scan_status == "running":
+            dev.last_scan_status = None
+            dev.last_scan_error = "上次扫描意外中断，已自动重置"
+            db.commit()
 
         scan_log_id = _create_scan_log(db, "f5", f5_device_id, dev.name)
 
@@ -227,8 +237,12 @@ def _zdns_scan_job(zdns_device_id: int):
     db = SessionLocal()
     try:
         dev = db.query(ZDNSDevice).get(zdns_device_id)
-        if not dev or not dev.is_active or dev.last_scan_status == "running":
+        if not dev or not dev.is_active:
             return
+        if dev.last_scan_status == "running":
+            dev.last_scan_status = None
+            dev.last_scan_error = "上次扫描意外中断，已自动重置"
+            db.commit()
 
         scan_log_id = _create_scan_log(db, "zdns", zdns_device_id, dev.name)
 
@@ -265,8 +279,12 @@ def _zdns_ip_scan_job(zdns_device_id: int):
     db = SessionLocal()
     try:
         dev = db.query(ZDNSDevice).get(zdns_device_id)
-        if not dev or not dev.is_active or dev.last_ip_scan_status == "running":
+        if not dev or not dev.is_active:
             return
+        if dev.last_ip_scan_status == "running":
+            dev.last_ip_scan_status = None
+            dev.last_ip_scan_error = "上次扫描意外中断，已自动重置"
+            db.commit()
 
         scan_log_id = _create_scan_log(db, "zdns_ip", zdns_device_id, dev.name)
 
@@ -303,8 +321,12 @@ def _qax_scan_job(device_id: int):
     db = SessionLocal()
     try:
         dev = db.query(QianXinDevice).get(device_id)
-        if not dev or not dev.enabled or dev.last_scan_status == "running":
+        if not dev or not dev.enabled:
             return
+        if dev.last_scan_status == "running":
+            dev.last_scan_status = None
+            dev.last_scan_error = "上次扫描意外中断，已自动重置"
+            db.commit()
 
         scan_log_id = _create_scan_log(db, "qax", device_id, dev.name)
 
