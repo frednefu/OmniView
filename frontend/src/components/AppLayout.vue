@@ -5,7 +5,7 @@
         <div class="logo-icon">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
             <rect width="24" height="24" rx="6" fill="url(#logo-grad)"/>
-            <text x="12" y="17" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">IP</text>
+            <text x="12" y="17" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">OV</text>
             <defs>
               <linearGradient id="logo-grad" x1="0" y1="0" x2="24" y2="24">
                 <stop stop-color="#6366f1"/>
@@ -14,8 +14,8 @@
             </defs>
           </svg>
         </div>
-        <span v-show="!isCollapse" class="logo-text">IPAM</span>
-        <span v-show="isCollapse" class="logo-text-collapsed">IP</span>
+        <span v-show="!isCollapse" class="logo-text">OmniView</span>
+        <span v-show="isCollapse" class="logo-text-collapsed">OV</span>
       </div>
 
       <el-menu
@@ -81,7 +81,7 @@
       </el-menu>
 
       <div class="sidebar-footer" v-show="!isCollapse">
-        <div class="version">IPAM v2.0</div>
+        <div class="version">OmniView v2.0</div>
       </div>
     </el-aside>
 

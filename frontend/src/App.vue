@@ -7,7 +7,7 @@
 
 <style>
 /* ═══════════════════════════════════════════
-   全局设计 Token — IPAM Design System
+   全局设计 Token — OmniView Design System
    ═══════════════════════════════════════════ */
 :root {
   /* 主色调 */

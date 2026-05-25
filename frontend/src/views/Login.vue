@@ -11,7 +11,7 @@
       <div class="login-header">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
           <rect width="24" height="24" rx="6" fill="url(#login-logo-grad)"/>
-          <text x="12" y="17" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">IP</text>
+          <text x="12" y="17" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">OV</text>
           <defs>
             <linearGradient id="login-logo-grad" x1="0" y1="0" x2="24" y2="24">
               <stop stop-color="#6366f1"/>
@@ -19,8 +19,8 @@
             </linearGradient>
           </defs>
         </svg>
-        <h1>IPAM</h1>
-        <p>企业 IP 地址管理系统</p>
+        <h1>OmniView</h1>
+        <p>全维 IT 资产发现与治理平台</p>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" size="large" @submit.prevent="handleLogin">
         <el-form-item prop="username">

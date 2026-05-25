@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="IPAM API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="OmniView API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
