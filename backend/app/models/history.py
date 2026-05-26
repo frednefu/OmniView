@@ -15,6 +15,7 @@ class SourceType(str, enum.Enum):
     vcenter = "vcenter"
     f5 = "f5"
     zdns = "zdns"
+    qax = "qax"
 
 
 class History(Base):

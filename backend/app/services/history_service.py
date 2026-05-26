@@ -308,3 +308,70 @@ def detect_zdns_changes(db, zdns_device_id: int, zdns_device_name: str,
             count += 1
 
     return count
+
+
+QAX_TRACKED_FIELDS = [
+    "ipv4", "intranet_ip", "operation_system",
+    "cpu", "memory", "disk_size_str", "online_status",
+    "run_status", "machine_group",
+]
+
+
+def _qax_fields_differ(old_row, new_row):
+    for f in QAX_TRACKED_FIELDS:
+        ov = str(getattr(old_row, f, None) or "")
+        nv = str(getattr(new_row, f, None) or "")
+        if ov != nv:
+            return True
+    return False
+
+
+def _make_qax_entry(change_type, new_row, old_row, device_id, device_name):
+    row = new_row if new_row is not None else old_row
+    # dedup_key 格式: machine_name::machine_uuid::device_id（方便前端展示）
+    dedup_key = f"{row.machine_name}::{row.machine_uuid}::{device_id}"
+
+    entry = History(
+        change_type=change_type,
+        source_type=SourceType.qax,
+        source_id=device_id,
+        source_name=device_name,
+        dedup_key=dedup_key,
+        ip_address=row.ipv4 or "",
+        mac_address="",
+    )
+
+    if old_row is not None and new_row is not None:
+        entry.change_detail = _build_change_detail(old_row, new_row, QAX_TRACKED_FIELDS)
+
+    return entry
+
+
+def detect_qax_changes(db, device_id: int, device_name: str,
+                        old_by_key: dict, new_by_key: dict):
+    """以 (machine_uuid, device_id) 为键 diff，写入椒图 History。"""
+    if not old_by_key:
+        return 0
+
+    count = 0
+
+    for key, new_row in new_by_key.items():
+        if key not in old_by_key:
+            db.add(_make_qax_entry(ChangeType.added, new_row, None,
+                                    device_id, device_name))
+            count += 1
+
+    for key, old_row in old_by_key.items():
+        if key not in new_by_key:
+            db.add(_make_qax_entry(ChangeType.deleted, None, old_row,
+                                    device_id, device_name))
+            count += 1
+
+    for key, new_row in new_by_key.items():
+        old_row = old_by_key.get(key)
+        if old_row is not None and _qax_fields_differ(old_row, new_row):
+            db.add(_make_qax_entry(ChangeType.modified, new_row, old_row,
+                                    device_id, device_name))
+            count += 1
+
+    return count

@@ -155,173 +155,288 @@ def _update_scan_log_failed(scan_log_id: int | None, server_count: int, error_ms
 
 
 async def _run_qax_scan_async(device_id: int, scan_log_id: int | None = None):
-    """异步扫描椒图设备，采集服务器清单及端口/进程/软件详情并写入数据库。"""
+    """异步扫描椒图设备，采集服务器清单及端口/进程/软件详情并写入数据库。
+
+    分阶段执行，避免在 API 调用期间持有数据库会话：
+    1. 快照旧服务器数据（用于变更历史 diff）
+    2. 通过 API 获取服务器列表
+    3. 写入服务器基本信息（短事务）
+    4. 逐台采集详情并独立写入（每台服务器一个短事务）
+    5. 写入变更历史 + 更新设备状态
+    """
     from app.models.scan_log import ScanLog, ScanStatus
+    from app.services.history_service import detect_qax_changes
 
     start_time = datetime.now()
 
+    # 阶段 0：验证设备 + 快照旧数据
     db = SessionLocal()
     device = None
-    server_count = 0
-    scan_success = False
-    error_msg = None
+    old_by_key = {}
+    device_name = ""
     try:
         device = db.query(QianXinDevice).get(device_id)
         if not device or not device.enabled:
             _update_scan_log_failed(scan_log_id, 0, "设备不存在或已禁用")
             return
 
+        device_name = device.name
         device.last_scan_status = "running"
         device.last_scan_error = None
         db.commit()
-        db.close()  # 释放 SQLite 连接，避免与后续 write_db 冲突
 
+        # 快照旧服务器（变更历史 diff 用）
+        old_rows = db.query(QianXinServer).filter(
+            QianXinServer.device_id == device_id
+        ).all()
+        for r in old_rows:
+            old_by_key[(r.machine_uuid, device_id)] = r
+    finally:
+        db.close()
+
+    server_count = 0
+    detail_success = 0
+    detail_failed = 0
+    scan_success = False
+    error_msg = None
+
+    try:
+        # 阶段 1：通过 API 获取服务器列表（不持有 DB 会话）
         client = QianXinClient(device.host, device.uuid, device.secret)
-
         loop = asyncio.get_running_loop()
         servers = await loop.run_in_executor(None, client.get_all_servers)
 
-        write_db = SessionLocal()
-        try:
-            # 删除该设备所有旧数据
-            old_server_ids = [
-                r[0] for r in write_db.query(QianXinServer.id).filter(
-                    QianXinServer.device_id == device_id
-                ).all()
-            ]
-            if old_server_ids:
-                write_db.query(QianXinPort).filter(
-                    QianXinPort.server_id.in_(old_server_ids)
-                ).delete(synchronize_session=False)
-                write_db.query(QianXinProcess).filter(
-                    QianXinProcess.server_id.in_(old_server_ids)
-                ).delete(synchronize_session=False)
-                write_db.query(QianXinSoftware).filter(
-                    QianXinSoftware.server_id.in_(old_server_ids)
-                ).delete(synchronize_session=False)
-            write_db.query(QianXinServer).filter(
-                QianXinServer.device_id == device_id
-            ).delete()
-
-            # 写入服务器基本信息
-            for s in servers:
-                server = QianXinServer(
-                    device_id=device_id,
-                    machine_uuid=s.get("machineUuid", ""),
-                    machine_name=s.get("machineName", ""),
-                    ipv4=s.get("ipv4") or s.get("intranetIp") or "",
-                    intranet_ip=s.get("intranetIp") or "",
-                    ipv6=s.get("ipv6") or "",
-                    operation_system=s.get("operationSystem", ""),
-                    kernel_version=s.get("kernelVersion", ""),
-                    cpu=s.get("cpu") or s.get("cpuInfo", ""),
-                    memory=s.get("memory") or s.get("memoryGb", ""),
-                    disk_size_str=s.get("diskSizeStr") or s.get("diskSize", ""),
-                    online_status=s.get("onlineStatus", 0),
-                    run_status=s.get("runStatus", 0),
-                    machine_group=s.get("machineGroup", ""),
-                    port_count=s.get("portCount", 0),
-                    process_count=s.get("processCount", 0),
-                    software_count=s.get("softwareAppCount", 0),
-                    web_count=s.get("webCount", 0),
-                    web_server_count=s.get("webServerCount", 0),
-                    database_count=s.get("databaseCount", 0),
-                )
-                write_db.add(server)
-                write_db.flush()
-
-                server_id = server.id
-                machine_uuid = s.get("machineUuid", "")
-                if not machine_uuid:
-                    continue
-
-                # 获取并写入端口
-                try:
-                    ports = await loop.run_in_executor(None, client.get_server_ports, machine_uuid)
-                    for p in ports:
-                        write_db.add(QianXinPort(
-                            device_id=device_id,
-                            server_id=server_id,
-                            port=str(p.get("port", "")),
-                            protocol=str(p.get("protocol", "")),
-                            process_name=str(p.get("processName", "")),
-                            start_user=str(p.get("startUser", "")),
-                            process_version=str(p.get("processVersion", "")),
-                        ))
-                except Exception as e:
-                    logger.warning("获取端口失败 server=%s: %s", s.get("machineName", ""), e)
-
-                # 获取并写入进程
-                try:
-                    procs = await loop.run_in_executor(None, client.get_server_processes, machine_uuid)
-                    for p in procs:
-                        write_db.add(QianXinProcess(
-                            device_id=device_id,
-                            server_id=server_id,
-                            process_name=str(p.get("processName", "")),
-                            pid=str(p.get("pid", "")),
-                            start_user=str(p.get("startUser", "")),
-                            cpu_percent=str(p.get("cpuPercent", "")),
-                            mem_percent=str(p.get("memPercent", "")),
-                        ))
-                except Exception as e:
-                    logger.warning("获取进程失败 server=%s: %s", s.get("machineName", ""), e)
-
-                # 获取并写入软件
-                try:
-                    sw_list = await loop.run_in_executor(None, client.get_server_software, machine_uuid)
-                    for sw in sw_list:
-                        write_db.add(QianXinSoftware(
-                            device_id=device_id,
-                            server_id=server_id,
-                            software_name=str(sw.get("softwareName", "")),
-                            version=str(sw.get("version", "")),
-                            install_path=str(sw.get("installPath", "")),
-                        ))
-                except Exception as e:
-                    logger.warning("获取软件失败 server=%s: %s", s.get("machineName", ""), e)
-
-            write_db.commit()
-            server_count = len(servers)
+        if not servers:
+            # 无服务器返回 — 清空旧数据
+            _wipe_qax_data(device_id)
+            server_count = 0
             scan_success = True
-        except Exception:
-            write_db.rollback()
-            raise
-        finally:
-            write_db.close()
+            _finalize_scan_success(device_id, start_time, server_count, 0, 0)
+            _write_qax_history(device_id, device_name, old_by_key, {})
+            if scan_log_id:
+                _update_scan_log(scan_log_id, True, 0, None)
+            return
 
-        duration = round((datetime.now() - start_time).total_seconds(), 1)
-        # 重新打开 db 会话更新最终状态
-        db = SessionLocal()
-        db_device = db.query(QianXinDevice).get(device_id)
-        if db_device:
-            db_device.last_scan_status = "success"
-            db_device.last_scan_time = datetime.now()
-            db_device.last_scan_duration = duration
-            db_device.last_server_count = server_count
-            db_device.last_scan_error = None
-            db.commit()
-        db.close()
-        logger.info("椒图 %s 扫描完成，服务器: %s，耗时 %ss", device.host, server_count, duration)
+        # 阶段 2：写入服务器基本信息（短事务，不混合 API 调用）
+        server_map = _write_qax_servers(device_id, servers)
+        server_count = len(servers)
+
+        # 阶段 3：逐台采集详情（每台服务器独立 DB 会话，避免长期持锁）
+        for s in servers:
+            machine_uuid = s.get("machineUuid", "")
+            machine_name = s.get("machineName", "")
+            if not machine_uuid:
+                continue
+
+            server_id = server_map.get(machine_uuid)
+            if not server_id:
+                continue
+
+            try:
+                ports = await loop.run_in_executor(None, client.get_server_ports, machine_uuid)
+                procs = await loop.run_in_executor(None, client.get_server_processes, machine_uuid)
+                sw_list = await loop.run_in_executor(None, client.get_server_software, machine_uuid)
+                _write_qax_server_details(device_id, server_id, ports, procs, sw_list)
+                detail_success += 1
+            except Exception as e:
+                detail_failed += 1
+                logger.warning("采集详情失败 server=%s: %s", machine_name, e)
+                # 尝试写入部分数据
+                try:
+                    _write_qax_server_details(device_id, server_id, [], [], [])
+                except Exception:
+                    pass
+
+        scan_success = True
     except Exception as e:
-        duration = round((datetime.now() - start_time).total_seconds(), 1)
         error_msg = str(e)
         logger.exception("椒图 %s 扫描失败", device.host if device else device_id)
         try:
-            db = SessionLocal()
-            db_device = db.query(QianXinDevice).get(device_id)
-            if db_device:
-                db_device.last_scan_status = "failed"
-                db_device.last_scan_error = error_msg
-                db_device.last_scan_duration = duration
-                db.commit()
-            db.close()
-        except Exception as inner_e:
+            _finalize_scan_failed(device_id, start_time, error_msg)
+        except Exception:
             logger.exception("更新椒图设备失败状态出错 device_id=%s", device_id)
+    else:
+        # 阶段 4：变更历史 + 最终状态
+        try:
+            new_by_key = {}
+            db = SessionLocal()
+            try:
+                new_rows = db.query(QianXinServer).filter(
+                    QianXinServer.device_id == device_id
+                ).all()
+                for r in new_rows:
+                    new_by_key[(r.machine_uuid, device_id)] = r
+                detect_qax_changes(db, device_id, device_name, old_by_key, new_by_key)
+                db.commit()
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("写入椒图变更历史失败 device_id=%s", device_id)
+
+        _finalize_scan_success(device_id, start_time, server_count, detail_success, detail_failed)
+        logger.info("椒图 %s 扫描完成，服务器: %s，详情成功: %s，失败: %s，耗时 %ss",
+                    device.host, server_count, detail_success, detail_failed,
+                    round((datetime.now() - start_time).total_seconds(), 1))
 
     # 更新扫描日志
     if scan_log_id:
         _update_scan_log(scan_log_id, scan_success, server_count, error_msg)
+
+
+def _wipe_qax_data(device_id: int):
+    """清空指定椒图设备的所有采集数据。"""
+    db = SessionLocal()
+    try:
+        old_ids = [r[0] for r in db.query(QianXinServer.id).filter(
+            QianXinServer.device_id == device_id
+        ).all()]
+        if old_ids:
+            db.query(QianXinPort).filter(QianXinPort.server_id.in_(old_ids)).delete(synchronize_session=False)
+            db.query(QianXinProcess).filter(QianXinProcess.server_id.in_(old_ids)).delete(synchronize_session=False)
+            db.query(QianXinSoftware).filter(QianXinSoftware.server_id.in_(old_ids)).delete(synchronize_session=False)
+        db.query(QianXinServer).filter(QianXinServer.device_id == device_id).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _write_qax_servers(device_id: int, servers: list) -> dict:
+    """写入服务器基本信息，返回 {machine_uuid: server_id} 映射。"""
+    db = SessionLocal()
+    server_map = {}
+    try:
+        _wipe_qax_data(device_id)
+
+        for s in servers:
+            server = QianXinServer(
+                device_id=device_id,
+                machine_uuid=s.get("machineUuid", ""),
+                machine_name=s.get("machineName", ""),
+                ipv4=s.get("ipv4") or s.get("intranetIp") or "",
+                intranet_ip=s.get("intranetIp") or "",
+                ipv6=s.get("ipv6") or "",
+                operation_system=s.get("operationSystem", ""),
+                kernel_version=s.get("kernelVersion", ""),
+                cpu=s.get("cpu") or s.get("cpuInfo", ""),
+                memory=s.get("memory") or s.get("memoryGb", ""),
+                disk_size_str=s.get("diskSizeStr") or s.get("diskSize", ""),
+                online_status=s.get("onlineStatus", 0),
+                run_status=s.get("runStatus", 0),
+                machine_group=s.get("machineGroup", ""),
+                port_count=s.get("portCount", 0),
+                process_count=s.get("processCount", 0),
+                software_count=s.get("softwareAppCount", 0),
+                web_count=s.get("webCount", 0),
+                web_server_count=s.get("webServerCount", 0),
+                database_count=s.get("databaseCount", 0),
+            )
+            db.add(server)
+            db.flush()
+            muuid = s.get("machineUuid", "")
+            if muuid:
+                server_map[muuid] = server.id
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    return server_map
+
+
+def _write_qax_server_details(device_id: int, server_id: int,
+                               ports: list, processes: list, software_list: list):
+    """写入单台服务器的端口/进程/软件详情（独立短事务）。"""
+    db = SessionLocal()
+    try:
+        db.query(QianXinPort).filter(QianXinPort.server_id == server_id).delete(synchronize_session=False)
+        db.query(QianXinProcess).filter(QianXinProcess.server_id == server_id).delete(synchronize_session=False)
+        db.query(QianXinSoftware).filter(QianXinSoftware.server_id == server_id).delete(synchronize_session=False)
+
+        for p in ports:
+            db.add(QianXinPort(
+                device_id=device_id, server_id=server_id,
+                port=str(p.get("port", "")),
+                protocol=str(p.get("protocol", "")),
+                process_name=str(p.get("processName", "")),
+                start_user=str(p.get("startUser", "")),
+                process_version=str(p.get("processVersion", "")),
+            ))
+        for p in processes:
+            db.add(QianXinProcess(
+                device_id=device_id, server_id=server_id,
+                process_name=str(p.get("processName", "")),
+                pid=str(p.get("pid", "")),
+                start_user=str(p.get("startUser", "")),
+                cpu_percent=str(p.get("cpuPercent", "")),
+                mem_percent=str(p.get("memPercent", "")),
+            ))
+        for sw in software_list:
+            db.add(QianXinSoftware(
+                device_id=device_id, server_id=server_id,
+                software_name=str(sw.get("softwareName", "")),
+                version=str(sw.get("version", "")),
+                install_path=str(sw.get("installPath", "")),
+            ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _finalize_scan_success(device_id: int, start_time, server_count: int,
+                           detail_success: int, detail_failed: int):
+    """更新设备扫描状态为成功。"""
+    duration = round((datetime.now() - start_time).total_seconds(), 1)
+    db = SessionLocal()
+    try:
+        dev = db.query(QianXinDevice).get(device_id)
+        if dev:
+            dev.last_scan_status = "success"
+            dev.last_scan_time = datetime.now()
+            dev.last_scan_duration = duration
+            dev.last_server_count = server_count
+            dev.last_scan_error = None
+            db.commit()
+    finally:
+        db.close()
+
+
+def _finalize_scan_failed(device_id: int, start_time, error_msg: str):
+    """更新设备扫描状态为失败。"""
+    duration = round((datetime.now() - start_time).total_seconds(), 1)
+    db = SessionLocal()
+    try:
+        dev = db.query(QianXinDevice).get(device_id)
+        if dev:
+            dev.last_scan_status = "failed"
+            dev.last_scan_error = error_msg
+            dev.last_scan_duration = duration
+            db.commit()
+    finally:
+        db.close()
+
+
+def _write_qax_history(device_id: int, device_name: str,
+                        old_by_key: dict, new_by_key: dict):
+    """写入椒图变更历史。"""
+    from app.services.history_service import detect_qax_changes
+    db = SessionLocal()
+    try:
+        detect_qax_changes(db, device_id, device_name, old_by_key, new_by_key)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("写入椒图变更历史失败 device_id=%s", device_id)
+    finally:
+        db.close()
 
 
 async def trigger_qax_scan(device: QianXinDevice, triggered_by: str = "manual") -> int:

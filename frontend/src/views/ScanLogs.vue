@@ -117,12 +117,12 @@ function formatTime(t) {
 }
 
 function sourceTag(type) {
-  const map = { switch: '', vcenter: 'success', f5: 'warning', zdns: '' }
+  const map = { switch: '', vcenter: 'success', f5: 'warning', zdns: '', qax: 'danger' }
   return map[type] || ''
 }
 
 function sourceLabel(type) {
-  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS' }
+  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', qax: '椒图' }
   return map[type] || type
 }
 

@@ -80,13 +80,17 @@ def _scan_job(switch_id: int):
             db.commit()
 
         scan_log_id = _create_scan_log(db, "switch", switch_id, sw.name)
-
-        # 在线程中运行异步扫描
-        asyncio.run(_run_scan_async(sw, scan_log_id))
+        sw_obj = sw  # 保留引用，session 关闭后仍可访问属性
     except Exception:
-        logger.exception("定时扫描失败 switch_id=%s", switch_id)
+        logger.exception("定时扫描准备失败 switch_id=%s", switch_id)
+        return
     finally:
         db.close()
+
+    try:
+        asyncio.run(_run_scan_async(sw_obj, scan_log_id))
+    except Exception:
+        logger.exception("定时扫描失败 switch_id=%s", switch_id)
 
 
 def _vcenter_scan_job(vcenter_id: int):
@@ -102,12 +106,16 @@ def _vcenter_scan_job(vcenter_id: int):
             db.commit()
 
         scan_log_id = _create_scan_log(db, "vcenter", vcenter_id, vc.name)
+    except Exception:
+        logger.exception("vCenter 定时扫描准备失败 vcenter_id=%s", vcenter_id)
+        return
+    finally:
+        db.close()
 
+    try:
         asyncio.run(_run_vcenter_scan_async(vcenter_id, scan_log_id))
     except Exception:
         logger.exception("vCenter 定时扫描失败 vcenter_id=%s", vcenter_id)
-    finally:
-        db.close()
 
 
 def start_scheduler():
@@ -203,12 +211,16 @@ def _f5_scan_job(f5_device_id: int):
             db.commit()
 
         scan_log_id = _create_scan_log(db, "f5", f5_device_id, dev.name)
+    except Exception:
+        logger.exception("F5 定时扫描准备失败 f5_device_id=%s", f5_device_id)
+        return
+    finally:
+        db.close()
 
+    try:
         asyncio.run(_run_f5_scan_async(f5_device_id, scan_log_id))
     except Exception:
         logger.exception("F5 定时扫描失败 f5_device_id=%s", f5_device_id)
-    finally:
-        db.close()
 
 
 def refresh_f5_job(f5_device_id: int, scan_interval: int):
@@ -245,12 +257,16 @@ def _zdns_scan_job(zdns_device_id: int):
             db.commit()
 
         scan_log_id = _create_scan_log(db, "zdns", zdns_device_id, dev.name)
+    except Exception:
+        logger.exception("ZDNS 定时扫描准备失败 zdns_device_id=%s", zdns_device_id)
+        return
+    finally:
+        db.close()
 
+    try:
         asyncio.run(_run_zdns_scan_async(zdns_device_id, scan_log_id))
     except Exception:
         logger.exception("ZDNS 定时扫描失败 zdns_device_id=%s", zdns_device_id)
-    finally:
-        db.close()
 
 
 def refresh_zdns_job(zdns_device_id: int, scan_interval: int):
@@ -287,12 +303,16 @@ def _zdns_ip_scan_job(zdns_device_id: int):
             db.commit()
 
         scan_log_id = _create_scan_log(db, "zdns_ip", zdns_device_id, dev.name)
+    except Exception:
+        logger.exception("ZDNS IP 扫描准备失败 zdns_device_id=%s", zdns_device_id)
+        return
+    finally:
+        db.close()
 
+    try:
         asyncio.run(_run_zdns_ip_scan_async(zdns_device_id, scan_log_id))
     except Exception:
         logger.exception("ZDNS IP 扫描失败 zdns_device_id=%s", zdns_device_id)
-    finally:
-        db.close()
 
 
 def refresh_zdns_ip_job(zdns_device_id: int, ip_scan_interval: int):
@@ -317,7 +337,10 @@ def _add_zdns_ip_job(zdns_device_id: int, ip_scan_interval: int):
 
 
 def _qax_scan_job(device_id: int):
-    """单个椒图设备扫描 job（在独立线程中运行）。"""
+    """单个椒图设备扫描 job（在独立线程中运行）。
+
+    重要：调用 asyncio.run() 前必须关闭 DB 会话，否则 SQLite 写锁冲突导致扫描卡死。
+    """
     db = SessionLocal()
     try:
         dev = db.query(QianXinDevice).get(device_id)
@@ -329,12 +352,17 @@ def _qax_scan_job(device_id: int):
             db.commit()
 
         scan_log_id = _create_scan_log(db, "qax", device_id, dev.name)
+        dev_name = dev.name
+    except Exception:
+        logger.exception("椒图定时扫描准备失败 device_id=%s", device_id)
+        return
+    finally:
+        db.close()
 
+    try:
         asyncio.run(_run_qax_scan_async(device_id, scan_log_id))
     except Exception:
         logger.exception("椒图定时扫描失败 device_id=%s", device_id)
-    finally:
-        db.close()
 
 
 def refresh_qax_job(device_id: int, scan_interval: int):

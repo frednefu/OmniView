@@ -248,6 +248,63 @@
             layout="total, prev, pager, next" @current-change="fetchData" />
         </div>
       </el-tab-pane>
+
+      <!-- 椒图历史 -->
+      <el-tab-pane label="椒图历史" name="qax">
+        <div class="filter-bar">
+          <el-row :gutter="12">
+            <el-col :span="5">
+              <el-input v-model="filters.ip" placeholder="IP 地址" clearable @change="resetAndFetch" />
+            </el-col>
+            <el-col :span="5">
+              <el-select v-model="filters.source_id" placeholder="全部设备" clearable style="width:100%">
+                <el-option v-for="d in qaxOptions" :key="d.id" :label="d.name" :value="d.id" />
+              </el-select>
+            </el-col>
+            <el-col :span="4">
+              <el-select v-model="filters.change_type" placeholder="全部类型" clearable style="width:100%">
+                <el-option label="新增" value="added" />
+                <el-option label="删除" value="deleted" />
+                <el-option label="修改" value="modified" />
+              </el-select>
+            </el-col>
+            <el-col :span="8">
+              <el-date-picker v-model="dateRange" type="datetimerange" range-separator="至"
+                start-placeholder="开始" end-placeholder="结束" format="YYYY-MM-DD HH:mm"
+                value-format="YYYY-MM-DDTHH:mm" style="width:100%" @change="fetchData" />
+            </el-col>
+            <el-col :span="2">
+              <el-button @click="resetFilters" :icon="'Refresh'" size="small">重置</el-button>
+            </el-col>
+          </el-row>
+        </div>
+
+        <el-table :data="items" v-loading="loading" stripe :row-class-name="rowClassName" style="width:100%">
+          <el-table-column label="时间" width="170">
+            <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+          </el-table-column>
+          <el-table-column prop="source_name" label="椒图设备" width="160" show-overflow-tooltip />
+          <el-table-column label="变更类型" width="90">
+            <template #default="{ row }">
+              <el-tag :type="{ added:'success', deleted:'danger', modified:'warning' }[row.change_type]" size="small">
+                {{ { added:'新增', deleted:'删除', modified:'修改' }[row.change_type] }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="主机名" min-width="160" show-overflow-tooltip>
+            <template #default="{ row }">{{ parseDedup(row, 0) }}</template>
+          </el-table-column>
+          <el-table-column prop="ip_address" label="IP 地址" width="140" />
+          <el-table-column label="变更详情" min-width="300" show-overflow-tooltip>
+            <template #default="{ row }">{{ detailText(row) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <div class="pagination-wrap" v-if="isPaginated && total > 0">
+          <el-pagination v-model:current-page="page" :page-size="size" :total="total"
+            layout="total, prev, pager, next" @current-change="fetchData" />
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -267,6 +324,7 @@ const switchOptions = ref([])
 const vcenterOptions = ref([])
 const f5Options = ref([])
 const zdnsOptions = ref([])
+const qaxOptions = ref([])
 const dateRange = ref(null)
 const filters = reactive({ ip: '', mac: '', change_type: '', switch_id: null, source_id: null, vm_name: '' })
 
@@ -341,6 +399,9 @@ const fieldLabels = {
   member_state: '成员状态', domain_name: '域名',
   ip_category: 'IP类别', network_type: '网络类型', ttl: 'TTL',
   view_name: '视图', zone_name: '区', is_enabled: '启用',
+  ipv4: 'IP', intranet_ip: '内网IP', operation_system: '操作系统',
+  cpu: 'CPU', memory: '内存', disk_size_str: '磁盘',
+  online_status: '在线状态', run_status: '运行状态', machine_group: '分组',
 }
 
 function resetFilters() {
@@ -369,7 +430,7 @@ async function fetchData() {
       if (filters.change_type) params.change_type = filters.change_type
       if (filters.vm_name) params.vm_name = filters.vm_name
       if (filters.switch_id && activeTab.value === 'switch') params.switch_id = filters.switch_id
-      if (filters.source_id && ['vcenter', 'f5', 'zdns'].includes(activeTab.value))
+      if (filters.source_id && ['vcenter', 'f5', 'zdns', 'qax'].includes(activeTab.value))
         params.source_id = filters.source_id
       if (dateRange.value) {
         params.start_date = dateRange.value[0]
@@ -398,6 +459,10 @@ async function fetchDevices() {
   try {
     const { data } = await api.get('/zdns', { params: { size: 100 } })
     zdnsOptions.value = data.items || []
+  } catch { /* handled */ }
+  try {
+    const { data } = await api.get('/qax', { params: { size: 100 } })
+    qaxOptions.value = data.items || []
   } catch { /* handled */ }
 }
 
