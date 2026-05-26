@@ -45,7 +45,8 @@
               @keyup.enter="fetchServers" @clear="fetchServers" />
             <el-button type="primary" @click="fetchServers">查询</el-button>
           </div>
-          <el-table :data="servers" stripe v-loading="loading" style="width:100%;" @expand-change="onExpandChange">
+          <el-table ref="serversTable" :data="servers" stripe v-loading="loading" style="width:100%;"
+            :row-key="(r) => r.id" @expand-change="onExpandChange">
             <template #empty>
               <el-empty description="暂无服务器数据，请先触发扫描" :image-size="60" />
             </template>
@@ -100,7 +101,11 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="machine_name" label="名称" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="machine_name" label="名称" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="server-name-link" @click="toggleExpand(row)">{{ row.machine_name }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="ipv4" label="IPv4" width="130" />
             <el-table-column prop="intranet_ip" label="内网 IP" width="130" />
             <el-table-column prop="operation_system" label="操作系统" min-width="160" show-overflow-tooltip />
@@ -148,6 +153,7 @@ const device = ref(null)
 const scanning = ref(false)
 const activeTab = ref('servers')
 
+const serversTable = ref(null)
 const servers = ref([])
 const loading = ref(false)
 const page = ref(1)
@@ -159,6 +165,11 @@ onMounted(async () => {
   try { device.value = await getQAXDevice(deviceId) } catch { /* 404 */ }
   fetchServers()
 })
+
+function toggleExpand(row) {
+  if (!serversTable.value) return
+  serversTable.value.toggleRowExpansion(row)
+}
 
 async function fetchServers() {
   loading.value = true
@@ -261,6 +272,10 @@ async function fetchDevice() {
   display: flex;
   justify-content: center;
   margin-top: 8px;
+}
+.server-name-link {
+  color: var(--color-primary);
+  cursor: pointer;
 }
 .pagination-wrap {
   display: flex;
