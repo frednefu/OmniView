@@ -163,51 +163,56 @@ async def _run_qax_scan_async(device_id: int, scan_log_id: int | None = None):
     3. 写入服务器基本信息（短事务）
     4. 逐台采集详情并独立写入（每台服务器一个短事务）
     5. 写入变更历史 + 更新设备状态
+
+    注意：最外层 try/except 确保无论何种异常都能更新设备状态和扫描日志。
     """
     from app.models.scan_log import ScanLog, ScanStatus
     from app.services.history_service import detect_qax_changes
 
     start_time = datetime.now()
-
-    # 阶段 0：验证设备 + 快照旧数据
-    db = SessionLocal()
-    device = None
-    old_by_key = {}
-    device_name = ""
-    try:
-        device = db.query(QianXinDevice).get(device_id)
-        if not device or not device.enabled:
-            _update_scan_log_failed(scan_log_id, 0, "设备不存在或已禁用")
-            return
-
-        device_name = device.name
-        device.last_scan_status = "running"
-        device.last_scan_error = None
-        db.commit()
-
-        # 快照旧服务器（变更历史 diff 用）
-        old_rows = db.query(QianXinServer).filter(
-            QianXinServer.device_id == device_id
-        ).all()
-        for r in old_rows:
-            old_by_key[(r.machine_uuid, device_id)] = r
-    finally:
-        db.close()
+    logger.info("椒图扫描开始 device_id=%s scan_log_id=%s", device_id, scan_log_id)
 
     server_count = 0
     detail_success = 0
     detail_failed = 0
     scan_success = False
     error_msg = None
+    old_by_key = {}
+    device_name = ""
+    device = None
 
     try:
+        # 阶段 0：验证设备 + 快照旧数据
+        db = SessionLocal()
+        try:
+            device = db.query(QianXinDevice).get(device_id)
+            if not device or not device.enabled:
+                _update_scan_log_failed(scan_log_id, 0, "设备不存在或已禁用")
+                logger.warning("椒图扫描跳过 device_id=%s 设备不存在或已禁用", device_id)
+                return
+
+            device_name = device.name
+            device.last_scan_status = "running"
+            device.last_scan_error = None
+            db.commit()
+
+            old_rows = db.query(QianXinServer).filter(
+                QianXinServer.device_id == device_id
+            ).all()
+            for r in old_rows:
+                old_by_key[(r.machine_uuid, device_id)] = r
+            logger.info("椒图扫描阶段0完成 device=%s 旧记录=%s", device_name, len(old_by_key))
+        finally:
+            db.close()
+
         # 阶段 1：通过 API 获取服务器列表（不持有 DB 会话）
         client = QianXinClient(device.host, device.uuid, device.secret)
         loop = asyncio.get_running_loop()
+        logger.info("椒图扫描阶段1开始 device=%s 获取服务器列表...", device_name)
         servers = await loop.run_in_executor(None, client.get_all_servers)
+        logger.info("椒图扫描阶段1完成 device=%s 服务器数量=%s", device_name, len(servers))
 
         if not servers:
-            # 无服务器返回 — 清空旧数据
             _wipe_qax_data(device_id)
             server_count = 0
             scan_success = True
@@ -215,14 +220,18 @@ async def _run_qax_scan_async(device_id: int, scan_log_id: int | None = None):
             _write_qax_history(device_id, device_name, old_by_key, {})
             if scan_log_id:
                 _update_scan_log(scan_log_id, True, 0, None)
+            logger.info("椒图扫描完成 device=%s 无服务器返回", device_name)
             return
 
-        # 阶段 2：写入服务器基本信息（短事务，不混合 API 调用）
+        # 阶段 2：写入服务器基本信息（短事务）
+        logger.info("椒图扫描阶段2开始 device=%s 写入 %s 台服务器...", device_name, len(servers))
         server_map = _write_qax_servers(device_id, servers)
         server_count = len(servers)
+        logger.info("椒图扫描阶段2完成 device=%s 写入完成", device_name)
 
-        # 阶段 3：逐台采集详情（每台服务器独立 DB 会话，避免长期持锁）
-        for s in servers:
+        # 阶段 3：逐台采集详情
+        logger.info("椒图扫描阶段3开始 device=%s 逐台采集详情...", device_name)
+        for idx, s in enumerate(servers):
             machine_uuid = s.get("machineUuid", "")
             machine_name = s.get("machineName", "")
             if not machine_uuid:
@@ -241,46 +250,56 @@ async def _run_qax_scan_async(device_id: int, scan_log_id: int | None = None):
             except Exception as e:
                 detail_failed += 1
                 logger.warning("采集详情失败 server=%s: %s", machine_name, e)
-                # 尝试写入部分数据
                 try:
                     _write_qax_server_details(device_id, server_id, [], [], [])
                 except Exception:
                     pass
 
+            if (idx + 1) % 10 == 0:
+                logger.info("椒图扫描进度 device=%s %s/%s 详情成功=%s 失败=%s",
+                            device_name, idx + 1, server_count, detail_success, detail_failed)
+
+        logger.info("椒图扫描阶段3完成 device=%s 详情成功=%s 失败=%s",
+                    device_name, detail_success, detail_failed)
         scan_success = True
+
     except Exception as e:
         error_msg = str(e)
-        logger.exception("椒图 %s 扫描失败", device.host if device else device_id)
+        logger.exception("椒图扫描失败 device_id=%s: %s", device_id, error_msg)
         try:
             _finalize_scan_failed(device_id, start_time, error_msg)
         except Exception:
             logger.exception("更新椒图设备失败状态出错 device_id=%s", device_id)
     else:
         # 阶段 4：变更历史 + 最终状态
+        logger.info("椒图扫描阶段4开始 device=%s 写入变更历史...", device_name)
         try:
-            new_by_key = {}
             db = SessionLocal()
             try:
                 new_rows = db.query(QianXinServer).filter(
                     QianXinServer.device_id == device_id
                 ).all()
+                new_by_key = {}
                 for r in new_rows:
                     new_by_key[(r.machine_uuid, device_id)] = r
-                detect_qax_changes(db, device_id, device_name, old_by_key, new_by_key)
+                history_count = detect_qax_changes(db, device_id, device_name, old_by_key, new_by_key)
                 db.commit()
+                logger.info("椒图变更历史写入完成 device=%s 变更记录=%s", device_name, history_count)
             finally:
                 db.close()
         except Exception:
             logger.exception("写入椒图变更历史失败 device_id=%s", device_id)
 
         _finalize_scan_success(device_id, start_time, server_count, detail_success, detail_failed)
-        logger.info("椒图 %s 扫描完成，服务器: %s，详情成功: %s，失败: %s，耗时 %ss",
-                    device.host, server_count, detail_success, detail_failed,
-                    round((datetime.now() - start_time).total_seconds(), 1))
+        duration = round((datetime.now() - start_time).total_seconds(), 1)
+        logger.info("椒图扫描完成 device=%s 服务器=%s 详情成功=%s 失败=%s 耗时=%ss",
+                    device_name, server_count, detail_success, detail_failed, duration)
 
-    # 更新扫描日志
+    # 更新扫描日志（无论成功或失败都执行）
     if scan_log_id:
         _update_scan_log(scan_log_id, scan_success, server_count, error_msg)
+        logger.info("椒图扫描日志已更新 scan_log_id=%s success=%s count=%s",
+                    scan_log_id, scan_success, server_count)
 
 
 def _wipe_qax_data(device_id: int):
@@ -465,8 +484,22 @@ async def trigger_qax_scan(device: QianXinDevice, triggered_by: str = "manual") 
         scan_log_id = scan_log.id
     finally:
         db.close()
-    asyncio.create_task(_run_qax_scan_async(device.id, scan_log_id))
+
+    task = asyncio.create_task(_run_qax_scan_async(device.id, scan_log_id))
+    task.add_done_callback(_on_scan_task_done)
     return scan_log_id
+
+
+def _on_scan_task_done(task: asyncio.Task):
+    """后台扫描任务完成回调，用于捕获未处理异常。"""
+    try:
+        exc = task.exception()
+        if exc:
+            logger.error("椒图后台扫描任务异常终止: %s", exc, exc_info=exc)
+        else:
+            logger.info("椒图后台扫描任务正常完成")
+    except asyncio.CancelledError:
+        logger.warning("椒图后台扫描任务被取消")
 
 
 async def test_qax_connection(host: str, uuid: str, secret: str) -> dict:
