@@ -5,21 +5,24 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.asset_profile import AssetProfileResponse, AssetProfileStats, AssetProfileRow
 from app.services.asset_profile_service import build_asset_profile, compute_stats, filter_sort_paginate, get_network_names, get_source_names
+from app.services.cache_service import get_json, set_json
 from app.api.deps import get_current_user
 from app.utils.export import export_to_excel
 
 router = APIRouter(prefix="/asset-profile", tags=["资产画像"])
 
-# 缓存数据（在请求间重用，需要手动刷新）
-_profile_cache: list[dict] | None = None
+ASSET_PROFILE_TTL = 300  # 资产画像缓存 5 分钟
 
 
 def _get_cached_profile(db: Session) -> list[dict]:
-    """获取缓存的资产画像数据。每次请求重新构建以保证数据最新。"""
-    global _profile_cache
-    # 每次请求都重建，保证数据实时性
-    _profile_cache = build_asset_profile(db)
-    return _profile_cache
+    """获取缓存的资产画像数据，缓存命中直接返回，未命中则构建并缓存。"""
+    cached = get_json("asset_profile:rows")
+    if cached is not None:
+        return cached
+
+    rows = build_asset_profile(db)
+    set_json("asset_profile:rows", rows, ttl=ASSET_PROFILE_TTL)
+    return rows
 
 
 @router.get("", response_model=AssetProfileResponse)

@@ -27,6 +27,7 @@ from app.schemas.subnet import (
 )
 from app.api.deps import get_current_user
 from app.services.subnet_service import get_subnet_utilization, get_available_ips, get_occupied_ips
+from app.services.cache_service import get_json, set_json
 
 _IP_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
 
@@ -204,8 +205,16 @@ def _normalize_cpu_types(rows) -> list:
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 
 
+DASHBOARD_STATS_TTL = 30  # 仪表盘统计缓存 30 秒
+
+
 @router.get("/stats", response_model=DashboardStats)
 def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    # Redis 缓存命中直接返回
+    cached = get_json("dashboard:stats")
+    if cached is not None:
+        return DashboardStats(**cached)
+
     # ── 交换机 ──
     switch_count = db.query(func.count(Switch.id)).filter(Switch.is_active == True).scalar() or 0
     total_ips = db.query(func.count(func.distinct(ScanResult.ip_address))).filter(
@@ -455,7 +464,7 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
         ScanLog.status == ScanStatus.failed
     ).scalar() or 0
 
-    return DashboardStats(
+    result = DashboardStats(
         switch_count=switch_count,
         total_ips=total_ips,
         total_macs=total_macs,
@@ -470,6 +479,8 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
         last_scan_success=last_scan_success,
         last_scan_failed=last_scan_failed,
     )
+    set_json("dashboard:stats", result.model_dump(), ttl=DASHBOARD_STATS_TTL)
+    return result
 
 
 @router.get("/subnet-utilization", response_model=list[SubnetUtilization])
