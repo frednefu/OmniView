@@ -166,47 +166,41 @@ channel:scan:list              — 任务列表变更（新增/完成）
 
 ---
 
-### Phase E: Worker 容器化 + 注册认证
+### Phase E: Worker 容器化 + 注册认证 ✅
 
-**新增表：**
+> **已提交** `b1584a6`
 
-```sql
-CREATE TABLE scan_workers (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    worker_name VARCHAR(64) UNIQUE,
-    token_hash VARCHAR(128),
-    ip_address VARCHAR(45),
-    status ENUM('online','offline','busy'),
-    capabilities JSON,
-    current_tasks INT DEFAULT 0,
-    max_tasks INT DEFAULT 4,
-    last_heartbeat DATETIME,
-    registered_at DATETIME,
-    version VARCHAR(32)
-);
-```
+> **解决核心问题：Worker 需单独命令行启动，无容器化部署方案，无注册监控机制**
 
-**后端改动：**
+**数据库改动：**
+
+- 新增 `scan_workers` 表：`worker_name`（唯一）、`token_hash`、`ip_address`、`status`（online/offline/busy）、`capabilities`（JSON）、`current_tasks`、`max_tasks`、`version`、`last_heartbeat`
+
+**后端核心文件：**
 
 | 文件 | 内容 |
 |------|------|
-| `backend/app/models/scan_worker.py` | Worker 模型 |
-| `backend/app/api/workers.py` | Worker 注册/心跳/注销 API |
-| `backend/app/middleware/worker_auth.py` | Worker Token 验证中间件 |
+| `backend/app/models/scan_worker.py` | Worker 数据模型（11 字段，独立 DB 会话） |
+| `backend/app/schemas/worker.py` | Pydantic 模式：注册/心跳/注销请求与响应 |
+| `backend/app/api/worker_auth.py` | Worker 共享密钥认证依赖（`secrets.compare_digest` 时序安全比较） |
+| `backend/app/api/workers.py` | 6 个 API 端点：register/heartbeat/deregister（Worker 认证）+ list/get/delete（管理员认证） |
+| `backend/app/config.py` | 新增 `worker_token` 配置项 |
 
 **Docker 相关：**
 
 | 文件 | 内容 |
 |------|------|
-| `docker-compose.worker.yml` | Worker 独立部署模板 |
-| `backend/Dockerfile.worker` | Worker 镜像（Celery Worker + 全部扫描能力） |
+| `backend/Dockerfile.worker` | Celery Worker 镜像（并发 4，1h 硬超时，55min 软超时） |
+| `docker-compose.worker.yml` | Worker 独立部署模板（mysql + redis + worker），支持 `--scale worker=N` 水平扩容 |
 
 **Worker 安全认证：**
 
 ```
-Worker 启动 → 携带 TOKEN 向 API 注册
-API 验证 TOKEN + IP 白名单 → 返回 Worker ID
-后续通信 Header: Authorization: Bearer <worker-token>
+Worker 启动 → 携带 WORKER_TOKEN 向 API 注册（幂等：同名重新注册即更新）
+API secrets.compare_digest() 时序安全比较 → 创建/更新 scan_workers 记录 → 返回 Worker ID
+Worker 定期发送心跳 POST /api/workers/{id}/heartbeat
+Worker 关闭时发送 deregister → 标记 offline
+管理面板可查看所有 Worker 在线状态/当前任务/并发数
 ```
 
 ---
@@ -257,7 +251,7 @@ API 验证 TOKEN + IP 白名单 → 返回 Worker ID
 | Phase B: Celery + Redis 异步化 | ✅ 已完成 | `147873e` |
 | Phase C: 扫描步骤日志 + 监控面板 | ✅ 已完成 | `f172f61` |
 | Phase D: WebSocket 进度推送 + 前端稳定性修复 | ✅ 已完成 | `716a6c0`, `0ea20d7` |
-| Phase E: Worker 容器化 | 🔲 下一步 | — |
-| Phase F: Worker 管理面板 | 🔲 待开发 | — |
+| Phase E: Worker 容器化 | ✅ 已完成 | `b1584a6` |
+| Phase F: Worker 管理面板 | 🔲 下一步 | — |
 | Phase G: Redis 缓存 | 🔲 待开发 | — |
 | Phase H: 远程部署 | 🔲 远期规划 | — |

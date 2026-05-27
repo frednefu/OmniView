@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-this-to-a-random-string"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480
+    worker_token: str = "change-me-to-a-secure-random-string"
 
     model_config = {
         "env_file": ".env",

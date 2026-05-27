@@ -36,6 +36,12 @@ async def lifespan(app: FastAPI):
         ("last_routes_found", "INTEGER DEFAULT 0"),
         ("last_scan_error", "TEXT"),
     ])
+    _migrate_columns("scan_workers", [
+        ("capabilities", "JSON"),
+        ("current_tasks", "INTEGER DEFAULT 0"),
+        ("max_tasks", "INTEGER DEFAULT 4"),
+        ("version", "VARCHAR(32) DEFAULT ''"),
+    ])
     start_scheduler()
     yield
     shutdown_scheduler()

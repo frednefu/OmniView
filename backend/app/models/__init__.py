@@ -12,5 +12,6 @@ from app.models.datastore import Datastore
 from app.models.f5 import F5Device, F5VirtualServer, F5PoolMember, F5Rule, F5ApplicationMap
 from app.models.zdns import ZDNSDevice, ZDNSRecord, ZDNSDomainMap
 from app.models.qax import QianXinDevice, QianXinServer, QianXinPort, QianXinProcess, QianXinSoftware
+from app.models.scan_worker import ScanWorker
 
-__all__ = ["User", "Switch", "ScanResult", "RouteTable", "ScanLog", "ScanStep", "Subnet", "History", "VCenter", "VMInventory", "EsxiHost", "Datastore", "F5Device", "F5VirtualServer", "F5PoolMember", "F5Rule", "F5ApplicationMap", "ZDNSDevice", "ZDNSRecord", "ZDNSDomainMap", "QianXinDevice", "QianXinServer", "QianXinPort", "QianXinProcess", "QianXinSoftware"]
+__all__ = ["User", "Switch", "ScanResult", "RouteTable", "ScanLog", "ScanStep", "Subnet", "History", "VCenter", "VMInventory", "EsxiHost", "Datastore", "F5Device", "F5VirtualServer", "F5PoolMember", "F5Rule", "F5ApplicationMap", "ZDNSDevice", "ZDNSRecord", "ZDNSDomainMap", "QianXinDevice", "QianXinServer", "QianXinPort", "QianXinProcess", "QianXinSoftware", "ScanWorker"]

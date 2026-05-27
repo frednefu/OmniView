@@ -1,0 +1,65 @@
+# Worker 独立部署模板 — 启动 Celery Worker 容器，连接已有 MySQL + Redis
+#
+# 启动: docker-compose -f docker-compose.worker.yml up -d
+# 停止: docker-compose -f docker-compose.worker.yml down
+# 扩容: docker-compose -f docker-compose.worker.yml up -d --scale worker=3
+#
+# 环境变量需在 .env 文件中配置:
+#   DATABASE_URL  — MySQL 连接串
+#   REDIS_URL     — Redis 连接串（Celery broker）
+#   WORKER_TOKEN  — Worker 注册认证令牌（与 API 服务器配置一致）
+
+services:
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    container_name: omniview-worker
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      WORKER_TOKEN: ${WORKER_TOKEN}
+    volumes:
+      - ./backend:/app
+      - ./switchReader:/app/switchReader
+
+  mysql:
+    image: mysql:8.0.40
+    container_name: omniview-mysql
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ipam
+      MYSQL_USER: ipam
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:alpine
+    container_name: omniview-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
