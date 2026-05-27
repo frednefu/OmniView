@@ -1,5 +1,6 @@
 """扫描步骤追踪辅助 — 每个函数独立管理 DB 会话，实时提交，供 API 轮询/WebSocket 推送。"""
 import logging
+import time
 from datetime import datetime
 
 from app.database import SessionLocal
@@ -7,9 +8,18 @@ from app.models.scan_log import ScanLog, ScanStep, StepStatus
 
 logger = logging.getLogger(__name__)
 
+# 节流：同一 scan_log_id 两次通知间隔至少 1.5 秒，避免高频写入时 DB/Redis/W前端 被淹没
+_notify_last: dict[int, float] = {}
+_NOTIFY_THROTTLE = 1.5
+
 
 def _notify(scan_log_id: int):
-    """DB 变更后通知 WebSocket 订阅者。"""
+    """DB 变更后通知 WebSocket 订阅者（节流：最少间隔 1.5s）。"""
+    now = time.time()
+    last = _notify_last.get(scan_log_id, 0)
+    if now - last < _NOTIFY_THROTTLE:
+        return
+    _notify_last[scan_log_id] = now
     try:
         from app.services.progress_broker import publish_scan_update
         publish_scan_update(scan_log_id)
