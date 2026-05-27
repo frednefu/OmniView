@@ -15,6 +15,7 @@ from celery.signals import worker_ready, worker_shutdown, task_prerun, task_post
 from kombu import Queue
 
 from app.config import settings
+from app.version import get_version
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def _register_worker():
     """向 API 服务器注册当前 Worker。"""
     api_base = os.environ.get("API_BASE_URL", "http://backend:8000")
     worker_name = os.environ.get("WORKER_NAME", socket.gethostname())
-    version = os.environ.get("WORKER_VERSION", "2.0.0")
+    version = os.environ.get("WORKER_VERSION") or get_version()
     worker_token = settings.worker_token
     concurrency = int(os.environ.get("WORKER_CONCURRENCY", "4"))
     task_types = _WORKER_TASK_TYPES

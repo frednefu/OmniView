@@ -89,7 +89,7 @@
       </el-menu>
 
       <div class="sidebar-footer" v-show="!isCollapse">
-        <div class="version">OmniView v2.0</div>
+        <div class="version">OmniView v{{ appVersion }}</div>
       </div>
     </el-aside>
 
@@ -155,15 +155,17 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/store/auth'
+import { getVersion } from '@/api/version'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const isCollapse = ref(false)
 const searchText = ref('')
+const appVersion = ref('1.0.0')
 
 const pageTitle = computed(() => {
   const titles = {
@@ -200,6 +202,13 @@ function handleLogout() {
   authStore.logout()
   router.push('/login')
 }
+
+onMounted(async () => {
+  try {
+    const data = await getVersion()
+    appVersion.value = data.version
+  } catch { /* 使用默认值 */ }
+})
 </script>
 
 <style scoped>

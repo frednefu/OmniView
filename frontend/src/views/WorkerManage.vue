@@ -122,6 +122,7 @@
 <script setup>
 import { reactive, ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { getWorkers, registerWorker, deleteWorker } from '@/api/workers'
+import { getVersion } from '@/api/version'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const workers = ref([])
@@ -137,12 +138,14 @@ const autoRefresh = ref(true)
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const formRef = ref(null)
-const form = reactive({ worker_name: '', version: '2.0.0', task_types: ['switch', 'vcenter', 'f5', 'zdns', 'zdns_ip', 'qax'] })
+const form = reactive({ worker_name: '', version: '1.0.0', task_types: ['switch', 'vcenter', 'f5', 'zdns', 'zdns_ip', 'qax'] })
 const formRules = {
   worker_name: [{ required: true, message: '请输入 Worker 名称', trigger: 'blur' }],
 }
 
 let refreshTimer = null
+
+const appVersion = ref('1.0.0')
 
 const onlineCount = computed(() => workers.value.filter(w => w.status === 'online').length)
 
@@ -225,7 +228,7 @@ async function handleDelete(row) {
 
 function resetForm() {
   form.worker_name = ''
-  form.version = '2.0.0'
+  form.version = appVersion.value
   form.task_types = ['switch', 'vcenter', 'f5', 'zdns', 'zdns_ip', 'qax']
   formRef.value?.resetFields()
 }
@@ -263,7 +266,15 @@ function stopPolling() {
 
 watch(autoRefresh, (val) => { if (val) { startPolling() } else { stopPolling() } })
 
-onMounted(() => { fetchList(); startPolling() })
+async function loadVersion() {
+  try {
+    const data = await getVersion()
+    appVersion.value = data.version
+    form.version = data.version
+  } catch { /* 使用默认值 */ }
+}
+
+onMounted(() => { fetchList(); startPolling(); loadVersion() })
 onUnmounted(stopPolling)
 
 if (import.meta.hot) { import.meta.hot.decline() }

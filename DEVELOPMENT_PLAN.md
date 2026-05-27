@@ -205,11 +205,11 @@ Worker 关闭时发送 deregister → 标记 offline
 
 ---
 
-### Phase F: Worker 管理面板
+### Phase F: Worker 管理面板 + 调度增强 ✅
 
-> **已提交** `337b7ef`
+> **已提交** `337b7ef`、`3132d0b`
 
-> **解决核心问题：管理员无法在前端查看和管理 Worker 节点**
+> **解决核心问题：管理员无法在前端查看和管理 Worker 节点；任务队列路由与并发计数不准确**
 
 **前端核心文件：**
 
@@ -224,20 +224,69 @@ Worker 关闭时发送 deregister → 标记 offline
 |------|------|
 | `backend/app/api/worker_auth.py` | 新增 `verify_worker_or_admin` 双认证依赖（Worker Token → Admin JWT 回退） |
 | `backend/app/api/workers.py` | register 端点改用双认证，Admin 手动注册时存储 WORKER_TOKEN hash 作为凭证 |
-| `backend/app/tasks/celery_app.py` | Celery `worker_ready` 信号自动注册 + `worker_shutdown` 信号自动注销 |
+| `backend/app/tasks/celery_app.py` | Celery `worker_ready` 信号自动注册 + `worker_shutdown` 信号自动注销；`multiprocessing.Value` 跨进程并发计数器；6 队列精确路由 + 能力订阅；SIGTERM 即时注销 |
+| `backend/app/tasks/scan_tasks.py` | 所有 6 个 task 新增 `_record_worker()` 记录执行节点到 scan_log |
+| `backend/app/models/scan_log.py` | 新增 `worker_name` 字段，追溯扫描由哪个 Worker 执行 |
+| `backend/requirements.txt` | 添加 `requests`、`urllib3` 依赖（椒图扫描器） |
+
+**调度修复：**
+- 修复 Worker 并发计数始终为 0：prefork 池子进程变量对主进程不可见 → 改用 `multiprocessing.Value('i', 0)` 共享内存
+- 修复 zdns_ip 任务永久排队：Worker 能力列表缺少 zdns_ip → 默认值补齐 6 种类型
+- 修复 qax 扫描崩溃：`ModuleNotFoundError: No module named 'urllib3'` → 补全依赖
+- 修复 Python 字节码缓存导致新代码不生效 → 清理 `__pycache__`
+
+**前端增强：**
+
+| 文件 | 内容 |
+|------|------|
+| `frontend/src/views/ScanMonitor.vue` | 新增 Worker 执行节点显示；zdns_ip 更名为"IP扫描"；统一 6 种技能颜色（与资产画像色块一致） |
+| `frontend/src/views/ScanLogs.vue` | 新增"执行节点"列；zdns_ip/qax 加入筛选下拉；统一技能颜色 |
+| `frontend/src/views/WorkerManage.vue` | 技能标签统一颜色和名称（含"IP扫描"）；注册表单能力勾选同步更新 |
+| `frontend/src/views/Dashboard.vue` | 图表颜色统一为 6 种技能配色 |
 
 **已实现功能：**
 - Worker 容器启动后自动向 API 注册（Celery 信号驱动）
-- Worker 容器关闭时自动注销
+- Worker 容器关闭时自动注销（SIGTERM + worker_shutdown 双保障）
 - 管理员可手动注册 Worker（名称、版本、扫描能力勾选）
 - 表格展示：状态彩色标签、能力标签、并发数、心跳相对时间、超时红色警告
 - 状态下拉筛选 + 名称搜索 + 分页
 - 5秒自动刷新 + 开关
 - Admin 专属菜单（侧边栏 `v-if="authStore.isAdmin"`）
+- 任务队列精确路由（6 个数据源 → 6 个独立 Redis 队列）
+- Worker 能力订阅（`WORKER_TASK_TYPES` 控制队列订阅范围）
+- 跨进程并发计数器（`multiprocessing.Value` 共享内存）
+- 扫描日志记录执行 Worker 名称（前端可追溯）
+- 统一 6 种技能颜色和名称（全前端一致）
 
 ---
 
-### Phase G: Redis 缓存优化
+### Phase G: 版本管理 ✅
+
+> **解决核心问题：前后端 + Worker 版本号分散硬编码，缺乏统一管理**
+
+**实现方案：**
+
+| 组件 | 改动 |
+|------|------|
+| `VERSION` 文件 | 项目根目录 + `backend/VERSION`，当前版本 `1.0.0` |
+| `backend/app/version.py` | `get_version()` 读取 VERSION 文件，支持 `OMNIVIEW_VERSION` 环境变量覆盖 |
+| `backend/app/api/version.py` | `GET /api/version` 公开端点 |
+| `backend/app/main.py` | FastAPI `version` 参数从文件读取 |
+| `backend/app/tasks/celery_app.py` | Worker 注册版本从 VERSION 文件读取 |
+| `frontend/src/api/version.js` | 前端版本 API 封装 |
+| `frontend/src/components/AppLayout.vue` | 侧边栏底部动态显示版本号 |
+| `frontend/src/views/WorkerManage.vue` | 注册表单版本号自动填充当前版本 |
+
+**版本规则：**
+| 操作 | 版本变化 | 示例 |
+|------|---------|------|
+| 代码修改 | PATCH +1 | 1.0.0 → 1.0.1 |
+| Git 提交 | MINOR +1 | 1.0.0 → 1.1.0 |
+| 重大功能升级 | MAJOR +1 | 1.0.0 → 2.0.0 |
+
+---
+
+### Phase H: Redis 缓存优化
 
 - 资产画像关联计算缓存（5 分钟 TTL）
 - 仪表盘统计缓存（30 秒 TTL）
@@ -245,7 +294,7 @@ Worker 关闭时发送 deregister → 标记 offline
 
 ---
 
-### Phase H: 远程部署 Worker（远期）
+### Phase I: 远程部署 Worker（远期）
 
 - API 通过 SSH 连接目标服务器，执行 `docker compose up -d`
 - 或对接 Docker Remote API / Portainer
@@ -273,6 +322,7 @@ Worker 关闭时发送 deregister → 标记 offline
 | Phase C: 扫描步骤日志 + 监控面板 | ✅ 已完成 | `f172f61` |
 | Phase D: WebSocket 进度推送 + 前端稳定性修复 | ✅ 已完成 | `716a6c0`, `0ea20d7` |
 | Phase E: Worker 容器化 | ✅ 已完成 | `b1584a6` |
-| Phase F: Worker 管理面板 | ✅ 已完成 | `337b7ef` |
-| Phase G: Redis 缓存 | 🔲 下一步 | — |
-| Phase H: 远程部署 | 🔲 远期规划 | — |
+| Phase F: Worker 管理面板 + 调度增强 | ✅ 已完成 | `337b7ef`, `3132d0b` |
+| Phase G: 版本管理 | ✅ 已完成 | — |
+| Phase H: Redis 缓存 | 🔲 下一步 | — |
+| Phase I: 远程部署 | 🔲 远期规划 | — |

@@ -7,6 +7,7 @@ from app.database import engine, Base
 from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore
 from app.api.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
+from app.version import get_version
 
 
 def _migrate_columns(table_name: str, columns: list[tuple[str, str]]):
@@ -47,7 +48,7 @@ async def lifespan(app: FastAPI):
     shutdown_scheduler()
 
 
-app = FastAPI(title="OmniView API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="OmniView API", version=get_version(), lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

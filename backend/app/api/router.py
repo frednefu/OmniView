@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api import auth, switches, results, scan_logs, dashboard, subnets, search, history, users, vcenters, f5, zdns, qax, asset_profile, workers
+from app.api import auth, switches, results, scan_logs, dashboard, subnets, search, history, users, vcenters, f5, zdns, qax, asset_profile, workers, version
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
@@ -17,3 +17,4 @@ api_router.include_router(search.router)
 api_router.include_router(history.router)
 api_router.include_router(asset_profile.router)
 api_router.include_router(workers.router)
+api_router.include_router(version.router)
