@@ -11,6 +11,28 @@ from app.models.department import Department
 router = APIRouter(prefix="/assets", tags=["信息资产管理"])
 
 
+def _get_sub_dept_ids(db: Session, dept_id: int) -> list[int]:
+    """获取部门及其所有下级部门 ID 列表。"""
+    dept = db.execute(text("SELECT dwbm FROM departments WHERE id=:id"), {"id": dept_id}).fetchone()
+    if not dept:
+        return [dept_id]
+    all_depts = db.execute(text("SELECT id, dwbm, lsdwh FROM departments")).fetchall()
+    children_map = {}
+    for d in all_depts:
+        children_map.setdefault(d.lsdwh or "__root__", []).append(d.id)
+
+    result = [dept_id]
+    def collect(dwbm):
+        for cid in children_map.get(dwbm, []):
+            if cid not in result:
+                result.append(cid)
+                child = next((d for d in all_depts if d.id == cid), None)
+                if child:
+                    collect(child.dwbm)
+    collect(dept.dwbm)
+    return result
+
+
 def _should_skip_domain(name: str) -> bool:
     """排除 in-addr.arpa 等反向解析域名。"""
     if not name:
@@ -359,14 +381,16 @@ def get_dept_vms(
             "WHERE v.department_id IS NULL OR v.claim_status = 'unlinked'"
         ))
     else:
+        sub_ids = _get_sub_dept_ids(db, dept_id)
+        placeholders = ",".join(str(s) for s in sub_ids)
         q = db.execute(text(
-            "SELECT v.*, d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
-            "vc.name as vcenter_name FROM vm_inventory v "
-            "LEFT JOIN departments d ON v.department_id = d.id "
-            "LEFT JOIN users u ON v.owner_user_id = u.id "
-            "LEFT JOIN vcenters vc ON v.vcenter_id = vc.id "
-            "WHERE v.department_id = :did"
-        ), {"did": dept_id})
+            f"SELECT v.*, d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
+            f"vc.name as vcenter_name FROM vm_inventory v "
+            f"LEFT JOIN departments d ON v.department_id = d.id "
+            f"LEFT JOIN users u ON v.owner_user_id = u.id "
+            f"LEFT JOIN vcenters vc ON v.vcenter_id = vc.id "
+            f"WHERE v.department_id IN ({placeholders})"
+        ))
 
     rows = q.fetchall()
     if visible_depts is not None:
@@ -432,10 +456,12 @@ def get_dept_domains(
     else:
         if visible is not None and dept_id not in visible:
             return {"items": [], "total": 0}
+        sub_ids = _get_sub_dept_ids(db, dept_id)
+        placeholders = ",".join(str(s) for s in sub_ids)
         vm_rows = db.execute(text(
-            "SELECT v.ip_address, v.vm_name, v.id, COALESCE(u.name, u.username) as owner_name FROM vm_inventory v "
-            "LEFT JOIN users u ON v.owner_user_id = u.id WHERE v.department_id = :did"
-        ), {"did": dept_id}).fetchall()
+            f"SELECT v.ip_address, v.vm_name, v.id, COALESCE(u.name, u.username) as owner_name FROM vm_inventory v "
+            f"LEFT JOIN users u ON v.owner_user_id = u.id WHERE v.department_id IN ({placeholders})"
+        )).fetchall()
         vm_ips = set()
         vm_by_ip = {}
         for r in vm_rows:
