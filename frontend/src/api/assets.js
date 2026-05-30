@@ -36,6 +36,10 @@ export function statusMatchOwner() {
   return api.get('/assets/auto-match/status-owner').then((r) => r.data)
 }
 
+export function syncAssets() {
+  return api.post('/assets/sync').then((r) => r.data)
+}
+
 export function claimAssets(data) {
   return api.post('/assets/claim', data).then((r) => r.data)
 }

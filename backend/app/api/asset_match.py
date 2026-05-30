@@ -29,9 +29,10 @@ def _run_match_owner():
         db.commit()
 
         vms = db.execute(text(
-            "SELECT v.id, v.vm_name, v.remark, v.department_id, d.dwmc, d.dwbm FROM vm_inventory v "
-            "LEFT JOIN departments d ON v.department_id = d.id "
-            "WHERE v.department_id IS NOT NULL AND v.owner_user_id IS NULL "
+            "SELECT v.id, v.vm_name, v.remark, a.department_id, d.dwmc, d.dwbm FROM vm_inventory v "
+            "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            "LEFT JOIN departments d ON a.department_id = d.id "
+            "WHERE a.department_id IS NOT NULL AND a.owner_user_id IS NULL "
             "AND v.remark IS NOT NULL AND v.remark != ''"
         )).fetchall()
 
@@ -65,7 +66,9 @@ def _run_match_owner():
             for name in names:
                 user = db.execute(text("SELECT id FROM users WHERE name = :name"), {"name": name}).fetchone()
                 if user:
-                    db.execute(text("UPDATE vm_inventory SET owner_user_id=:u,claimed_by=:u,claimed_at=NOW() WHERE id=:v"), {"u": user.id, "v": v.id})
+                    db.execute(text(
+                        "UPDATE asset_inventory SET owner_user_id=:u, claimed_by=:u, claim_status='manual', claimed_at=NOW() WHERE vm_name=:n"
+                    ), {"u": user.id, "n": v.vm_name})
                     db.commit()
                     matched += 1
                     break
@@ -113,7 +116,10 @@ def _run_match_owner():
                         ), {"u": gh, "p": hash_password(gh), "n": xm, "g": gh, "g2": gender, "e": email if email else None, "ph": phone if phone else None, "m": mobile if mobile else None, "d": v.department_id})
                         db.commit()
                         uid = db.execute(text("SELECT id FROM users WHERE gh=:g"), {"g": gh}).fetchone().id
-                    db.execute(text("UPDATE vm_inventory SET owner_user_id=:u,claimed_by=:u,claimed_at=NOW() WHERE id=:v"), {"u": uid, "v": v.id})
+                    db.execute(text(
+                        "INSERT INTO asset_inventory (vm_name, owner_user_id, claimed_by, claim_status, claimed_at) "
+                        "VALUES (:n, :u, :u, 'manual', NOW()) ON DUPLICATE KEY UPDATE owner_user_id=:u, claimed_by=:u, claim_status='manual', claimed_at=NOW()"
+                    ), {"n": v.vm_name, "u": uid})
                     db.commit()
                     matched += 1
                     break
@@ -236,8 +242,9 @@ def _extract_names(text: str) -> list[str]:
 @router.get("/preview", response_model=AutoMatchPreview)
 def preview_match(db: Session = Depends(get_db), _=Depends(require_admin)):
     vms = db.execute(text(
-        "SELECT id, vm_name, vm_folder FROM vm_inventory "
-        "WHERE (department_id IS NULL OR claim_status = 'unlinked') AND vm_folder IS NOT NULL AND vm_folder != ''"
+        "SELECT v.id, v.vm_name, v.vm_folder FROM vm_inventory v "
+        "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+        "WHERE (a.id IS NULL OR a.claim_status = 'unlinked') AND v.vm_folder IS NOT NULL AND v.vm_folder != ''"
     )).fetchall()
     items = []
     for v in vms:
@@ -250,8 +257,9 @@ def preview_match(db: Session = Depends(get_db), _=Depends(require_admin)):
 @router.post("", response_model=AutoMatchResult)
 def execute_match(db: Session = Depends(get_db), _=Depends(require_admin)):
     vms = db.execute(text(
-        "SELECT id, vm_name, vm_folder FROM vm_inventory "
-        "WHERE (department_id IS NULL OR claim_status = 'unlinked') AND vm_folder IS NOT NULL AND vm_folder != ''"
+        "SELECT v.id, v.vm_name, v.vm_folder FROM vm_inventory v "
+        "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+        "WHERE (a.id IS NULL OR a.claim_status = 'unlinked') AND v.vm_folder IS NOT NULL AND v.vm_folder != ''"
     )).fetchall()
     details = []
     matched = 0
@@ -260,7 +268,11 @@ def execute_match(db: Session = Depends(get_db), _=Depends(require_admin)):
         dept_id, dept_name, seg = _match_folder_to_dept(db, v.vm_folder)
         if dept_id:
             try:
-                db.execute(text("UPDATE vm_inventory SET department_id=:d, claim_status='auto', claimed_at=NOW() WHERE id=:i"), {"d": dept_id, "i": v.id})
+                db.execute(text(
+                    "INSERT INTO asset_inventory (vm_name, department_id, claim_status, claimed_at) "
+                    "VALUES (:n, :d, 'auto', NOW()) "
+                    "ON DUPLICATE KEY UPDATE department_id=:d, claim_status='auto', claimed_at=NOW()"
+                ), {"n": v.vm_name, "d": dept_id})
                 db.commit()
                 matched += 1
                 details.append({"vm_name": v.vm_name, "folder": v.vm_folder, "dept": dept_name, "status": "success"})

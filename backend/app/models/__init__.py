@@ -16,5 +16,6 @@ from app.models.scan_worker import ScanWorker
 from app.models.department import Department
 from app.models.staff_info import StaffInfo
 from app.models.api_config import ApiConfig
+from app.models.asset_inventory import AssetInventory
 
-__all__ = ["User", "Switch", "ScanResult", "RouteTable", "ScanLog", "ScanStep", "Subnet", "History", "VCenter", "VMInventory", "EsxiHost", "Datastore", "F5Device", "F5VirtualServer", "F5PoolMember", "F5Rule", "F5ApplicationMap", "ZDNSDevice", "ZDNSRecord", "ZDNSDomainMap", "QianXinDevice", "QianXinServer", "QianXinPort", "QianXinProcess", "QianXinSoftware", "ScanWorker", "Department", "StaffInfo", "ApiConfig"]
+__all__ = ["User", "Switch", "ScanResult", "RouteTable", "ScanLog", "ScanStep", "Subnet", "History", "VCenter", "VMInventory", "EsxiHost", "Datastore", "F5Device", "F5VirtualServer", "F5PoolMember", "F5Rule", "F5ApplicationMap", "ZDNSDevice", "ZDNSRecord", "ZDNSDomainMap", "QianXinDevice", "QianXinServer", "QianXinPort", "QianXinProcess", "QianXinSoftware", "ScanWorker", "Department", "StaffInfo", "ApiConfig", "AssetInventory"]

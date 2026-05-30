@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
 from app.database import engine, Base
-from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig
+from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory
 from app.api.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 from app.version import get_version
@@ -44,6 +44,19 @@ def _migrate_columns(table_name: str, columns: list[tuple[str, str]]):
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     _drop_created_by_fk()
+    # 迁移 vm_inventory 管理字段到 asset_inventory
+    try:
+        with engine.connect() as conn:
+            cnt = conn.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar()
+            if cnt == 0:
+                conn.execute(text(
+                    "INSERT IGNORE INTO asset_inventory (vm_name, department_id, owner_user_id, claim_status, claimed_by, claimed_at) "
+                    "SELECT vm_name, department_id, owner_user_id, COALESCE(claim_status,'unlinked'), claimed_by, claimed_at "
+                    "FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != ''"
+                ))
+                conn.commit()
+    except Exception:
+        pass
     _migrate_columns("vm_inventory", [("provisioned_gb", "FLOAT"), ("used_gb", "FLOAT")])
     _migrate_columns("datastores", [("mounted_host_count", "INTEGER DEFAULT 0"), ("storage_type", "VARCHAR(16) DEFAULT ''")])
     _migrate_columns("switches", [

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 from app.models.department import Department
 
@@ -119,17 +119,36 @@ def _get_visible_dept_ids(db: Session, user: User) -> set[int] | None:
     return visible
 
 
+@router.post("/sync")
+def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
+    """从 vm_inventory 同步新 VM 到 asset_inventory。"""
+    # 新增的 VM
+    new_rows = db.execute(text(
+        "INSERT IGNORE INTO asset_inventory (vm_name, department_id, owner_user_id, claim_status, claimed_by, claimed_at) "
+        "SELECT v.vm_name, a.department_id, a.owner_user_id, COALESCE(a.claim_status,'unlinked'), a.claimed_by, a.claimed_at "
+        "FROM vm_inventory v LEFT JOIN asset_inventory a2 ON v.vm_name = a2.vm_name "
+        "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name WHERE a2.id IS NULL"
+    ))
+    db.commit()
+    new_count = new_rows.rowcount
+
+    # 总数
+    total = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
+    return {"message": f"同步完成：新增 {new_count} 个 VM，共 {total} 个", "new": new_count, "total": total}
+
+
 @router.get("/tree")
 def get_asset_tree(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # VM 按部门统计
+    # VM 按部门统计（从 asset_inventory）
     vm_counts = {}
-    dept_ips = {}  # department_id → set of IPs
+    dept_ips = {}
     vm_rows = db.execute(text(
-        "SELECT department_id, ip_address FROM vm_inventory "
-        "WHERE department_id IS NOT NULL AND claim_status != 'unlinked'"
+        "SELECT a.department_id, v.ip_address FROM asset_inventory a "
+        "JOIN vm_inventory v ON a.vm_name = v.vm_name "
+        "WHERE a.department_id IS NOT NULL AND a.claim_status != 'unlinked'"
     )).fetchall()
     for r in vm_rows:
         vm_counts[r.department_id] = vm_counts.get(r.department_id, 0) + 1
@@ -162,9 +181,10 @@ def get_asset_tree(
     depts = db.execute(text("SELECT id, dwmc, dwjc, dwbm, lsdwh, pxh FROM departments")).fetchall()
     dept_by_code = {d.dwbm: d for d in depts}
 
-    # 未关联统计
+    # 未关联统计（从 asset_inventory）
     unlinked_vms = db.execute(text(
-        "SELECT COUNT(*) FROM vm_inventory WHERE department_id IS NULL OR claim_status = 'unlinked'"
+        "SELECT COUNT(*) FROM vm_inventory v LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+        "WHERE a.id IS NULL OR a.claim_status = 'unlinked'"
     )).scalar() or 0
     linked_ips = set()
     for ips in dept_ips.values():
@@ -373,23 +393,27 @@ def get_dept_vms(
     visible_depts = _get_visible_dept_ids(db, current_user)
     if dept_id == 0:
         q = db.execute(text(
-            "SELECT v.*, d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
+            "SELECT v.*, a.department_id, a.owner_user_id, a.claim_status, a.claimed_by, a.claimed_at, "
+            "d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
             "vc.name as vcenter_name FROM vm_inventory v "
-            "LEFT JOIN departments d ON v.department_id = d.id "
-            "LEFT JOIN users u ON v.owner_user_id = u.id "
+            "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            "LEFT JOIN departments d ON a.department_id = d.id "
+            "LEFT JOIN users u ON a.owner_user_id = u.id "
             "LEFT JOIN vcenters vc ON v.vcenter_id = vc.id "
-            "WHERE v.department_id IS NULL OR v.claim_status = 'unlinked'"
+            "WHERE a.id IS NULL OR a.claim_status = 'unlinked'"
         ))
     else:
         sub_ids = _get_sub_dept_ids(db, dept_id)
         placeholders = ",".join(str(s) for s in sub_ids)
         q = db.execute(text(
-            f"SELECT v.*, d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
+            f"SELECT v.*, a.department_id, a.owner_user_id, a.claim_status, a.claimed_by, a.claimed_at, "
+            f"d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
             f"vc.name as vcenter_name FROM vm_inventory v "
-            f"LEFT JOIN departments d ON v.department_id = d.id "
-            f"LEFT JOIN users u ON v.owner_user_id = u.id "
+            f"LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            f"LEFT JOIN departments d ON a.department_id = d.id "
+            f"LEFT JOIN users u ON a.owner_user_id = u.id "
             f"LEFT JOIN vcenters vc ON v.vcenter_id = vc.id "
-            f"WHERE v.department_id IN ({placeholders})"
+            f"WHERE a.department_id IN ({placeholders})"
         ))
 
     rows = q.fetchall()

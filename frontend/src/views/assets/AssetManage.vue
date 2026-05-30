@@ -4,7 +4,8 @@
       <h2>信息资产管理</h2>
       <div class="header-right">
         <el-switch v-model="hideEmpty" active-text="隐藏空部门" @change="loadTree" />
-        <el-button @click="showMatchPreview" :loading="previewLoading">自动关联预览</el-button>
+        <el-button type="info" plain @click="handleSync" :loading="syncLoading">同步资产</el-button>
+        <el-button @click="showMatchPreview" :loading="previewLoading">分组预览</el-button>
         <el-button type="primary" @click="handleAutoMatch" :loading="autoMatchLoading">自动分组</el-button>
         <el-button type="success" plain @click="handleMatchOwner" :loading="ownerMatchLoading">匹配负责人</el-button>
         <el-button type="danger" plain @click="handleResetAll">重置关联</el-button>
@@ -253,7 +254,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, WarningFilled, OfficeBuilding } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import { getDepartmentTree } from '@/api/departments'
-import { getAssetTree, getDeptVMs, getDeptDomains, getVMFilters, searchAssets, previewAutoMatch, executeAutoMatch, startMatchOwner, statusMatchOwner, claimAssets, assignAssets, revokeAssets, resetAllAssets } from '@/api/assets'
+import { getAssetTree, getDeptVMs, getDeptDomains, getVMFilters, searchAssets, previewAutoMatch, executeAutoMatch, startMatchOwner, statusMatchOwner, syncAssets, claimAssets, assignAssets, revokeAssets, resetAllAssets } from '@/api/assets'
 import { getUsers } from '@/api/users'
 
 const authStore = useAuthStore()
@@ -339,8 +340,10 @@ async function searchUsers(query) {
   } catch { userOptions.value = [] } finally { userSearching.value = false }
 }
 
+const syncLoading = ref(false)
 const autoMatchLoading = ref(false)
 const ownerMatchLoading = ref(false)
+const previewLoading = ref(false)
 const matchPreviewVisible = ref(false)
 const matchPreviewData = ref({ items: [], total_vms: 0, matched_count: 0 })
 
@@ -474,6 +477,15 @@ async function handleMatchOwner() {
     ownerMatchLoading.value = false
     ElMessage.error('启动任务失败：' + (e?.response?.data?.detail || e?.message || ''))
   }
+}
+
+async function handleSync() {
+  syncLoading.value = true
+  try {
+    const res = await syncAssets()
+    ElMessage.success(res.message)
+    await loadTree()
+  } catch { ElMessage.error('同步失败') } finally { syncLoading.value = false }
 }
 
 async function handleAutoMatch() {

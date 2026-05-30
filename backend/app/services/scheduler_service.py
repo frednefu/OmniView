@@ -152,9 +152,44 @@ def start_scheduler():
             misfire_grace_time=15,
         )
 
+    # 资产同步任务（每 30 分钟）
+    if not scheduler.get_job("asset_sync"):
+        scheduler.add_job(
+            _asset_sync_job,
+            trigger=IntervalTrigger(minutes=30),
+            id="asset_sync",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+
     if not scheduler.running:
         scheduler.start()
         logger.info("定时扫描调度器已启动")
+
+
+def _asset_sync_job():
+    """定时同步 vm_inventory → asset_inventory。"""
+    from sqlalchemy import text
+    db = SessionLocal()
+    try:
+        r = db.execute(text(
+            "INSERT IGNORE INTO asset_inventory (vm_name) SELECT vm_name FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != ''"
+        ))
+        db.commit()
+        if r.rowcount > 0:
+            logger.info(f"资产同步：新增 {r.rowcount} 个 VM")
+    except Exception as e:
+        logger.error(f"资产同步失败：{e}")
+    finally:
+        db.close()
+
+def get_scheduler_status() -> dict:
+    """返回调度器状态。"""
+    jobs = []
+    if scheduler.running:
+        for job in scheduler.get_jobs():
+            jobs.append({"id": job.id, "next_run": str(job.next_run_time) if job.next_run_time else None})
+    return {"running": scheduler.running, "jobs": jobs}
 
 
 def shutdown_scheduler():
