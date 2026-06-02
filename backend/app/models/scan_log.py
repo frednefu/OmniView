@@ -5,6 +5,7 @@ import enum
 
 
 class ScanStatus(str, enum.Enum):
+    queued = "queued"
     running = "running"
     success = "success"
     failed = "failed"

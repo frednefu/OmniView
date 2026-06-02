@@ -27,6 +27,7 @@ _TASK_TYPE_QUEUE = {
     "zdns": "scan:zdns",
     "zdns_ip": "scan:zdns_ip",
     "qax": "scan:qax",
+    "dingjia": "scan:dingjia",
 }
 
 # 任务函数路径 → 队列名路由
@@ -37,6 +38,7 @@ _TASK_ROUTES = {
     "app.tasks.scan_tasks.scan_zdns_task": {"queue": "scan:zdns"},
     "app.tasks.scan_tasks.scan_zdns_ip_task": {"queue": "scan:zdns_ip"},
     "app.tasks.scan_tasks.scan_qax_task": {"queue": "scan:qax"},
+    "app.tasks.scan_tasks.scan_dingjia_task": {"queue": "scan:dingjia"},
 }
 
 # Worker 只订阅自己能力范围内的队列

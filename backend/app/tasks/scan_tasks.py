@@ -127,3 +127,52 @@ def scan_qax_task(self, device_id: int, scan_log_id: int):
     except Exception as e:
         logger.exception("Celery 椒图扫描失败 device_id=%s", device_id)
         raise
+
+
+@celery_app.task(bind=True, max_retries=1, default_retry_delay=60, queue="scan:dingjia")
+def scan_dingjia_task(self, device_id: int, scan_log_id: int):
+    """鼎甲备份扫描任务。"""
+    _record_worker(scan_log_id)
+    from app.services.dingjia_scanner import fetch_backup_data, TZ as DJ_TZ
+    from app.models.dingjia import DingJiaDevice, DingJiaBackupRecord
+    from app.models.scan_log import ScanLog, ScanStatus
+    from datetime import datetime, timezone, timedelta
+
+    db = SessionLocal()
+    try:
+        dev = db.query(DingJiaDevice).get(device_id)
+        if not dev:
+            raise Exception(f"设备不存在: {device_id}")
+        # 更新 scan_log 状态
+        log = db.query(ScanLog).get(scan_log_id)
+        if log:
+            log.status = ScanStatus.running
+            db.commit()
+
+        now_start = datetime.now(DJ_TZ).replace(tzinfo=None)
+        # 更新 started_at 为东八区时间
+        if log:
+            log.started_at = now_start
+            db.commit()
+        records = fetch_backup_data(dev.host, dev.api_key, dev.access_key)
+        db.query(DingJiaBackupRecord).filter(DingJiaBackupRecord.device_id == device_id).delete()
+        for r in records:
+            db.add(DingJiaBackupRecord(device_id=device_id, **r))
+        now_end = datetime.now(DJ_TZ).replace(tzinfo=None)
+        dev.last_scan_status = "success"
+        dev.last_scan_time = now_end
+        dev.last_scan_duration = int((now_end - now_start).total_seconds())
+        if log:
+            log.status = ScanStatus.success
+            log.hosts_found = len(records)
+            log.duration_seconds = (now_end - now_start).total_seconds()
+            log.completed_at = now_end
+        db.commit()
+    except Exception as e:
+        logger.exception("Celery 鼎甲备份扫描失败 device_id=%s", device_id)
+        if 'log' in dir() and log:
+            log.status = ScanStatus.failed; log.error_message = str(e)
+            db.commit()
+        raise
+    finally:
+        db.close()

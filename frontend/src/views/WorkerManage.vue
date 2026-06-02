@@ -158,7 +158,7 @@ function statusLabel(s) {
 }
 
 const _TASK_LABELS = {
-  switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图',
+  switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图', dingjia: '鼎甲',
 }
 
 const _TASK_COLORS = {

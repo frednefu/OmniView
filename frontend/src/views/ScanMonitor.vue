@@ -37,6 +37,7 @@
         <el-option label="ZDNS" value="zdns" />
         <el-option label="IP扫描" value="zdns_ip" />
         <el-option label="椒图" value="qax" />
+        <el-option label="鼎甲备份" value="dingjia" />
       </el-select>
       <el-select v-model="filters.status" placeholder="全部状态" clearable style="width:120px" @change="fetchAll">
         <el-option label="扫描中" value="running" />
@@ -209,12 +210,12 @@ function isQueued(item) {
 }
 
 function sourceColor(type) {
-  const map = { switch: '#06b6d4', vcenter: '#f59e0b', f5: '#10b981', zdns: '#6366f1', zdns_ip: '#8b5cf6', qax: '#ef4444' }
+  const map = { switch: '#06b6d4', vcenter: '#f59e0b', f5: '#10b981', zdns: '#6366f1', zdns_ip: '#8b5cf6', qax: '#ef4444', dingjia: '#ec4899' }
   return map[type] || '#94a3b8'
 }
 
 function sourceLabel(type) {
-  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图' }
+  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图', dingjia: '鼎甲备份' }
   return map[type] || type
 }
 

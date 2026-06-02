@@ -92,6 +92,18 @@ async def lifespan(app: FastAPI):
         ("notes", "VARCHAR(512)"),
         ("gender", "VARCHAR(4)"),
     ])
+    _migrate_columns("dingjia_backup_records", [
+        ("vm_uuid", "VARCHAR(128)"),
+        ("backup_versions", "INTEGER DEFAULT 1"),
+        ("vm_size_gb", "FLOAT"),
+    ])
+    # 更新 scan_logs 表 status 列支持 queued
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE scan_logs MODIFY COLUMN status VARCHAR(16) NOT NULL DEFAULT 'running'"))
+            conn.commit()
+    except Exception:
+        pass
     start_scheduler()
     yield
     shutdown_scheduler()

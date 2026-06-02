@@ -40,6 +40,10 @@
         </el-menu-item>
 
         <div class="menu-group-title" v-show="!isCollapse">资产管理</div>
+        <el-menu-item index="/dingjia">
+          <el-icon><FolderOpened /></el-icon>
+          <span>鼎甲备份管理</span>
+        </el-menu-item>
         <el-menu-item index="/switches">
           <el-icon><Monitor /></el-icon>
           <span>交换机管理</span>
@@ -219,6 +223,7 @@ const pageTitle = computed(() => {
     '/asset-profile': '资产画像',
     '/profile': '个人设置',
     '/search': '搜索结果',
+    '/dingjia': '鼎甲备份管理',
     '/sys/api-config': 'API 配置',
     '/sys/assets': '信息资产管理',
     '/sys/departments': '组织机构管理',

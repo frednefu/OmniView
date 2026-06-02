@@ -134,6 +134,18 @@ const routes = [
         meta: { title: '信息资产管理' },
       },
       {
+        path: 'dingjia',
+        name: 'DingJia',
+        component: () => import('@/views/DingJiaList.vue'),
+        meta: { title: '鼎甲备份管理' },
+      },
+      {
+        path: 'dingjia/:id',
+        name: 'DingJiaDetail',
+        component: () => import('@/views/DingJiaDetail.vue'),
+        meta: { title: '鼎甲备份详情' },
+      },
+      {
         path: 'sys/departments',
         name: 'OrgManage',
         component: () => import('@/views/system/OrgManage.vue'),

@@ -152,6 +152,22 @@ def start_scheduler():
             misfire_grace_time=15,
         )
 
+    # 鼎甲备份扫描任务
+    try:
+        from app.models.dingjia import DingJiaDevice
+        ddb = SessionLocal()
+        dj_devices = ddb.query(DingJiaDevice).filter(DingJiaDevice.is_active == True).all()
+        for d in dj_devices:
+            jid = f"dingjia_{d.id}"
+            if not scheduler.get_job(jid):
+                scheduler.add_job(
+                    _dingjia_scan_job, trigger=IntervalTrigger(seconds=d.scan_interval),
+                    id=jid, args=[d.id], replace_existing=True, misfire_grace_time=60,
+                )
+        ddb.close()
+    except Exception:
+        pass
+
     # 资产同步任务（每 30 分钟）
     if not scheduler.get_job("asset_sync"):
         scheduler.add_job(
@@ -204,6 +220,8 @@ def _job_label(job_id: str) -> str:
         return f"ZDNS扫描-{job_id.split('_',1)[1]}"
     if job_id.startswith("qax_"):
         return f"椒图扫描-{job_id.split('_',1)[1]}"
+    if job_id.startswith("dingjia_"):
+        return f"鼎甲备份扫描-{job_id.split('_',1)[1]}"
     return job_id
 
 
@@ -218,6 +236,29 @@ def _format_interval(secs: int) -> str:
     if secs < 3600: return f"{secs//60}分钟"
     if secs < 86400: return f"{secs//3600}小时"
     return f"{secs//86400}天"
+
+
+def _dingjia_scan_job(device_id: int):
+    """定时执行的鼎甲备份扫描——提交到 Celery 队列。"""
+    db = SessionLocal()
+    try:
+        from app.models.dingjia import DingJiaDevice
+        from app.models.scan_log import ScanLog, ScanStatus, TriggerType
+        dev = db.query(DingJiaDevice).get(device_id)
+        if not dev or not dev.is_active:
+            return
+        from datetime import timezone as dt_tz, timedelta as dt_td
+        tz8 = dt_tz(dt_td(hours=8))
+        scan_log = ScanLog(source_type="dingjia", source_id=device_id, source_name=dev.name,
+                          triggered_by=TriggerType.scheduled, status=ScanStatus.queued,
+                          started_at=datetime.now(tz8).replace(tzinfo=None))
+        db.add(scan_log); db.commit(); db.refresh(scan_log)
+        from app.tasks.scan_tasks import scan_dingjia_task
+        scan_dingjia_task.delay(device_id, scan_log.id)
+    except Exception as e:
+        logger.error(f"鼎甲备份扫描提交失败 device_id={device_id}：{e}")
+    finally:
+        db.close()
 
 
 def get_scheduler_status() -> dict:
