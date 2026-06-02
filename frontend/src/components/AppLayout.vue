@@ -34,10 +34,16 @@
           <el-icon><DataAnalysis /></el-icon>
           <span>资产画像</span>
         </el-menu-item>
-        <el-menu-item index="/sys/assets">
-          <el-icon><DataBoard /></el-icon>
-          <span>信息资产管理</span>
-        </el-menu-item>
+        <el-sub-menu index="/sys/info">
+          <template #title>
+            <el-icon><DataBoard /></el-icon>
+            <span>信息资产管理</span>
+          </template>
+          <el-menu-item index="/sys/assets">信息资产总览</el-menu-item>
+          <el-menu-item index="/sys/info-systems">信息系统维护</el-menu-item>
+          <el-menu-item index="/sys/djdj">等保信息维护</el-menu-item>
+          <el-menu-item index="/sys/icp">ICP备案维护</el-menu-item>
+        </el-sub-menu>
 
         <div class="menu-group-title" v-show="!isCollapse">资产管理</div>
         <el-menu-item index="/dingjia">
@@ -226,6 +232,9 @@ const pageTitle = computed(() => {
     '/dingjia': '鼎甲备份管理',
     '/sys/api-config': 'API 配置',
     '/sys/assets': '信息资产管理',
+    '/sys/info-systems': '信息系统维护',
+    '/sys/djdj': '等保信息维护',
+    '/sys/icp': 'ICP备案维护',
     '/sys/departments': '组织机构管理',
     '/sys/accounts': '账号管理',
     '/sys/workers': 'Worker 管理',

@@ -1,6 +1,8 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from app.database import engine, Base
@@ -92,6 +94,9 @@ async def lifespan(app: FastAPI):
         ("notes", "VARCHAR(512)"),
         ("gender", "VARCHAR(4)"),
     ])
+    _migrate_columns("djdj_records", [
+        ("image_path", "VARCHAR(512)"),
+    ])
     _migrate_columns("dingjia_backup_records", [
         ("vm_uuid", "VARCHAR(128)"),
         ("backup_versions", "INTEGER DEFAULT 1"),
@@ -129,3 +134,7 @@ app.add_websocket_route("/ws/scan-progress", ws_scan_progress)
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+# 静态文件服务（上传文件）
+os.makedirs("uploads/djdj", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

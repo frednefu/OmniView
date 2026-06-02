@@ -134,6 +134,24 @@ const routes = [
         meta: { title: '信息资产管理' },
       },
       {
+        path: 'sys/info-systems',
+        name: 'InfoSystems',
+        component: () => import('@/views/system/InfoSystemList.vue'),
+        meta: { title: '信息系统维护', admin: true },
+      },
+      {
+        path: 'sys/djdj',
+        name: 'DjDjList',
+        component: () => import('@/views/system/DjDjList.vue'),
+        meta: { title: '等保信息维护', admin: true },
+      },
+      {
+        path: 'sys/icp',
+        name: 'IcpList',
+        component: () => import('@/views/system/IcpList.vue'),
+        meta: { title: 'ICP备案维护', admin: true },
+      },
+      {
         path: 'dingjia',
         name: 'DingJia',
         component: () => import('@/views/DingJiaList.vue'),
