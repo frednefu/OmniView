@@ -152,6 +152,12 @@ const routes = [
         meta: { title: 'Worker 管理', admin: true },
       },
       {
+        path: 'sys/scheduler',
+        name: 'SchedulerMonitor',
+        component: () => import('@/views/system/SchedulerMonitor.vue'),
+        meta: { title: '定时任务', admin: true },
+      },
+      {
         path: 'asset-profile',
         name: 'AssetProfile',
         component: () => import('@/views/AssetProfile.vue'),

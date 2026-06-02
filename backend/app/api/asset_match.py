@@ -242,30 +242,34 @@ def _extract_names(text: str) -> list[str]:
 @router.get("/preview", response_model=AutoMatchPreview)
 def preview_match(db: Session = Depends(get_db), _=Depends(require_admin)):
     vms = db.execute(text(
-        "SELECT v.id, v.vm_name, v.vm_folder FROM vm_inventory v "
+        "SELECT v.id, v.vm_name, v.vm_folder, v.resource_pool FROM vm_inventory v "
         "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
-        "WHERE (a.id IS NULL OR a.claim_status = 'unlinked') AND v.vm_folder IS NOT NULL AND v.vm_folder != ''"
+        "WHERE (a.id IS NULL OR a.claim_status = 'unlinked') "
+        "AND ((v.vm_folder IS NOT NULL AND v.vm_folder != '') OR (v.resource_pool IS NOT NULL AND v.resource_pool != ''))"
     )).fetchall()
     items = []
     for v in vms:
-        dept_id, dept_name, seg = _match_folder_to_dept(db, v.vm_folder)
+        source = (v.vm_folder or "") if (v.vm_folder or "") else (v.resource_pool or "")
+        dept_id, dept_name, seg = _match_folder_to_dept(db, source)
         if dept_id:
-            items.append(MatchPreviewItem(vm_id=v.id, vm_name=v.vm_name, vm_folder=v.vm_folder, matched_segment=seg, matched_dept_id=dept_id, matched_dept_name=dept_name))
+            items.append(MatchPreviewItem(vm_id=v.id, vm_name=v.vm_name, vm_folder=source, matched_segment=seg, matched_dept_id=dept_id, matched_dept_name=dept_name))
     return AutoMatchPreview(items=items, total_vms=len(vms), matched_count=len(items))
 
 
 @router.post("", response_model=AutoMatchResult)
 def execute_match(db: Session = Depends(get_db), _=Depends(require_admin)):
     vms = db.execute(text(
-        "SELECT v.id, v.vm_name, v.vm_folder FROM vm_inventory v "
+        "SELECT v.id, v.vm_name, v.vm_folder, v.resource_pool FROM vm_inventory v "
         "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
-        "WHERE (a.id IS NULL OR a.claim_status = 'unlinked') AND v.vm_folder IS NOT NULL AND v.vm_folder != ''"
+        "WHERE (a.id IS NULL OR a.claim_status = 'unlinked') "
+        "AND ((v.vm_folder IS NOT NULL AND v.vm_folder != '') OR (v.resource_pool IS NOT NULL AND v.resource_pool != ''))"
     )).fetchall()
     details = []
     matched = 0
     failed = 0
     for v in vms:
-        dept_id, dept_name, seg = _match_folder_to_dept(db, v.vm_folder)
+        source = (v.vm_folder or "") if (v.vm_folder or "") else (v.resource_pool or "")
+        dept_id, dept_name, seg = _match_folder_to_dept(db, source)
         if dept_id:
             try:
                 db.execute(text(
@@ -275,10 +279,10 @@ def execute_match(db: Session = Depends(get_db), _=Depends(require_admin)):
                 ), {"n": v.vm_name, "d": dept_id})
                 db.commit()
                 matched += 1
-                details.append({"vm_name": v.vm_name, "folder": v.vm_folder, "dept": dept_name, "status": "success"})
+                details.append({"vm_name": v.vm_name, "folder": source, "dept": dept_name, "status": "success"})
             except Exception as e:
                 failed += 1
-                details.append({"vm_name": v.vm_name, "folder": v.vm_folder, "dept": dept_name, "status": f"error:{e}"})
+                details.append({"vm_name": v.vm_name, "folder": source, "dept": dept_name, "status": f"error:{e}"})
                 db.rollback()
     logger.info(f"自动分组完成：共{len(vms)}VM，匹配{matched}，失败{failed}")
     return AutoMatchResult(total_vms=len(vms), matched=matched, failed=failed, details=details)

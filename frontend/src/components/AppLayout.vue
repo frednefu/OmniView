@@ -110,16 +110,16 @@
               <el-icon><Cpu /></el-icon>
               <span>Worker 管理</span>
             </el-menu-item>
+            <el-menu-item index="/sys/scheduler">
+              <el-icon><Timer /></el-icon>
+              <span>定时任务</span>
+            </el-menu-item>
           </el-sub-menu>
         </template>
       </el-menu>
 
       <div class="sidebar-footer" v-show="!isCollapse">
         <div class="version">OmniView v{{ appVersion }}</div>
-        <div class="scheduler-status" v-if="authStore.isAdmin">
-          <span class="status-dot" :class="schedulerRunning ? 'dot-green' : 'dot-red'"></span>
-          <span>{{ schedulerRunning ? '调度器运行中' : '调度器未运行' }}</span>
-        </div>
       </div>
     </el-aside>
 
@@ -196,16 +196,6 @@ const authStore = useAuthStore()
 const isCollapse = ref(false)
 const searchText = ref('')
 const appVersion = ref('1.0.0')
-const schedulerRunning = ref(false)
-
-async function checkScheduler() {
-  if (!authStore.isAdmin) return
-  try {
-    const res = await fetch('/api/system/scheduler-status', { headers: { Authorization: `Bearer ${authStore.token}` } })
-    const data = await res.json()
-    schedulerRunning.value = data.running
-  } catch { schedulerRunning.value = false }
-}
 
 const activeMenu = computed(() => {
   if (route.path.startsWith('/sys/')) return route.path
@@ -234,6 +224,7 @@ const pageTitle = computed(() => {
     '/sys/departments': '组织机构管理',
     '/sys/accounts': '账号管理',
     '/sys/workers': 'Worker 管理',
+    '/sys/scheduler': '定时任务',
   }
   return titles[route.path] || ''
 })
@@ -255,8 +246,6 @@ onMounted(async () => {
     const data = await getVersion()
     appVersion.value = data.version
   } catch { /* */ }
-  checkScheduler()
-  setInterval(checkScheduler, 60000)  // 每分钟检查
 })
 </script>
 
@@ -322,13 +311,6 @@ onMounted(async () => {
   color: rgba(255, 255, 255, 0.25);
   letter-spacing: 0.5px;
 }
-.scheduler-status {
-  display: flex; align-items: center; gap: 4px; font-size: 10px;
-  color: rgba(255,255,255,0.2); margin-top: 4px;
-}
-.status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
-.dot-green { background: #67c23a; }
-.dot-red { background: #f56c6c; }
 
 /* ═══════════════ 顶栏 ═══════════════ */
 .navbar {

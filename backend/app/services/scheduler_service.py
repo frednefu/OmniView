@@ -183,13 +183,71 @@ def _asset_sync_job():
     finally:
         db.close()
 
+_JOB_NAMES = {
+    "cleanup_stale_workers": "清理过期Worker",
+    "asset_sync": "资产同步",
+}
+
+
+def _job_label(job_id: str) -> str:
+    if job_id in _JOB_NAMES:
+        return _JOB_NAMES[job_id]
+    if job_id.startswith("scan_"):
+        return f"交换机扫描-{job_id.split('_',1)[1]}"
+    if job_id.startswith("vcenter_"):
+        return f"vCenter扫描-{job_id.split('_',1)[1]}"
+    if job_id.startswith("f5_"):
+        return f"F5扫描-{job_id.split('_',1)[1]}"
+    if job_id.startswith("zdns_ip_"):
+        return f"ZDNS IP扫描-{job_id.split('_',2)[2] if job_id.count('_')>=2 else job_id.split('_',1)[1]}"
+    if job_id.startswith("zdns_"):
+        return f"ZDNS扫描-{job_id.split('_',1)[1]}"
+    if job_id.startswith("qax_"):
+        return f"椒图扫描-{job_id.split('_',1)[1]}"
+    return job_id
+
+
+def _job_interval_secs(job) -> int:
+    if hasattr(job.trigger, 'interval'):
+        return job.trigger.interval.days * 86400 + job.trigger.interval.seconds
+    return 0
+
+
+def _format_interval(secs: int) -> str:
+    if secs < 60: return f"{secs}秒"
+    if secs < 3600: return f"{secs//60}分钟"
+    if secs < 86400: return f"{secs//3600}小时"
+    return f"{secs//86400}天"
+
+
 def get_scheduler_status() -> dict:
-    """返回调度器状态。"""
+    """返回调度器状态及所有任务详情。"""
     jobs = []
     if scheduler.running:
         for job in scheduler.get_jobs():
-            jobs.append({"id": job.id, "next_run": str(job.next_run_time) if job.next_run_time else None})
-    return {"running": scheduler.running, "jobs": jobs}
+            secs = _job_interval_secs(job)
+            jobs.append({
+                "id": job.id,
+                "name": _job_label(job.id),
+                "next_run": str(job.next_run_time) if job.next_run_time else None,
+                "interval_secs": secs,
+                "interval": _format_interval(secs),
+            })
+    return {"running": scheduler.running, "jobs": jobs, "total": len(jobs)}
+
+
+def update_job_interval(job_id: str, interval_secs: int) -> bool:
+    """修改任务的运行周期。"""
+    job = scheduler.get_job(job_id)
+    if not job:
+        return False
+    from apscheduler.triggers.interval import IntervalTrigger
+    scheduler.reschedule_job(
+        job_id,
+        trigger=IntervalTrigger(seconds=interval_secs),
+        misfire_grace_time=job.misfire_grace_time,
+    )
+    return True
 
 
 def shutdown_scheduler():
