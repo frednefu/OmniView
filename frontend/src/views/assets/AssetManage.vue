@@ -63,6 +63,12 @@
                   <el-option label="已认领" value="yes" />
                   <el-option label="未认领" value="no" />
                 </el-select>
+                <el-select v-model="vmQaxFilter" placeholder="安全" clearable size="small" style="width:80px" @change="vmPage=1;loadVMs()">
+                  <el-option label="是" value="yes"/><el-option label="否" value="no"/>
+                </el-select>
+                <el-select v-model="vmBackupFilter" placeholder="备份" clearable size="small" style="width:80px" @change="vmPage=1;loadVMs()">
+                  <el-option label="是" value="yes"/><el-option label="否" value="no"/>
+                </el-select>
                 <el-select v-model="vmPowerFilter" placeholder="电源状态" clearable size="small" style="width:100px" @change="vmPage=1;loadVMs()">
                   <el-option v-for="s in filterOptions.power_states" :key="s" :label="s==='poweredOn'?'开机':'关机'" :value="s" />
                 </el-select>
@@ -80,22 +86,22 @@
                 <el-button type="warning" size="small" :disabled="selectedVMs.length===0" @click="handleRevoke">撤销认领</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
-              <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect">
+              <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort">
                 <el-table-column type="selection" width="35" />
-                <el-table-column prop="vm_name" label="名称" width="150" show-overflow-tooltip />
-                <el-table-column prop="power_state" label="电源" width="65">
+                <el-table-column prop="vm_name" label="名称" width="150" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="power_state" label="电源" width="65" sortable="custom">
                   <template #default="{ row }">
                     <el-tag :type="row.power_state === 'poweredOn' ? 'success' : 'info'" size="small">{{ row.power_state === 'poweredOn' ? '开' : '关' }}</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="provisioned_gb" label="置备空间" width="80">
+                <el-table-column prop="provisioned_gb" label="置备空间" width="80" sortable="custom">
                   <template #default="{ row }">{{ row.provisioned_gb ? row.provisioned_gb + 'G' : '-' }}</template>
                 </el-table-column>
-                <el-table-column prop="used_gb" label="已用空间" width="80">
+                <el-table-column prop="used_gb" label="已用空间" width="80" sortable="custom">
                   <template #default="{ row }">{{ row.used_gb ? row.used_gb + 'G' : '-' }}</template>
                 </el-table-column>
-                <el-table-column prop="cpu_count" label="CPU" width="50" />
-                <el-table-column prop="memory_gb" label="内存" width="55">
+                <el-table-column prop="cpu_count" label="CPU" width="50" sortable="custom" />
+                <el-table-column prop="memory_gb" label="内存" width="55" sortable="custom">
                   <template #default="{ row }">{{ row.memory_gb ? row.memory_gb + 'G' : '-' }}</template>
                 </el-table-column>
                 <el-table-column prop="os_name" label="操作系统" min-width="130" show-overflow-tooltip />
@@ -117,6 +123,22 @@
                 <el-table-column label="认领" width="70">
                   <template #default="{ row }">
                     <el-tag :type="row.owner_name ? '' : 'info'" size="small">{{ row.owner_name ? '已认领' : '未认领' }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="安全" width="60">
+                  <template #default="{ row }">
+                    <el-tag :type="row.has_qax ? 'success' : 'info'" size="small">{{ row.has_qax ? '是' : '否' }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="备份" width="120">
+                  <template #default="{ row }">
+                    <template v-if="row.has_backup">
+                      <el-tag :type="isBackupStale(row.last_backup_time) ? 'warning' : 'success'" size="small">
+                        是
+                      </el-tag>
+                      <span v-if="row.last_backup_time" style="font-size:10px;color:#909399;margin-left:2px">{{ formatDate(row.last_backup_time) }}</span>
+                    </template>
+                    <el-tag v-else type="info" size="small">否</el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column prop="owner_name" label="负责人" width="80" />
@@ -271,6 +293,8 @@ const vmLoading = ref(false)
 const filterOptions = ref({ power_states: [], os_names: [], networks: [], folders: [] })
 const vmSearch = ref('')
 const vmClaimFilter = ref('')
+const vmQaxFilter = ref('')
+const vmBackupFilter = ref('')
 const vmClaimedFilter = ref('')
 const vmPowerFilter = ref('')
 const vmOsFilter = ref('')
@@ -299,6 +323,14 @@ const claimSubmitting = ref(false)
 
 const selectedVMs = ref([])
 function onVMSelect(val) { selectedVMs.value = val }
+function onVMSort({prop, order}) {
+  if (!order) { loadVMs(); return }
+  vmList.value.sort((a,b) => {
+    const va = a[prop] ?? ''; const vb = b[prop] ?? ''
+    if (typeof va === 'number') return order === 'ascending' ? va - vb : vb - va
+    return order === 'ascending' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
+  })
+}
 
 async function handleClaim() {
   const ids = selectedVMs.value.map(v => v.id).filter(Boolean)
@@ -349,6 +381,11 @@ const matchPreviewData = ref({ items: [], total_vms: 0, matched_count: 0 })
 
 function statusLabel(s) {
   return s === 'auto' ? '自动' : s === 'manual' ? '手动' : '未关联'
+}
+function formatDate(t) { return t ? new Date(t).toLocaleDateString('zh-CN') : '' }
+function isBackupStale(t) {
+  if (!t) return false
+  return (Date.now() - new Date(t).getTime()) > 7 * 24 * 3600 * 1000
 }
 
 function filterNode(value, data) {
@@ -408,6 +445,7 @@ async function loadVMs() {
     const res = await getDeptVMs(deptId, {
       page: vmPage.value, size: vmSize.value, search: vmSearch.value,
       claim_status: vmClaimFilter.value, claimed: vmClaimedFilter.value,
+      has_qax: vmQaxFilter.value, has_backup: vmBackupFilter.value,
       power_state: vmPowerFilter.value,
       os_name: vmOsFilter.value, network_name: vmNetFilter.value,
       vm_folder: vmFolderFilter.value,

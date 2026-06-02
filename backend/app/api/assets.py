@@ -302,6 +302,25 @@ def _enrich_vms(db: Session, vm_rows: list) -> list[dict]:
     # 按 IP 数量最多的子网排序（用于选择最佳 IP）
     best_subnets = sorted(subnet_counts.items(), key=lambda x: -x[1])
 
+    # 椒图安全关联（IP 匹配）
+    qax_ips = set()
+    try:
+        qax_rows = db.execute(text("SELECT DISTINCT ipv4 FROM qax_servers WHERE ipv4 IS NOT NULL AND ipv4 != ''")).fetchall()
+        qax_ips = {r.ipv4.strip() for r in qax_rows}
+    except Exception:
+        pass
+
+    # 鼎甲备份关联（VM 名称匹配）
+    dj_backup_info = {}
+    try:
+        dj_rows = db.execute(text("SELECT vm_name, last_run_time FROM dingjia_backup_records WHERE vm_name IS NOT NULL AND vm_name != ''")).fetchall()
+        for r in dj_rows:
+            name = r.vm_name
+            if name not in dj_backup_info or (r.last_run_time and (not dj_backup_info[name] or r.last_run_time > dj_backup_info[name])):
+                dj_backup_info[name] = r.last_run_time
+    except Exception:
+        pass
+
     # 组装
     items = []
     for r in vm_rows:
@@ -371,6 +390,9 @@ def _enrich_vms(db: Session, vm_rows: list) -> list[dict]:
             "f5_public_ips": ",".join(sorted(f5_ips)) if f5_ips else "",
             "f5_domains": ",".join(sorted(f5_doms)) if f5_doms else "",
             "switch_ips": ",".join(sw_ips) if sw_ips else "",
+            "has_qax": any(ip in qax_ips for ip in vm_ips_r) if vm_ips_r else False,
+            "has_backup": r.vm_name in dj_backup_info if hasattr(r, "vm_name") else False,
+            "last_backup_time": dj_backup_info.get(r.vm_name).isoformat() if dj_backup_info.get(r.vm_name) else None,
         })
     return items
 
@@ -383,6 +405,8 @@ def get_dept_vms(
     search: str = Query("", max_length=128),
     claim_status: str = Query("", max_length=16, description="分组状态"),
     claimed: str = Query("", max_length=8, description="认领状态: yes/no"),
+    has_qax: str = Query("", max_length=4, description="安全: yes/no"),
+    has_backup: str = Query("", max_length=4, description="备份: yes/no"),
     power_state: str = Query("", max_length=32),
     os_name: str = Query("", max_length=128),
     network_name: str = Query("", max_length=256),
@@ -432,6 +456,14 @@ def get_dept_vms(
         all_items = [it for it in all_items if it.get("owner_name")]
     elif claimed == "no":
         all_items = [it for it in all_items if not it.get("owner_name")]
+    if has_qax == "yes":
+        all_items = [it for it in all_items if it.get("has_qax")]
+    elif has_qax == "no":
+        all_items = [it for it in all_items if not it.get("has_qax")]
+    if has_backup == "yes":
+        all_items = [it for it in all_items if it.get("has_backup")]
+    elif has_backup == "no":
+        all_items = [it for it in all_items if not it.get("has_backup")]
     if power_state:
         all_items = [it for it in all_items if (it["power_state"] or "") == power_state]
     if os_name:
