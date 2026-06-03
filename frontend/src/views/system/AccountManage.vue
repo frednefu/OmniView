@@ -229,12 +229,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="submitting"
-          :disabled="!isEdit && !lookupVerified"
-          @click="handleSubmit"
-        >
+        <el-button type="primary" :loading="submitting" @click="handleSubmit">
           {{ isEdit ? '保存' : '创建' }}
         </el-button>
       </template>
@@ -459,10 +454,6 @@ async function handleLookup() {
 }
 
 async function handleSubmit() {
-  if (!isEdit.value && !lookupVerified.value) {
-    ElMessage.warning('请先查询并选择教职工')
-    return
-  }
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   submitting.value = true

@@ -321,8 +321,8 @@ npm run dev
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── views/               # Login, Dashboard, SwitchList/Detail, VCenterList/Detail, F5List/Detail, ZDNSList/Detail, QAXList/Detail, Results, Routes, SubnetManage, SearchResult, ScanLogs, ScanMonitor, History, AssetProfile, UserManage, Profile
-│   │   ├── components/          # AppLayout, SwitchFormDialog, VCenterFormDialog, F5FormDialog, ZDNSFormDialog
+│   │   ├── views/               # Dashboard, AssetProfile, InfoSystem, DjDj, Icp, SupplyChain, SwitchList, VCenterList, F5List, ZDNSList, QAXList, DingJia, Results, Routes, Subnets, ScanLogs, ScanMonitor, History, AccountManage, Departments, Workers, Scheduler, ApiConfig, Profile
+│   │   ├── components/          # AppLayout（菜单：信息资产/网络资产/对接资产/日志/系统管理）
 │   │   ├── api/                 # Axios 封装
 │   │   ├── store/               # Pinia auth
 │   │   └── router/              # Vue Router（含角色守卫）

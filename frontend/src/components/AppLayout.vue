@@ -26,10 +26,20 @@
         text-color="var(--sidebar-text)"
         active-text-color="var(--sidebar-text-active)"
       >
-        <el-menu-item index="/dashboard">
-          <el-icon><HomeFilled /></el-icon>
-          <span>仪表盘</span>
-        </el-menu-item>
+        <template v-if="authStore.isAdmin">
+          <el-menu-item index="/dashboard">
+            <el-icon><HomeFilled /></el-icon>
+            <span>仪表盘</span>
+            <el-tag size="small" type="warning" class="menu-badge">管理员</el-tag>
+          </el-menu-item>
+        </template>
+        <template v-else>
+          <el-menu-item index="/dashboard" class="menu-item-wip" @click.prevent>
+            <el-icon><HomeFilled /></el-icon>
+            <span>仪表盘</span>
+            <el-tag size="small" type="info" class="menu-badge">待开发</el-tag>
+          </el-menu-item>
+        </template>
         <el-menu-item index="/asset-profile">
           <el-icon><DataAnalysis /></el-icon>
           <span>资产画像</span>
@@ -46,60 +56,76 @@
           <el-menu-item index="/sys/supply-chain">供应链信息维护</el-menu-item>
         </el-sub-menu>
 
-        <div class="menu-group-title" v-show="!isCollapse">资产管理</div>
-        <el-menu-item index="/dingjia">
-          <el-icon><FolderOpened /></el-icon>
-          <span>鼎甲备份管理</span>
-        </el-menu-item>
-        <el-menu-item index="/switches">
-          <el-icon><Monitor /></el-icon>
-          <span>交换机管理</span>
-        </el-menu-item>
-        <el-menu-item index="/vcenters">
-          <el-icon><Cloudy /></el-icon>
-          <span>vCenter 管理</span>
-        </el-menu-item>
-        <el-menu-item index="/f5">
-          <el-icon><Connection /></el-icon>
-          <span>F5 管理</span>
-        </el-menu-item>
-        <el-menu-item index="/zdns">
-          <el-icon><Link /></el-icon>
-          <span>ZDNS 管理</span>
-        </el-menu-item>
-        <el-menu-item index="/qax">
-          <el-icon><Monitor /></el-icon>
-          <span>椒图管理</span>
-        </el-menu-item>
+        <el-sub-menu index="/sys/network">
+          <template #title>
+            <el-icon><Connection /></el-icon>
+            <span>网络资产信息</span>
+          </template>
+          <el-menu-item index="/results">
+            <el-icon><List /></el-icon>
+            <span>IP地址信息</span>
+          </el-menu-item>
+          <el-menu-item index="/routes">
+            <el-icon><Connection /></el-icon>
+            <span>路由信息</span>
+          </el-menu-item>
+          <el-menu-item index="/subnets">
+            <el-icon><Grid /></el-icon>
+            <span>地址段信息</span>
+          </el-menu-item>
+        </el-sub-menu>
 
-        <div class="menu-group-title" v-show="!isCollapse">扫描分析</div>
-        <el-menu-item index="/results">
-          <el-icon><List /></el-icon>
-          <span>扫描结果</span>
-        </el-menu-item>
-        <el-menu-item index="/routes">
-          <el-icon><Connection /></el-icon>
-          <span>路由表</span>
-        </el-menu-item>
-        <el-menu-item index="/subnets">
-          <el-icon><Grid /></el-icon>
-          <span>地址段管理</span>
-        </el-menu-item>
-        <el-menu-item index="/scan-monitor">
-          <el-icon><TrendCharts /></el-icon>
-          <span>扫描监控</span>
-        </el-menu-item>
-        <el-menu-item index="/scan-logs">
-          <el-icon><Tickets /></el-icon>
-          <span>扫描日志</span>
-        </el-menu-item>
-        <el-menu-item index="/history">
-          <el-icon><Clock /></el-icon>
-          <span>历史记录</span>
-        </el-menu-item>
+        <el-sub-menu index="/sys/asset-mgmt">
+          <template #title>
+            <el-icon><Monitor /></el-icon>
+            <span>对接资产信息管理</span>
+          </template>
+          <el-menu-item index="/switches">
+            <el-icon><Monitor /></el-icon>
+            <span>交换机管理</span>
+          </el-menu-item>
+          <el-menu-item index="/vcenters">
+            <el-icon><Cloudy /></el-icon>
+            <span>vCenter 管理</span>
+          </el-menu-item>
+          <el-menu-item index="/f5">
+            <el-icon><Connection /></el-icon>
+            <span>F5 管理</span>
+          </el-menu-item>
+          <el-menu-item index="/zdns">
+            <el-icon><Link /></el-icon>
+            <span>ZDNS 管理</span>
+          </el-menu-item>
+          <el-menu-item index="/qax">
+            <el-icon><Monitor /></el-icon>
+            <span>椒图管理</span>
+          </el-menu-item>
+          <el-menu-item index="/dingjia">
+            <el-icon><FolderOpened /></el-icon>
+            <span>鼎甲备份管理</span>
+          </el-menu-item>
+          <el-menu-item index="/scan-monitor">
+            <el-icon><TrendCharts /></el-icon>
+            <span>扫描监控</span>
+          </el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu index="/sys/logs">
+          <template #title>
+            <el-icon><Tickets /></el-icon>
+            <span>日志信息</span>
+          </template>
+          <el-menu-item index="/scan-logs">
+            <el-icon><Tickets /></el-icon>
+            <span>扫描日志</span>
+          </el-menu-item>
+          <el-menu-item index="/history">
+            <el-icon><Clock /></el-icon>
+            <span>历史记录</span>
+          </el-menu-item>
+        </el-sub-menu>
 
         <template v-if="authStore.isAdmin">
-          <div class="menu-group-title" v-show="!isCollapse">系统管理</div>
           <el-sub-menu index="/sys">
             <template #title>
               <el-icon><Setting /></el-icon>
@@ -113,6 +139,11 @@
               <el-icon><OfficeBuilding /></el-icon>
               <span>组织机构管理</span>
             </el-menu-item>
+            <el-menu-item index="/sys/roles" class="menu-item-wip" @click.prevent>
+              <el-icon><Avatar /></el-icon>
+              <span>角色管理</span>
+              <el-tag size="small" type="info" class="menu-badge">待开发</el-tag>
+            </el-menu-item>
             <el-menu-item index="/sys/accounts">
               <el-icon><UserFilled /></el-icon>
               <span>账号管理</span>
@@ -123,7 +154,7 @@
             </el-menu-item>
             <el-menu-item index="/sys/scheduler">
               <el-icon><Timer /></el-icon>
-              <span>定时任务</span>
+              <span>定时任务监控</span>
             </el-menu-item>
           </el-sub-menu>
         </template>
@@ -221,9 +252,9 @@ const pageTitle = computed(() => {
     '/f5': 'F5 管理',
     '/zdns': 'ZDNS 管理',
     '/qax': '椒图管理',
-    '/results': '扫描结果',
-    '/routes': '路由表',
-    '/subnets': '地址段管理',
+    '/results': 'IP地址信息',
+    '/routes': '路由信息',
+    '/subnets': '地址段信息',
     '/scan-monitor': '扫描监控',
     '/scan-logs': '扫描日志',
     '/history': '历史记录',
@@ -236,10 +267,11 @@ const pageTitle = computed(() => {
     '/sys/info-systems': '信息系统维护',
     '/sys/djdj': '等保信息维护',
     '/sys/icp': 'ICP备案维护',
+    '/sys/supply-chain': '供应链信息维护',
     '/sys/departments': '组织机构管理',
     '/sys/accounts': '账号管理',
     '/sys/workers': 'Worker 管理',
-    '/sys/scheduler': '定时任务',
+    '/sys/scheduler': '定时任务监控',
   }
   return titles[route.path] || ''
 })
@@ -325,6 +357,16 @@ onMounted(async () => {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.25);
   letter-spacing: 0.5px;
+}
+
+/* ═══════════════ 菜单徽标与待开发项 ═══════════════ */
+.menu-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.menu-item-wip {
+  pointer-events: none;
+  opacity: 0.45;
 }
 
 /* ═══════════════ 顶栏 ═══════════════ */
