@@ -377,6 +377,128 @@ def create_supply_chain(body: dict, db: Session = Depends(get_db), _=Depends(req
     db.add(rec); db.commit(); db.refresh(rec)
     return {"id": rec.id, "message": "已创建"}
 
+@router.get("/supply-chain/names")
+def list_supply_chain_names(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    items = db.query(SupplyChain.company_name).order_by(SupplyChain.company_name).all()
+    return {"items": [r[0] for r in items]}
+
+# ── 供应链导入导出 ──
+
+# Excel 行业名称到系统选项的映射（Excel 中使用中文顿号分隔，系统使用斜杠）
+_INDUSTRY_MAP = {
+    "信息运输、软件和信息技术服务业": "信息运输/软件和信息技术服务业",
+    "文化、体育和娱乐业": "文化/体育和娱乐业",
+    "交通运输、仓储和邮政业": "交通运输/仓储和邮政业",
+    "电力、热力、燃气及水生产和供应业": "电力/热力/燃气及水生产和供应业",
+    "农、林、牧、渔业": "农/林/牧/渔业",
+    "公共管理、社会保障和社会组织": "公共管理/社会保障和社会组织",
+    "卫生和社会工作": "卫生和社会工作",
+    "居民服务、修理和其他服务业": "居民服务/修理和其他服务业",
+    "水利、环境和公共": "水利/环境和公共",
+    "科学研究和技术服务业": "科学研究和技术服务业",
+    "租聘和商务": "租聘和商务",
+    "批发和零售业": "批发和零售业",
+    "住宿和餐饮业": "住宿和餐饮业",
+    "制造业": "制造业",
+    "建筑业": "建筑业",
+    "采矿业": "采矿业",
+}
+
+
+def _normalize_industry(val: str) -> str:
+    """将 Excel 中的行业名称转换为系统选项格式。"""
+    parts = [p.strip() for p in val.split(",") if p.strip()]
+    return ",".join(_INDUSTRY_MAP.get(p, p) for p in parts)
+
+
+@router.post("/supply-chain/import")
+def import_supply_chain(file: UploadFile, db: Session = Depends(get_db), _=Depends(require_admin)):
+    """从信息系统管理 Excel 文件中导入供应链单位信息（去重）。"""
+    wb = openpyxl.load_workbook(io.BytesIO(file.file.read()))
+    ws = wb.active
+    # 查询已有单位名称用于去重
+    existing = {r[0] for r in db.query(SupplyChain.company_name).all()}
+    imported, skipped = 0, 0
+    seen = set()
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        vals = [_cell_str(v) for v in row]
+        if len(vals) <= 51:
+            continue
+        name = vals[51].strip()
+        if not name:
+            continue
+        if name in seen or name in existing:
+            skipped += 1
+            continue
+        seen.add(name)
+        # 行业：合并主行业(col 59) + 其他(col 60)
+        industry_raw = vals[59] if len(vals) > 59 else ""
+        industry_other = vals[60] if len(vals) > 60 else ""
+        if industry_raw and industry_other:
+            industry_raw = industry_raw + "," + industry_other
+        industry = _normalize_industry(industry_raw) if industry_raw else ""
+        # 服务类型：合并 col 61 + col 62
+        service_raw = vals[61] if len(vals) > 61 else ""
+        service_other = vals[62] if len(vals) > 62 else ""
+        if service_raw and service_other and service_other != "无":
+            service_raw = service_raw + "," + service_other
+        rec = SupplyChain(
+            company_name=name,
+            credit_code=vals[52] if len(vals) > 52 else "",
+            address=vals[53] if len(vals) > 53 else "",
+            security_dept=vals[54] if len(vals) > 54 else "",
+            security_contact=vals[55] if len(vals) > 55 else "",
+            security_phone=vals[56] if len(vals) > 56 else "",
+            company_type=vals[57] if len(vals) > 57 else "",
+            has_foreign_capital=vals[58] if len(vals) > 58 else "",
+            industry=industry,
+            service_type=service_raw if service_raw else "",
+            importance=vals[63] if len(vals) > 63 else "",
+            url_ip_range=vals[64] if len(vals) > 64 else "",
+            data_level=vals[65] if len(vals) > 65 else "",
+            data_location=vals[66] if len(vals) > 66 else "",
+            data_storage=vals[67] if len(vals) > 67 else "",
+            db_type=vals[68] if len(vals) > 68 else "",
+        )
+        db.add(rec)
+        imported += 1
+    db.commit()
+    return {"message": f"导入完成：新增 {imported} 条，跳过重复 {skipped} 条"}
+
+
+@router.get("/supply-chain/export")
+def export_supply_chain(db: Session = Depends(get_db), _=Depends(require_admin)):
+    items = db.query(SupplyChain).order_by(SupplyChain.id).all()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "供应链信息"
+    ws.append(["单位名称", "信用代码", "注册地址", "安全责任部门", "联系人", "联系电话",
+               "单位类型", "境外资本", "服务行业", "服务类型", "重要程度",
+               "URL/IP地址段", "数据最高级别", "存储位置", "存储方式", "数据库类型", "备注"])
+    for r in items:
+        ws.append([r.company_name, r.credit_code, r.address, r.security_dept,
+                   r.security_contact, r.security_phone, r.company_type,
+                   r.has_foreign_capital, r.industry, r.service_type, r.importance,
+                   r.url_ip_range, r.data_level, r.data_location, r.data_storage,
+                   r.db_type, r.remark or ""])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=supply_chain_export.xlsx"}
+    )
+
+@router.post("/supply-chain/batch-delete")
+def batch_delete_supply_chain(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    ids = body.get("ids", [])
+    if not ids:
+        raise HTTPException(400, "请选择记录")
+    db.query(SupplyChain).filter(SupplyChain.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"message": f"已删除 {len(ids)} 条"}
+
+
 @router.put("/supply-chain/{rec_id}")
 def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     rec = db.query(SupplyChain).get(rec_id)
@@ -392,10 +514,6 @@ def delete_supply_chain(rec_id: int, db: Session = Depends(get_db), _=Depends(re
     db.commit()
     return {"message": "已删除"}
 
-@router.get("/supply-chain/names")
-def list_supply_chain_names(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    items = db.query(SupplyChain.company_name).order_by(SupplyChain.company_name).all()
-    return {"items": [r[0] for r in items]}
 
 @router.post("/icp/import")
 def import_icp(file: UploadFile, db: Session = Depends(get_db), _=Depends(require_admin)):
