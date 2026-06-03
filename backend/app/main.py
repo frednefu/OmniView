@@ -94,6 +94,16 @@ async def lifespan(app: FastAPI):
         ("notes", "VARCHAR(512)"),
         ("gender", "VARCHAR(4)"),
     ])
+    _migrate_columns("info_systems", [
+        ("vendor_name", "VARCHAR(256)"),
+        ("product_name", "VARCHAR(256)"),
+        ("product_version", "VARCHAR(128)"),
+        ("source_type", "VARCHAR(32)"),
+        ("vendor_contact", "VARCHAR(64)"),
+        ("vendor_phone", "VARCHAR(32)"),
+        ("ops_contact", "VARCHAR(64)"),
+        ("ops_phone", "VARCHAR(32)"),
+    ])
     _migrate_columns("djdj_records", [
         ("image_path", "VARCHAR(512)"),
     ])

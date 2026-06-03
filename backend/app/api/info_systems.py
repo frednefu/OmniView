@@ -8,7 +8,7 @@ from sqlalchemy import text
 import openpyxl
 
 from app.database import get_db
-from app.models.info_system import InfoSystem, DjDjRecord, IcpRecord
+from app.models.info_system import InfoSystem, DjDjRecord, IcpRecord, SupplyChain
 from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/info-systems", tags=["信息系统"])
@@ -307,6 +307,95 @@ def delete_icp(rec_id: int, db: Session = Depends(get_db), _=Depends(require_adm
     db.query(IcpRecord).filter(IcpRecord.id == rec_id).delete()
     db.commit()
     return {"message": "已删除"}
+
+
+# ── 数据同步 ──
+
+@router.post("/sync-from-platform")
+def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
+    """根据 ZDNS 域名数据自动同步信息系统状态。"""
+    zdns_domains = {}
+    for r in db.execute(text("SELECT domain_name, ip_address FROM zdns_domain_map")).fetchall():
+        d = (r.domain_name or "").strip().lower()
+        if d and d not in zdns_domains:
+            zdns_domains[d] = r.ip_address
+
+    def clean_domain(dom):
+        dom = (dom or "").strip().lower()
+        for prefix in ["https://", "http://"]:
+            if dom.startswith(prefix):
+                dom = dom[len(prefix):]
+        return dom.split("/")[0].split(":")[0]
+
+    updated, deprecated = 0, 0
+    items = db.query(InfoSystem).all()
+    for sys in items:
+        dom = clean_domain(sys.domain)
+        if not dom:
+            continue
+        # 保存清洗后的域名
+        if sys.domain != dom:
+            sys.domain = dom
+        if dom in zdns_domains:
+            zdns_ip = zdns_domains[dom] or ""
+            if sys.ip_address != zdns_ip and zdns_ip:
+                sys.ip_address = zdns_ip
+            sys.fill_type = "自动"
+            updated += 1
+        else:
+            sys.fill_type = "失效"
+            deprecated += 1
+    db.commit()
+    return {"message": f"同步完成：更新 {updated} 条，标记失效 {deprecated} 条"}
+
+
+# ── 等保关联查询 ──
+
+@router.get("/djdj-search")
+def search_djdj(q: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    items = db.query(DjDjRecord).filter(DjDjRecord.system_name.contains(q)).limit(20).all()
+    return {"items": [{"id": r.id, "system_name": r.system_name, "record_no": r.record_no,
+                        "level": r.level, "record_date": str(r.record_date) if r.record_date else None,
+                        "org_name": r.org_name} for r in items]}
+
+
+# ── 供应链 CRUD ──
+
+@router.get("/supply-chain")
+def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
+                      search: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user)):
+    q = db.query(SupplyChain)
+    if search:
+        q = q.filter(SupplyChain.company_name.contains(search))
+    total = q.count()
+    items = q.order_by(SupplyChain.id).offset((page - 1) * size).limit(size).all()
+    return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
+
+@router.post("/supply-chain")
+def create_supply_chain(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    rec = SupplyChain(**{k: v for k, v in body.items() if hasattr(SupplyChain, k)})
+    db.add(rec); db.commit(); db.refresh(rec)
+    return {"id": rec.id, "message": "已创建"}
+
+@router.put("/supply-chain/{rec_id}")
+def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    rec = db.query(SupplyChain).get(rec_id)
+    if not rec: raise HTTPException(404, "不存在")
+    for k, v in body.items():
+        if hasattr(rec, k) and k != "id": setattr(rec, k, v)
+    db.commit()
+    return {"message": "已更新"}
+
+@router.delete("/supply-chain/{rec_id}")
+def delete_supply_chain(rec_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+    db.query(SupplyChain).filter(SupplyChain.id == rec_id).delete()
+    db.commit()
+    return {"message": "已删除"}
+
+@router.get("/supply-chain/names")
+def list_supply_chain_names(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    items = db.query(SupplyChain.company_name).order_by(SupplyChain.company_name).all()
+    return {"items": [r[0] for r in items]}
 
 @router.post("/icp/import")
 def import_icp(file: UploadFile, db: Session = Depends(get_db), _=Depends(require_admin)):

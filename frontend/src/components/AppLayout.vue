@@ -43,6 +43,7 @@
           <el-menu-item index="/sys/info-systems">信息系统维护</el-menu-item>
           <el-menu-item index="/sys/djdj">等保信息维护</el-menu-item>
           <el-menu-item index="/sys/icp">ICP备案维护</el-menu-item>
+          <el-menu-item index="/sys/supply-chain">供应链信息维护</el-menu-item>
         </el-sub-menu>
 
         <div class="menu-group-title" v-show="!isCollapse">资产管理</div>

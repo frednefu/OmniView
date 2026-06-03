@@ -152,6 +152,12 @@ const routes = [
         meta: { title: 'ICP备案维护', admin: true },
       },
       {
+        path: 'sys/supply-chain',
+        name: 'SupplyChain',
+        component: () => import('@/views/system/SupplyChainList.vue'),
+        meta: { title: '供应链信息维护', admin: true },
+      },
+      {
         path: 'dingjia',
         name: 'DingJia',
         component: () => import('@/views/DingJiaList.vue'),

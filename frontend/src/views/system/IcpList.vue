@@ -13,6 +13,7 @@
       <el-input v-model="search" placeholder="搜索备案编号/主体" clearable style="width:260px" @keyup.enter="fetchList" @clear="fetchList">
         <template #append><el-button :icon="Search" @click="fetchList" /></template>
       </el-input>
+      <span style="color:#909399;font-size:13px;line-height:32px">共 {{total}} 条</span>
     </div>
     <el-table :data="items" v-loading="loading" stripe size="small">
       <el-table-column prop="icp_no" label="ICP备案编号" width="200" />
