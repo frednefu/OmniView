@@ -30,6 +30,13 @@ class InfoSystem(Base):
     internal_url = Column(String(512), nullable=True, comment="内网URL")
     ip_range = Column(String(128), nullable=True, comment="IP地址段")
     remark = Column(Text, nullable=True, comment="备注")
+    # 归属信息
+    dept_id = Column(Integer, nullable=True, comment="所属部门ID")
+    manager_name = Column(String(64), nullable=True, comment="管理员姓名")
+    manager_gh = Column(String(32), nullable=True, comment="管理员工号")
+    owner_name = Column(String(64), nullable=True, comment="负责人姓名")
+    owner_gh = Column(String(32), nullable=True, comment="负责人工号")
+    # 供应链信息
     vendor_name = Column(String(256), nullable=True, comment="开发厂商名称")
     product_name = Column(String(256), nullable=True, comment="产品名称")
     product_version = Column(String(128), nullable=True, comment="版本号")

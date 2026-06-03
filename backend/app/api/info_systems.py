@@ -9,6 +9,9 @@ import openpyxl
 
 from app.database import get_db
 from app.models.info_system import InfoSystem, DjDjRecord, IcpRecord, SupplyChain
+from app.models.user import User
+from app.models.department import Department
+from app.utils.security import hash_password
 from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/info-systems", tags=["信息系统"])
@@ -16,6 +19,111 @@ router = APIRouter(prefix="/info-systems", tags=["信息系统"])
 
 def _gen_asset_id():
     return f"IS-{datetime.now().strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4]}"
+
+
+# ── 人员查询 + 自动注册 ──
+
+@router.get("/staff-search")
+def search_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db), _=Depends(require_admin)):
+    """按姓名或工号搜索系统用户，未找到则返回空。"""
+    items = db.query(User).filter(
+        (User.name.contains(q)) | (User.gh.contains(q)) | (User.username.contains(q))
+    ).limit(15).all()
+    return {"items": [{"id": u.id, "name": u.name, "gh": u.gh, "username": u.username,
+                        "phone": u.phone, "mobile": u.mobile, "department_name": u.department.dwmc if u.department else ""} for u in items]}
+
+
+@router.get("/staff-lookup")
+def lookup_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db), _=Depends(require_admin)):
+    """查找人员（系统用户 + 教职工库），返回合并结果供确认。"""
+    results = []
+    # 1. 系统用户
+    users = db.query(User).filter(
+        (User.name.contains(q)) | (User.gh.contains(q)) | (User.username.contains(q))
+    ).limit(10).all()
+    for u in users:
+        results.append({"id": u.id, "name": u.name, "gh": u.gh, "username": u.username,
+                        "phone": u.phone, "mobile": u.mobile,
+                        "department_name": u.department.dwmc if u.department else "",
+                        "source": "系统用户"})
+    # 2. 教职工库（排除已有用户）
+    from app.models.staff_info import StaffInfo
+    existing_ghs = {u.gh for u in users if u.gh}
+    staffs = db.query(StaffInfo).filter(
+        (StaffInfo.xm.contains(q)) | (StaffInfo.gh.contains(q))
+    ).limit(10).all()
+    for s in staffs:
+        if s.gh and s.gh in existing_ghs:
+            continue
+        results.append({"id": None, "name": s.xm, "gh": s.gh, "username": None,
+                        "phone": s.bgdh or "", "mobile": s.yddh or "",
+                        "department_name": s.szdwbm or "",
+                        "source": "教职工库（可注册）"})
+    return {"items": results[:15]}
+
+
+@router.post("/staff-register")
+def register_staff(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    """查询教职工并自动注册为系统用户（如不存在）。返回用户信息。"""
+    name = (body.get("name") or "").strip()
+    gh = (body.get("gh") or "").strip()
+    if not name and not gh:
+        raise HTTPException(400, "请提供姓名或工号")
+    # 先在本地查找
+    q = db.query(User)
+    if name and gh:
+        q = q.filter(User.name == name, User.gh == gh)
+    elif gh:
+        q = q.filter(User.gh == gh)
+    elif name:
+        q = q.filter(User.name == name)
+    user = q.first()
+    if user:
+        return {"id": user.id, "name": user.name, "gh": user.gh, "username": user.username,
+                "phone": user.phone, "mobile": user.mobile, "department_name": user.department.dwmc if user.department else "",
+                "existed": True}
+    # 尝试从 staff_info 查找
+    from app.models.staff_info import StaffInfo
+    sq = db.query(StaffInfo)
+    if name and gh:
+        sq = sq.filter(StaffInfo.xm == name, StaffInfo.gh == gh)
+    elif gh:
+        sq = sq.filter(StaffInfo.gh == gh)
+    elif name:
+        sq = sq.filter(StaffInfo.xm == name)
+    staff = sq.first()
+    if staff:
+        username = staff.gh or f"u{int(time.time())}"
+        exist = db.query(User).filter(User.username == username).first()
+        if exist:
+            username = f"{staff.gh}_{int(time.time() % 1000)}"
+        # 尝试根据部门编码匹配部门
+        dept_id = None
+        if staff.szdwbm:
+            d = db.query(Department).filter(Department.dwbm == staff.szdwbm).first()
+            if d:
+                dept_id = d.id
+        new_user = User(
+            username=username,
+            password_hash=hash_password("Abcd1234!"),
+            name=staff.xm,
+            gh=staff.gh,
+            gender="男" if staff.xbm == "1" else ("女" if staff.xbm == "2" else ""),
+            phone=staff.bgdh or "",
+            mobile=staff.yddh or "",
+            email=staff.dzyx or "",
+            department_id=dept_id,
+            user_type="internal",
+            role="user",
+            is_active=True,
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return {"id": new_user.id, "name": new_user.name, "gh": new_user.gh, "username": new_user.username,
+                "phone": new_user.phone, "mobile": new_user.mobile, "department_name": new_user.department.dwmc if new_user.department else "",
+                "existed": False, "message": f"已从教职工库自动注册用户: {new_user.name}"}
+    raise HTTPException(404, "未找到匹配的教职工信息")
 
 
 # ── InfoSystem CRUD ──
@@ -35,14 +143,39 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
     return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
 
 
+@router.post("/batch-delete")
+def batch_delete_systems(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    ids = body.get("ids", [])
+    if not ids:
+        raise HTTPException(400, "请选择记录")
+    db.query(InfoSystem).filter(InfoSystem.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"message": f"已删除 {len(ids)} 条"}
+
+
+def _clean_empty_dates(data: dict) -> dict:
+    """将 Date 类型字段的空字符串转为 None，避免 MySQL 1292 错误。"""
+    from sqlalchemy import Date
+    date_cols = {c.name for c in InfoSystem.__table__.columns if isinstance(c.type, Date)}
+    for k, v in data.items():
+        if k in date_cols and v == "":
+            data[k] = None
+    return data
+
+
 @router.post("")
 def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     if not body.get("asset_id"):
         body["asset_id"] = _gen_asset_id()
     if db.query(InfoSystem).filter(InfoSystem.asset_id == body["asset_id"]).first():
         raise HTTPException(400, "资产ID已存在")
-    sys = InfoSystem(**{k: v for k, v in body.items() if hasattr(InfoSystem, k)})
-    db.add(sys); db.commit(); db.refresh(sys)
+    valid_cols = {c.name for c in InfoSystem.__table__.columns}
+    sys = InfoSystem(**_clean_empty_dates({k: v for k, v in body.items() if k in valid_cols and k != 'id'}))
+    try:
+        db.add(sys); db.commit(); db.refresh(sys)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"创建失败：{e}")
     return {"id": sys.id, "message": "已创建"}
 
 
@@ -50,10 +183,16 @@ def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_a
 def update_system(sys_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     sys = db.query(InfoSystem).get(sys_id)
     if not sys: raise HTTPException(404, "不存在")
+    valid_cols = {c.name for c in sys.__table__.columns}
+    body = _clean_empty_dates(body)
     for k, v in body.items():
-        if hasattr(sys, k) and k != "id":
+        if k != "id" and k in valid_cols:
             setattr(sys, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"保存失败：{e}")
     return {"message": "已更新"}
 
 
@@ -66,52 +205,341 @@ def delete_system(sys_id: int, db: Session = Depends(get_db), _=Depends(require_
 
 # ── Excel 导入 ──
 
+# ── 导入格式定义 ──
+
+def _detect_import_format(ws) -> str:
+    """检测 Excel 文件格式，返回格式名称。"""
+    # 读取第一行所有列值
+    headers = [_cell_str(ws.cell(1, c).value) for c in range(1, min(ws.max_column + 1, 80))]
+    header_text = " ".join(headers)
+    # 新格式特征：包含"单位名称"+"管理员姓名"等关键词
+    if "单位名称" in header_text and "管理员姓名" in header_text:
+        return "iso_report"  # 信息系统管理_*.xlsx
+    # 旧格式特征：第一行是长说明文字
+    first_cell = _cell_str(ws.cell(1, 1).value)
+    if "填写说明" in first_cell or "必填项" in first_cell or len(first_cell) > 50:
+        return "asset_export"  # 资产导出.xlsx
+    return "unknown"
+
+
+# 旧格式（资产导出.xlsx）列映射：列号 → (模型字段, 转换函数或None)
+_FORMAT_ASSET_EXPORT = {
+    3:  "system_name",
+    4:  "system_type",
+    5:  "sub_type",
+    6:  "ip_address",
+    7:  "domain",
+    8:  "djdj_status",
+    12: "djdj_sys_name",
+    13: "djdj_date",
+    14: "djdj_no",
+    2:  "org_name",
+    25: "dept_name",
+    27: "contact",
+    28: "contact_phone",
+    11: "remark",
+}
+
+# 新格式（信息系统管理_*.xlsx）列映射：列号 → (模型字段, 转换函数或None)
+_FORMAT_ISO_REPORT = {
+    3:  "org_name",           # 单位名称
+    5:  "manager_name",       # 管理员姓名
+    6:  "manager_gh",         # 管理员工号_账号
+    7:  "owner_name",         # 负责人姓名
+    8:  "owner_phone",        # 负责人手机号码
+    10: "system_type",        # 系统类型
+    11: "sub_type",           # 信息系统类型
+    12: "product_name",       # 产品名称
+    13: "product_version",    # 版本号
+    14: "domain",             # 域名
+    15: "ip_address",         # 业务互联网IP
+    16: "ip_address2",        # 业务内网IP（合并到ip_address）
+    18: "dept_name",          # 运维单位
+    24: "source_type",        # 数据来源
+    30: "data_owner_name",    # 数据处理负责人
+    41: "djdj_status",        # 等保定级情况
+    42: "djdj_sys_name",      # 等保二级系统名称
+    43: "djdj_no",            # 等保定级编号
+    44: "djdj_date",          # 等保定级时间
+    47: "icp_no",             # ICP备案号
+    49: "icp_date",           # ICP备案时间
+    51: "remark",             # 备注
+    52: "vendor_name",        # 供应链单位名称
+    56: "vendor_contact",     # 供应链联系人
+    57: "vendor_phone",       # 供应链联系电话
+    70: "submitter",          # 提交人
+}
+
+
+def _parse_excel_date(val):
+    """尝试将值解析为日期字符串。"""
+    if val is None: return None
+    if isinstance(val, (datetime,)): return val.strftime("%Y-%m-%d")
+    s = str(val).strip()
+    if not s: return None
+    # 尝试常见日期格式
+    for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y-%m-%d %H:%M:%S"]:
+        try:
+            datetime.strptime(s[:19] if len(s) > 19 else s, fmt)
+            return s[:10]
+        except ValueError:
+            continue
+    return s[:10] if len(s) >= 10 else None
+
+
+def _is_empty(val) -> bool:
+    """判断值是否为空。"""
+    if val is None: return True
+    if isinstance(val, str) and not val.strip(): return True
+    return False
+
+
+def _parse_row_asset_export(ws, row_idx: int) -> dict:
+    """解析旧格式的一行数据。"""
+    data = {"fill_type": "导入"}
+    for col, field in _FORMAT_ASSET_EXPORT.items():
+        raw = ws.cell(row_idx, col).value
+        if field == "djdj_date":
+            data[field] = _parse_excel_date(raw)
+        else:
+            data[field] = _cell_str(raw)
+    # 合并内网IP（如果有第16列）
+    ip2 = _cell_str(ws.cell(row_idx, 16).value)
+    if ip2 and data.get("ip_address"):
+        data["ip_address"] = data["ip_address"] + ("," if not data["ip_address"].endswith(",") else "") + ip2
+    elif ip2:
+        data["ip_address"] = ip2
+    return data
+
+
+def _parse_row_iso_report(ws, row_idx: int) -> dict:
+    """解析新格式的一行数据。"""
+    data = {"fill_type": "导入"}
+    for col, field in _FORMAT_ISO_REPORT.items():
+        raw = ws.cell(row_idx, col).value
+        if field in ("djdj_date", "icp_date"):
+            data[field] = _parse_excel_date(raw)
+        elif field == "ip_address2":
+            # 内网IP暂存，后面合并
+            data["_ip_internal"] = _cell_str(raw)
+        elif field == "data_owner_name":
+            # 数据处理负责人 → 如负责人为空则填充
+            data["_data_owner"] = _cell_str(raw)
+        elif field == "submitter":
+            data["contact"] = _cell_str(raw)
+        else:
+            data[field] = _cell_str(raw)
+    # 提取系统名称（主键：K列=信息系统类型 → 产品名称 → 系统类型）
+    system_name = data.get("sub_type", "") or data.get("product_name", "") or data.get("system_type", "")
+    data["system_name"] = system_name
+    # 合并IP
+    ip_ext = data.get("ip_address", "")
+    ip_int = data.pop("_ip_internal", "")
+    if ip_int:
+        data["ip_address"] = (ip_ext + ("," if ip_ext and not ip_ext.endswith(",") else "") + ip_int) if ip_ext else ip_int
+    # 数据处理负责人 → owner_name fallback
+    data_owner = data.pop("_data_owner", "")
+    if data_owner and not data.get("owner_name"):
+        data["owner_name"] = data_owner
+    return data
+
+
+# ── 导入端点 ──
+
 @router.post("/import")
-def import_excel(file: UploadFile, db: Session = Depends(get_db), _=Depends(require_admin)):
+def import_excel(file: UploadFile, mode: str = Query("supplement"),
+                 db: Session = Depends(get_db), _=Depends(require_admin)):
+    """
+    导入 Excel 文件，自动识别格式。
+    mode: overwrite=覆盖已有 / supplement=补充空白字段 / skip=跳过重复
+    """
+    if mode not in ("overwrite", "supplement", "skip"):
+        raise HTTPException(400, "mode 必须是 overwrite / supplement / skip 之一")
+    try:
+        return _do_import(file, mode, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(500, f"导入失败：{e}\n{traceback.format_exc()}")
+
+
+def _do_import(file: UploadFile, mode: str, db: Session):
     wb = openpyxl.load_workbook(io.BytesIO(file.file.read()))
     ws = wb.active
-    db.query(InfoSystem).delete()
-    start = _find_data_start(ws)
-    imported = 0
-    for row in ws.iter_rows(min_row=start, values_only=True):
-        vals = [str(v) if v else "" for v in row]
-        if not any(vals): continue
-        sys = InfoSystem(
-            asset_id=_gen_asset_id(),
-            system_name=vals[3] if len(vals) > 3 else "",
-            system_type=vals[4] if len(vals) > 4 else "",
-            sub_type=vals[5] if len(vals) > 5 else "",
-            ip_address=vals[6] if len(vals) > 6 else "",
-            domain=vals[7] if len(vals) > 7 else "",
-            djdj_status=vals[8] if len(vals) > 8 else "",
-            djdj_sys_name=vals[12] if len(vals) > 12 else "",
-            djdj_date=vals[13] if len(vals) > 13 and vals[13] else None,
-            djdj_no=vals[14] if len(vals) > 14 else "",
-            org_name=vals[2] if len(vals) > 2 else "",
-            dept_name=vals[25] if len(vals) > 25 else "",
-            contact=vals[27] if len(vals) > 27 else "",
-            contact_phone=vals[28] if len(vals) > 28 else "",
-            fill_type="导入",
-            remark=vals[11] if len(vals) > 11 else "",
-        )
-        db.add(sys); imported += 1
+
+    # 检测格式
+    fmt = _detect_import_format(ws)
+    if fmt == "unknown":
+        raise HTTPException(400, "无法识别文件格式，请确认文件类型。支持：资产导出.xlsx、信息系统管理_*.xlsx")
+
+    # 找到数据起始行
+    if fmt == "asset_export":
+        start_row = _find_data_start(ws)
+        parse_row = _parse_row_asset_export
+        fmt_name = "资产导出"
+    else:
+        start_row = 2  # 第1行是表头，第2行开始是数据
+        parse_row = _parse_row_iso_report
+        fmt_name = "信息系统管理"
+
+    # 解析所有行
+    parsed = []
+    system_names_seen = set()
+    for row_idx in range(start_row, ws.max_row + 1):
+        row_data = parse_row(ws, row_idx)
+        sn = row_data.get("system_name", "").strip()
+        if not sn:
+            continue
+        # Excel 内重复的系统名称只取第一次
+        if sn in system_names_seen:
+            continue
+        system_names_seen.add(sn)
+        parsed.append(row_data)
+
+    # 统计 + 导入
+    stats = {"total": len(parsed), "created": 0, "updated": 0, "supplemented": 0, "skipped": 0, "errors": 0, "format": fmt_name}
+    valid_cols = {c.name for c in InfoSystem.__table__.columns}
+    date_cols = {"djdj_date", "icp_date"}
+
+    for row_data in parsed:
+        try:
+            system_name = row_data["system_name"].strip()
+            existing = db.query(InfoSystem).filter(InfoSystem.system_name == system_name).first()
+
+            if existing:
+                if mode == "skip":
+                    stats["skipped"] += 1
+                    continue
+                elif mode == "overwrite":
+                    # 完全覆盖（保留 asset_id 和 id）
+                    for k, v in row_data.items():
+                        if k != "id" and k in valid_cols:
+                            if k in date_cols and _is_empty(v):
+                                setattr(existing, k, None)
+                            else:
+                                setattr(existing, k, v)
+                    existing.fill_type = "导入"
+                    stats["updated"] += 1
+                elif mode == "supplement":
+                    # 只补充空白字段
+                    changed = False
+                    for k, v in row_data.items():
+                        if k != "id" and k in valid_cols:
+                            current = getattr(existing, k, None)
+                            if _is_empty(current) and not _is_empty(v):
+                                if k in date_cols:
+                                    setattr(existing, k, _parse_excel_date(v))
+                                else:
+                                    setattr(existing, k, v)
+                                changed = True
+                    if changed:
+                        stats["supplemented"] += 1
+                    else:
+                        stats["skipped"] += 1
+            else:
+                # 创建新记录
+                clean = {}
+                for k, v in row_data.items():
+                    if k in valid_cols:
+                        if k in date_cols and _is_empty(v):
+                            clean[k] = None
+                        else:
+                            clean[k] = v
+                clean["asset_id"] = _gen_asset_id()
+                sys_obj = InfoSystem(**clean)
+                db.add(sys_obj)
+                stats["created"] += 1
+        except Exception:
+            stats["errors"] += 1
+
     db.commit()
-    return {"message": f"导入完成，共 {imported} 条"}
+    parts = [f"导入完成（{fmt_name}格式）：共 {stats['total']} 条"]
+    if stats['created']: parts.append(f"新建 {stats['created']}")
+    if stats['updated']: parts.append(f"覆盖 {stats['updated']}")
+    if stats['supplemented']: parts.append(f"补充 {stats['supplemented']}")
+    if stats['skipped']: parts.append(f"跳过 {stats['skipped']}")
+    if stats['errors']: parts.append(f"失败 {stats['errors']}")
+    stats["message"] = "，".join(parts)
+    return stats
 
 
 # ── Excel 导出 ──
 
 @router.get("/export")
 def export_excel(db: Session = Depends(get_db), _=Depends(require_admin)):
-    items = db.query(InfoSystem).all()
+    items = db.query(InfoSystem).order_by(InfoSystem.id).all()
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "信息系统"
-    headers = ["资产ID", "系统名称", "类型", "IP", "域名", "单位", "运维单位", "联系人", "电话", "等保编号", "等保等级", "填报类型"]
+    # 中文表头映射（按逻辑分组排序）
+    export_cols = [
+        ("asset_id", "资产ID"),
+        ("system_name", "系统名称"),
+        ("system_type", "资产类型"),
+        ("sub_type", "信息系统类型"),
+        ("ip_address", "IP地址"),
+        ("domain", "域名/URL"),
+        ("org_name", "单位名称"),
+        ("dept_name", "运维单位"),
+        ("contact", "联系人"),
+        ("contact_phone", "联系电话"),
+        ("fill_type", "填报类型"),
+        # 归属信息
+        ("dept_id", "所属部门ID"),
+        ("manager_name", "管理员姓名"),
+        ("manager_gh", "管理员工号"),
+        ("owner_name", "负责人姓名"),
+        ("owner_gh", "负责人工号"),
+        # 等级保护
+        ("djdj_status", "等保状态"),
+        ("djdj_sys_name", "等保系统名称"),
+        ("djdj_no", "等保编号"),
+        ("djdj_level", "等保等级"),
+        ("djdj_date", "等保日期"),
+        ("djdj_org", "测评单位"),
+        # ICP
+        ("icp_no", "ICP备案号"),
+        ("icp_date", "ICP备案日期"),
+        # 供应链
+        ("vendor_name", "开发厂商"),
+        ("product_name", "产品名称"),
+        ("product_version", "版本号"),
+        ("source_type", "来源"),
+        ("vendor_contact", "厂商联系人"),
+        ("vendor_phone", "厂商电话"),
+        ("ops_contact", "运维联系人"),
+        ("ops_phone", "运维电话"),
+        # 其他
+        ("has_website", "是否有网站"),
+        ("internal_url", "内网URL"),
+        ("ip_range", "IP地址段"),
+        ("remark", "备注"),
+    ]
+    headers = [h for _, h in export_cols]
+    fields = [f for f, _ in export_cols]
     ws.append(headers)
+    date_fmt_cols = {"djdj_date", "icp_date"}
     for r in items:
-        ws.append([r.asset_id, r.system_name, r.system_type, r.ip_address, r.domain,
-                    r.org_name, r.dept_name, r.contact, r.contact_phone, r.djdj_no, r.djdj_level, r.fill_type])
+        row = []
+        for f in fields:
+            v = getattr(r, f, None)
+            if v is None:
+                row.append("")
+            elif f in date_fmt_cols and hasattr(v, "strftime"):
+                row.append(v.strftime("%Y-%m-%d"))
+            else:
+                row.append(v)
+        ws.append(row)
+    # 自动调整列宽
+    for col_idx in range(1, len(headers) + 1):
+        max_len = min(len(str(headers[col_idx - 1])) * 2, 30)
+        for row_idx in range(2, min(ws.max_row + 1, 30)):
+            cv = str(ws.cell(row_idx, col_idx).value or "")
+            clen = sum(2 if ord(c) > 127 else 1 for c in cv)
+            if clen > max_len:
+                max_len = clen
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = min(max_len + 2, 50)
     buf = io.BytesIO()
     wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -315,10 +743,10 @@ def delete_icp(rec_id: int, db: Session = Depends(get_db), _=Depends(require_adm
 def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
     """根据 ZDNS 域名数据自动同步信息系统状态。"""
     zdns_domains = {}
-    for r in db.execute(text("SELECT domain_name, ip_address FROM zdns_domain_map")).fetchall():
+    for r in db.execute(text("SELECT domain_name, ip_address, ip_status FROM zdns_domain_map")).fetchall():
         d = (r.domain_name or "").strip().lower()
         if d and d not in zdns_domains:
-            zdns_domains[d] = r.ip_address
+            zdns_domains[d] = {"ip": r.ip_address or "", "status": r.ip_status or ""}
 
     def clean_domain(dom):
         dom = (dom or "").strip().lower()
@@ -327,7 +755,7 @@ def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
                 dom = dom[len(prefix):]
         return dom.split("/")[0].split(":")[0]
 
-    updated, deprecated = 0, 0
+    updated, offline, deprecated = 0, 0, 0
     items = db.query(InfoSystem).all()
     for sys in items:
         dom = clean_domain(sys.domain)
@@ -337,16 +765,23 @@ def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
         if sys.domain != dom:
             sys.domain = dom
         if dom in zdns_domains:
-            zdns_ip = zdns_domains[dom] or ""
-            if sys.ip_address != zdns_ip and zdns_ip:
+            zdns = zdns_domains[dom]
+            zdns_ip = zdns["ip"]
+            # 始终带回 IP 地址
+            if sys.ip_address != zdns_ip:
                 sys.ip_address = zdns_ip
-            sys.fill_type = "自动"
-            updated += 1
+            # 根据 IP 状态设置填报类型
+            if zdns["status"] == "离线":
+                sys.fill_type = "离线"
+                offline += 1
+            else:
+                sys.fill_type = "自动"
+                updated += 1
         else:
             sys.fill_type = "失效"
             deprecated += 1
     db.commit()
-    return {"message": f"同步完成：更新 {updated} 条，标记失效 {deprecated} 条"}
+    return {"message": f"同步完成：在线 {updated} 条，离线 {offline} 条，失效 {deprecated} 条"}
 
 
 # ── 等保关联查询 ──

@@ -112,6 +112,14 @@ async def lifespan(app: FastAPI):
         ("backup_versions", "INTEGER DEFAULT 1"),
         ("vm_size_gb", "FLOAT"),
     ])
+    # 信息系统新增归属字段
+    _migrate_columns("info_systems", [
+        ("dept_id", "INTEGER"),
+        ("manager_name", "VARCHAR(64)"),
+        ("manager_gh", "VARCHAR(32)"),
+        ("owner_name", "VARCHAR(64)"),
+        ("owner_gh", "VARCHAR(32)"),
+    ])
     # 更新 scan_logs 表 status 列支持 queued
     try:
         with engine.connect() as conn:
