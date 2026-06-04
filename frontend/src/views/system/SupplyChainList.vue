@@ -24,11 +24,14 @@
       <el-table-column prop="importance" label="重要程度" width="80"/>
       <el-table-column prop="security_contact" label="联系人" width="80"/>
       <el-table-column prop="security_phone" label="电话" width="120"/>
-      <el-table-column label="操作" width="120" fixed="right" v-if="authStore.isAdmin">
-        <template #default="{row}"><el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button><el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button></template>
+      <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
+        <template #default="{row}">
+          <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
+          <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+        </template>
       </el-table-column>
     </el-table>
-    <el-pagination v-if="total>size" v-model:current-page="page" :page-size="size" :total="total" layout="prev,pager,next" @current-change="fetchList" style="justify-content:center;margin-top:16px"/>
+    <el-pagination v-if="total>0" v-model:current-page="page" v-model:page-size="size" :page-sizes="[10,20,50,100]" :total="total" layout="total,sizes,prev,pager,next" @current-change="fetchList" @size-change="fetchList" style="justify-content:center;margin-top:16px"/>
 
     <!-- 编辑/添加对话框 -->
     <el-dialog v-model="dlg" :title="isEdit?'编辑供应链单位':'添加供应链单位'" width="960px" class="sc-dialog" destroy-on-close>
@@ -204,7 +207,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, OfficeBuilding, User, Briefcase, Coin, EditPen } from '@element-plus/icons-vue'
+import { Search, OfficeBuilding, User, Briefcase, Coin, EditPen, Edit, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import api from '@/api/index'
 

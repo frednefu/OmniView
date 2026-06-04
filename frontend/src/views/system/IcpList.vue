@@ -15,19 +15,19 @@
       </el-input>
       <span style="color:#909399;font-size:13px;line-height:32px">共 {{total}} 条</span>
     </div>
-    <el-table :data="items" v-loading="loading" stripe size="small">
-      <el-table-column prop="icp_no" label="ICP备案编号" width="200" />
-      <el-table-column prop="org_name" label="备案主体" min-width="160" />
-      <el-table-column prop="domain" label="备案域名" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="record_date" label="备案日期" width="120" />
-      <el-table-column label="操作" width="120" fixed="right" v-if="authStore.isAdmin">
+    <el-table :data="items" v-loading="loading" stripe size="small" :default-sort="{prop:'id',order:'descending'}">
+      <el-table-column prop="icp_no" label="ICP备案编号" width="200" sortable />
+      <el-table-column prop="org_name" label="备案主体" min-width="160" sortable />
+      <el-table-column prop="domain" label="备案域名" min-width="200" show-overflow-tooltip sortable />
+      <el-table-column prop="record_date" label="备案日期" width="120" sortable />
+      <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
         <template #default="{row}">
-          <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
+          <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
         </template>
       </el-table-column>
     </el-table>
-    <el-pagination v-if="total>size" v-model:current-page="page" :page-size="size" :total="total" layout="prev,pager,next" @current-change="fetchList" style="justify-content:center;margin-top:16px" />
+    <el-pagination v-if="total>0" v-model:current-page="page" v-model:page-size="size" :page-sizes="[10,20,50,100]" :total="total" layout="total,sizes,prev,pager,next" @current-change="fetchList" @size-change="fetchList" style="justify-content:center;margin-top:16px" />
 
     <el-dialog v-model="dlg" :title="isEdit ? '编辑' : '添加'" width="500px">
       <el-form :model="form" label-width="100px" size="small">
@@ -48,7 +48,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Edit, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import api from '@/api/index'
 

@@ -24,8 +24,11 @@
       <el-table-column prop="eval_org" label="测评单位" min-width="160" />
       <el-table-column prop="level" label="等级" width="80" />
       <el-table-column prop="record_date" label="备案日期" width="120" />
-      <el-table-column label="操作" width="140" fixed="right" v-if="authStore.isAdmin">
-        <template #default="{row}"><el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button><el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button></template>
+      <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
+        <template #default="{row}">
+          <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
+          <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+        </template>
       </el-table-column>
     </el-table>
     <el-pagination v-if="total>0" v-model:current-page="page" v-model:page-size="size" :page-sizes="[10,20,50,100]" :total="total" layout="total,sizes,prev,pager,next" @current-change="fetchList" @size-change="fetchList" style="justify-content:center;margin-top:16px"/>
@@ -61,7 +64,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Close } from '@element-plus/icons-vue'
+import { Search, Close, Edit, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import api from '@/api/index'
 
