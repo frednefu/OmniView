@@ -19,10 +19,18 @@ router = APIRouter(prefix="/info-systems", tags=["信息系统"])
 
 _asset_id_counter = 0
 
-def _gen_asset_id():
+def _gen_asset_id(db: Session = None) -> str:
+    """生成唯一资产ID，重试直到不冲突。"""
     global _asset_id_counter
-    _asset_id_counter += 1
-    return f"IS-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}-{_asset_id_counter:04d}"
+    for _ in range(100):
+        _asset_id_counter += 1
+        ts = datetime.now().strftime('%Y%m%d%H%M%S')
+        aid = f"IS-{ts}-{uuid.uuid4().hex[:8]}-{_asset_id_counter:04d}"
+        if db is None:
+            return aid
+        if not db.query(InfoSystem).filter(InfoSystem.asset_id == aid).first():
+            return aid
+    raise HTTPException(500, "无法生成唯一资产ID")
 
 
 # ── 人员查询 + 自动注册 ──
@@ -170,7 +178,7 @@ def _clean_empty_dates(data: dict) -> dict:
 @router.post("")
 def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     if not body.get("asset_id"):
-        body["asset_id"] = _gen_asset_id()
+        body["asset_id"] = _gen_asset_id(db)
     if db.query(InfoSystem).filter(InfoSystem.asset_id == body["asset_id"]).first():
         raise HTTPException(400, "资产ID已存在")
     valid_cols = {c.name for c in InfoSystem.__table__.columns}
@@ -618,7 +626,7 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                             clean[k] = None
                         else:
                             clean[k] = v
-                clean["asset_id"] = _gen_asset_id()
+                clean["asset_id"] = _gen_asset_id(db)
                 sys_obj = InfoSystem(**clean)
                 db.add(sys_obj)
                 stats["created"] += 1
