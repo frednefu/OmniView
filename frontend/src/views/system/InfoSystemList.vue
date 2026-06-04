@@ -114,7 +114,7 @@
           <div class="sc-section">
             <div class="sc-section-title"><span class="sc-section-icon"><el-icon><Lock /></el-icon></span> 等级保护情况</div>
             <el-row :gutter="16">
-              <el-col :span="12"><el-form-item label="等保系统名称"><el-select v-model="form.djdj_sys_name" filterable remote :remote-method="searchDjdj" :loading="djdjSearching" @change="onDjdjSelect" clearable style="width:100%"><el-option v-for="d in djdjOptions" :key="d.system_name" :label="d.system_name" :value="d.system_name"/></el-select></el-form-item></el-col>
+              <el-col :span="12"><el-form-item label="等保系统名称"><el-select v-model="form.djdj_sys_name" filterable :filter-method="searchDjdj" :loading="djdjSearching" @focus="loadAllDjdj" @change="onDjdjSelect" clearable style="width:100%"><el-option v-for="d in djdjOptions" :key="d.system_name" :label="d.system_name" :value="d.system_name"/></el-select></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="等保编号"><el-input v-model="form.djdj_no"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="等保等级"><el-input v-model="form.djdj_level"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="等保日期"><el-input v-model="form.djdj_date" type="date"/></el-form-item></el-col>
@@ -279,6 +279,7 @@ function resetForm(){
   Object.assign(form, baseForm())
   managerSelected.value=null; ownerSelected.value=null
   managerOptions.value=[]; ownerOptions.value=[]
+  djdjOptions.value=[]
 }
 
 async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems',{params:{page:page.value,size:size.value,search:search.value,fill_type:fillTypeFilter.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
@@ -295,6 +296,12 @@ function openEdit(r){
   if(r.owner_name){
     ownerOptions.value=[{id:0,name:r.owner_name,gh:r.owner_gh,username:''}]
     ownerSelected.value=0
+  }
+  // 预加载等保选项（编辑时需显示已选值）
+  if(r.djdj_sys_name){
+    djdjOptions.value=[{system_name:r.djdj_sys_name,record_no:r.djdj_no,level:r.djdj_level,record_date:r.djdj_date,org_name:r.djdj_org}]
+  }else{
+    djdjOptions.value=[]
   }
   dlg.value=true
 }
@@ -374,8 +381,26 @@ function applyStaffToForm(u){
 }
 
 // ── 等保查询 ──
-async function searchDjdj(q){if(!q)return;djdjSearching.value=true;try{const r=await api.get('/info-systems/djdj-search',{params:{q}});djdjOptions.value=r.data.items}catch{}finally{djdjSearching.value=false}}
-function onDjdjSelect(name){const d=djdjOptions.value.find(d=>d.system_name===name);if(d){form.djdj_no=d.record_no;form.djdj_level=d.level;form.djdj_date=d.record_date;form.djdj_org=d.org_name||'';form.djdj_status=form.djdj_status||'已备案';form.org_name=form.org_name||d.org_name}}
+const allDjdjLoaded = ref(false)
+const allDjdj = ref([])
+async function loadAllDjdj(){
+  if(allDjdjLoaded.value){djdjOptions.value=allDjdj.value;return}
+  djdjSearching.value=true
+  try{
+    const r=await api.get('/info-systems/djdj',{params:{size:1000}})
+    allDjdj.value=r.data.items||[]
+    djdjOptions.value=allDjdj.value
+    allDjdjLoaded.value=true
+  }catch{}finally{djdjSearching.value=false}
+}
+function searchDjdj(q){
+  if(!q){djdjOptions.value=allDjdj.value;return}
+  djdjOptions.value=allDjdj.value.filter(d=>d.system_name&&d.system_name.includes(q))
+}
+function onDjdjSelect(name){
+  const d=djdjOptions.value.find(d=>d.system_name===name)
+  if(d){form.djdj_no=d.record_no;form.djdj_level=d.level;form.djdj_date=d.record_date;form.djdj_org=d.org_name||'';form.djdj_status=form.djdj_status||'已备案';form.org_name=form.org_name||d.org_name}
+}
 
 // ── 保存 ──
 async function handleSave(){
