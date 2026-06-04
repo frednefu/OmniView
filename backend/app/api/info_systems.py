@@ -17,8 +17,12 @@ from app.api.deps import get_current_user, require_admin
 router = APIRouter(prefix="/info-systems", tags=["信息系统"])
 
 
+_asset_id_counter = 0
+
 def _gen_asset_id():
-    return f"IS-{datetime.now().strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4]}"
+    global _asset_id_counter
+    _asset_id_counter += 1
+    return f"IS-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}-{_asset_id_counter:04d}"
 
 
 # ── 人员查询 + 自动注册 ──
