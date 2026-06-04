@@ -176,22 +176,26 @@
     </el-dialog>
 
     <!-- 人员查询对话框（两步确认） -->
-    <el-dialog v-model="staffDlg" title="查询人员" width="550px" append-to-body @closed="staffLookupResults=[]">
+    <el-dialog v-model="staffDlg" title="查询人员" width="720px" append-to-body @closed="staffLookupResults=[]">
       <el-form inline size="small">
-        <el-form-item label="姓名"><el-input v-model="staffForm.name" placeholder="输入姓名" style="width:120px"/></el-form-item>
-        <el-form-item label="工号"><el-input v-model="staffForm.gh" placeholder="工号" style="width:100px"/></el-form-item>
+        <el-form-item label="姓名"><el-input v-model="staffForm.name" placeholder="输入姓名" style="width:140px"/></el-form-item>
+        <el-form-item label="工号"><el-input v-model="staffForm.gh" placeholder="工号" style="width:120px"/></el-form-item>
         <el-form-item><el-button type="primary" :icon="Search" @click="doStaffLookup" :loading="staffLookingUp">查询</el-button></el-form-item>
       </el-form>
-      <div v-if="staffLookupResults.length>0" style="margin-top:8px">
+      <div v-if="staffLookupResults.length>0" style="margin-top:8px;max-height:380px;overflow-y:auto">
         <el-radio-group v-model="staffSelectedIdx" class="staff-radio-group">
           <el-radio v-for="(s,idx) in staffLookupResults" :key="idx" :value="idx" class="staff-radio-item" border>
             <div class="staff-card">
-              <strong>{{s.name}}</strong>
-              <span v-if="s.gh">工号: {{s.gh}}</span>
-              <span v-if="s.phone">办公: {{s.phone}}</span>
-              <span v-if="s.mobile">手机: {{s.mobile}}</span>
-              <span v-if="s.department_name">{{s.department_name}}</span>
-              <el-tag size="small" :type="s.source==='系统用户'?'success':s.source.includes('中台')?'warning':'info'">{{s.source}}</el-tag>
+              <div class="staff-card-row">
+                <strong class="staff-card-name">{{s.name}}</strong>
+                <span v-if="s.gh" class="staff-card-gh">工号 {{s.gh}}</span>
+                <el-tag size="small" :type="s.source==='系统用户'?'success':s.source.includes('中台')?'warning':'info'" style="margin-left:auto;flex-shrink:0">{{s.source}}</el-tag>
+              </div>
+              <div class="staff-card-row staff-card-meta" v-if="s.phone||s.mobile||s.department_name">
+                <span v-if="s.phone" class="staff-card-info"><el-icon><Phone /></el-icon> {{s.phone}}</span>
+                <span v-if="s.mobile" class="staff-card-info"><el-icon><Iphone /></el-icon> {{s.mobile}}</span>
+                <span v-if="s.department_name" class="staff-card-info"><el-icon><OfficeBuilding /></el-icon> {{s.department_name}}</span>
+              </div>
             </div>
           </el-radio>
         </el-radio-group>
@@ -251,7 +255,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Edit, Delete, DataBoard, UserFilled, Lock, Briefcase, UploadFilled } from '@element-plus/icons-vue'
+import { Search, Edit, Delete, DataBoard, UserFilled, Lock, Briefcase, UploadFilled, Phone, Iphone, OfficeBuilding } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import api from '@/api/index'
 
@@ -492,11 +496,15 @@ onMounted(async()=>{fetchList();try{const r=await api.get('/info-systems/supply-
 .is-dialog :deep(.el-dialog__body){padding:16px 24px}
 
 /* 人员查询结果 */
-.staff-radio-group{display:flex;flex-direction:column;gap:8px;width:100%}
-.staff-radio-item{width:100%;margin:0;padding:8px 12px}
-.staff-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.staff-card strong{min-width:60px}
-.staff-card span{color:#909399;font-size:12px}
+.staff-radio-group{display:flex;flex-direction:column;gap:6px;width:100%}
+.staff-radio-item{width:100%;margin:0!important;padding:10px 14px}
+.staff-card{display:flex;flex-direction:column;gap:6px;width:100%}
+.staff-card-row{display:flex;align-items:center;gap:12px}
+.staff-card-name{font-size:14px;min-width:50px}
+.staff-card-gh{font-size:12px;color:#909399}
+.staff-card-meta{gap:16px}
+.staff-card-info{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#606266}
+.staff-card-info .el-icon{font-size:13px;color:#909399}
 /* 导入结果 */
 .import-result{margin-top:16px}
 .import-stats{display:flex;gap:16px;margin-top:8px;padding:10px 14px;background:#f5f7fa;border-radius:6px;font-size:13px}
