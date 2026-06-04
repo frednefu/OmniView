@@ -489,8 +489,9 @@ def _do_import(file: UploadFile, mode: str, db: Session):
 
     # 清理存量数据中前后带空格的系统名称
     try:
+        from sqlalchemy import func as sa_func
         dirty = db.query(InfoSystem).filter(
-            (InfoSystem.system_name.startswith(" ")) | (InfoSystem.system_name.endswith(" "))
+            sa_func.trim(InfoSystem.system_name) != InfoSystem.system_name
         ).all()
         for d in dirty:
             d.system_name = d.system_name.strip()
@@ -601,7 +602,11 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                     except Exception:
                         db.rollback()
 
-            existing = db.query(InfoSystem).filter(InfoSystem.system_name == system_name).first()
+            # 用 TRIM 匹配，容忍前后空格和不可见字符
+            from sqlalchemy import func as sa_func
+            existing = db.query(InfoSystem).filter(
+                sa_func.trim(InfoSystem.system_name) == system_name
+            ).first()
 
             if existing:
                 if mode == "skip":
