@@ -188,8 +188,10 @@
             <div class="staff-card">
               <strong>{{s.name}}</strong>
               <span v-if="s.gh">工号: {{s.gh}}</span>
+              <span v-if="s.phone">办公: {{s.phone}}</span>
+              <span v-if="s.mobile">手机: {{s.mobile}}</span>
               <span v-if="s.department_name">{{s.department_name}}</span>
-              <el-tag size="small" :type="s.source==='系统用户'?'success':'info'">{{s.source}}</el-tag>
+              <el-tag size="small" :type="s.source==='系统用户'?'success':s.source.includes('中台')?'warning':'info'">{{s.source}}</el-tag>
             </div>
           </el-radio>
         </el-radio-group>
@@ -377,20 +379,20 @@ async function doStaffLookup(){
 async function confirmStaffSelect(){
   const s=staffLookupResults.value[staffSelectedIdx.value]
   if(!s)return
-  // 如果是系统用户，直接选；如果是教职工库，先注册
+  // 如果是系统用户，直接选
   if(s.source==='系统用户'){
     applyStaffToForm(s)
     staffDlg.value=false
     ElMessage.success('已选择人员')
     return
   }
-  // 从教职工库注册
+  // 从教职工库/数据中台注册（API自动补全个人信息）
   try{
     const r=await api.post('/info-systems/staff-register',{name:s.name,gh:s.gh})
     const u=r.data
     applyStaffToForm(u)
     staffDlg.value=false
-    ElMessage.success(r.data.message||'已添加并选择人员')
+    ElMessage.success(u.message||'已添加并选择人员')
   }catch(e){ElMessage.error(e.response?.data?.detail||'注册失败')}
 }
 function applyStaffToForm(u){

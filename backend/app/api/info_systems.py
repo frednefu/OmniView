@@ -47,20 +47,20 @@ def search_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db)
 
 @router.get("/staff-lookup")
 def lookup_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db), _=Depends(require_admin)):
-    """查找人员（系统用户 + 教职工库），返回合并结果供确认。"""
+    """查找人员（系统用户 + 数据中台教职工API），返回合并结果供确认。"""
     results = []
     # 1. 系统用户
     users = db.query(User).filter(
         (User.name.contains(q)) | (User.gh.contains(q)) | (User.username.contains(q))
     ).limit(10).all()
+    existing_ghs = {u.gh for u in users if u.gh}
     for u in users:
         results.append({"id": u.id, "name": u.name, "gh": u.gh, "username": u.username,
                         "phone": u.phone, "mobile": u.mobile,
                         "department_name": u.department.dwmc if u.department else "",
                         "source": "系统用户"})
-    # 2. 教职工库（排除已有用户）
+    # 2. 本地教职工库（排除已有用户）
     from app.models.staff_info import StaffInfo
-    existing_ghs = {u.gh for u in users if u.gh}
     staffs = db.query(StaffInfo).filter(
         (StaffInfo.xm.contains(q)) | (StaffInfo.gh.contains(q))
     ).limit(10).all()
@@ -71,7 +71,46 @@ def lookup_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db)
                         "phone": s.bgdh or "", "mobile": s.yddh or "",
                         "department_name": s.szdwbm or "",
                         "source": "教职工库（可注册）"})
-    return {"items": results[:15]}
+    # 3. 数据中台教职工API查询（排除已有用户和已查到的）
+    seen_ghs = existing_ghs | {s.gh for s in staffs if s.gh}
+    try:
+        from app.services.external_api_service import fetch_staff
+        # 尝试按工号和姓名分别查询
+        api_results = []
+        try:
+            api_results.extend(fetch_staff(db, gh=q))
+        except Exception:
+            pass
+        try:
+            api_results.extend(fetch_staff(db, xm=q))
+        except Exception:
+            pass
+        # 去重
+        api_seen = set()
+        for r in api_results:
+            gh = (r.get("GH") or "").strip()
+            if not gh or gh in seen_ghs or gh in api_seen:
+                continue
+            api_seen.add(gh)
+            xm = (r.get("XM") or "").strip()
+            email = (r.get("DZYX") or "").strip()
+            phone = (r.get("BGDH") or "").strip()
+            mobile = (r.get("YDDH") or "").strip()
+            szdwbm = (r.get("SZDWBM") or "").strip()
+            # 尝试匹配部门名称
+            dept_name = szdwbm
+            if szdwbm:
+                d = db.query(Department).filter(Department.dwbm == szdwbm).first()
+                if d:
+                    dept_name = d.dwmc
+            results.append({"id": None, "name": xm, "gh": gh, "username": None,
+                            "phone": phone, "mobile": mobile, "email": email,
+                            "department_name": dept_name,
+                            "source": "数据中台（可注册）"})
+        seen_ghs |= api_seen
+    except Exception:
+        pass  # API不可用时不影响本地查询
+    return {"items": results[:20]}
 
 
 @router.post("/staff-register")
@@ -94,7 +133,71 @@ def register_staff(body: dict, db: Session = Depends(get_db), _=Depends(require_
         return {"id": user.id, "name": user.name, "gh": user.gh, "username": user.username,
                 "phone": user.phone, "mobile": user.mobile, "department_name": user.department.dwmc if user.department else "",
                 "existed": True}
-    # 尝试从 staff_info 查找
+
+    def _find_or_create_user(staff_data: dict) -> dict:
+        """根据API/本地数据查找或创建用户。"""
+        s_gh = (staff_data.get("gh") or "").strip()
+        s_name = (staff_data.get("name") or "").strip()
+        s_email = (staff_data.get("email") or "").strip() or None
+        s_phone = (staff_data.get("phone") or "").strip() or None
+        s_mobile = (staff_data.get("mobile") or "").strip() or None
+        s_gender = (staff_data.get("gender") or "").strip() or ""
+        s_dept_code = (staff_data.get("dept_code") or "").strip()
+        # 匹配部门
+        dept_id = None
+        if s_dept_code:
+            d = db.query(Department).filter(Department.dwbm == s_dept_code).first()
+            if d:
+                dept_id = d.id
+        username = s_gh or f"u{int(time.time())}"
+        exist = db.query(User).filter(User.username == username).first()
+        if exist:
+            username = f"{s_gh}_{int(time.time() % 1000)}"
+        new_user = User(
+            username=username,
+            password_hash=hash_password("Abcd1234!"),
+            name=s_name,
+            gh=s_gh,
+            gender=s_gender,
+            phone=s_phone,
+            mobile=s_mobile,
+            email=s_email,
+            department_id=dept_id,
+            user_type="internal",
+            role="user",
+            is_active=True,
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return {"id": new_user.id, "name": new_user.name, "gh": new_user.gh, "username": new_user.username,
+                "phone": new_user.phone, "mobile": new_user.mobile,
+                "department_name": new_user.department.dwmc if new_user.department else "",
+                "existed": False, "message": f"已自动注册: {new_user.name}"}
+
+    # 1. 尝试从数据中台API查找
+    try:
+        from app.services.external_api_service import fetch_staff
+        api_results = []
+        if gh:
+            api_results = fetch_staff(db, gh=gh)
+        if not api_results and name:
+            api_results = fetch_staff(db, xm=name)
+        if api_results:
+            r = api_results[0]
+            return _find_or_create_user({
+                "gh": (r.get("GH") or "").strip(),
+                "name": (r.get("XM") or "").strip(),
+                "email": (r.get("DZYX") or "").strip(),
+                "phone": (r.get("BGDH") or "").strip(),
+                "mobile": (r.get("YDDH") or "").strip(),
+                "gender": "男" if r.get("XBM") == "1" else ("女" if r.get("XBM") == "2" else ""),
+                "dept_code": (r.get("SZDWBM") or "").strip(),
+            })
+    except Exception:
+        pass  # API不可用则降级到本地
+
+    # 2. 尝试从本地 staff_info 查找
     from app.models.staff_info import StaffInfo
     sq = db.query(StaffInfo)
     if name and gh:
@@ -105,37 +208,16 @@ def register_staff(body: dict, db: Session = Depends(get_db), _=Depends(require_
         sq = sq.filter(StaffInfo.xm == name)
     staff = sq.first()
     if staff:
-        username = staff.gh or f"u{int(time.time())}"
-        exist = db.query(User).filter(User.username == username).first()
-        if exist:
-            username = f"{staff.gh}_{int(time.time() % 1000)}"
-        # 尝试根据部门编码匹配部门
-        dept_id = None
-        if staff.szdwbm:
-            d = db.query(Department).filter(Department.dwbm == staff.szdwbm).first()
-            if d:
-                dept_id = d.id
-        new_user = User(
-            username=username,
-            password_hash=hash_password("Abcd1234!"),
-            name=staff.xm,
-            gh=staff.gh,
-            gender="男" if staff.xbm == "1" else ("女" if staff.xbm == "2" else ""),
-            phone=staff.bgdh or "",
-            mobile=staff.yddh or "",
-            email=staff.dzyx or "",
-            department_id=dept_id,
-            user_type="internal",
-            role="user",
-            is_active=True,
-        )
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        return {"id": new_user.id, "name": new_user.name, "gh": new_user.gh, "username": new_user.username,
-                "phone": new_user.phone, "mobile": new_user.mobile, "department_name": new_user.department.dwmc if new_user.department else "",
-                "existed": False, "message": f"已从教职工库自动注册用户: {new_user.name}"}
-    raise HTTPException(404, "未找到匹配的教职工信息")
+        return _find_or_create_user({
+            "gh": staff.gh or "",
+            "name": staff.xm,
+            "email": staff.dzyx or "",
+            "phone": staff.bgdh or "",
+            "mobile": staff.yddh or "",
+            "gender": "男" if staff.xbm == "1" else ("女" if staff.xbm == "2" else ""),
+            "dept_code": staff.szdwbm or "",
+        })
+    raise HTTPException(404, "未在系统中找到匹配的教职工信息，请确认姓名或工号")
 
 
 # ── InfoSystem CRUD ──
