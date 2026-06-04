@@ -239,13 +239,16 @@ def _detect_import_format(ws) -> str:
     row2 = [_cell_str(ws.cell(2, c).value) for c in range(1, min(ws.max_column + 1, 80))]
     r1 = " ".join(row1)
     r2 = " ".join(row2)
-    # 格式1: 信息系统管理_*.xlsx（行1是中文表头，含"单位名称"+"管理员姓名"）
+    # 格式1: 系统导出 info_systems(*).xlsx（行1含"资产ID"+"系统名称"，排在iso_report之前）
+    if "资产ID" in row1 and "系统名称" in row1 and "资产类型" in row1:
+        return "system_export"
+    # 格式2: 信息系统管理_*.xlsx（行1是中文表头，含"单位名称"+"管理员姓名"）
     if "单位名称" in r1 and "管理员姓名" in r1:
         return "iso_report"
-    # 格式2: 资产清单.xlsx（行1是说明文字，行2是"ID"+"所属单位"+"信息系统名称"等表头）
+    # 格式3: 资产清单.xlsx（行1是说明文字，行2是"ID"+"所属单位"+"信息系统名称"等表头）
     if ("说明" in r1 or "必填" in r1 or len(row1[0]) > 50) and "ID" in row2 and "所属单位" in r2:
         return "asset_list"
-    # 格式3: 资产导出.xlsx（行1是长说明，行2直接是数据或无表头行）
+    # 格式4: 资产导出.xlsx（行1是长说明，行2直接是数据或无表头行）
     if "填写说明" in r1 or "必填项" in r1 or len(row1[0]) > 50:
         return "asset_export"
     return "unknown"
@@ -373,6 +376,78 @@ _FORMAT_ASSET_LIST_HEADER_MAP = {
 _ASSET_LIST_EXTRA_IP_HEADERS = ["互联网接入IP地址", "IP"]
 
 
+# 系统导出 info_systems(*).xlsx 格式：中文表头 → 模型字段
+_SYSTEM_EXPORT_HEADER_MAP = {
+    "资产ID":          "asset_id",
+    "系统名称":        "system_name",
+    "资产类型":        "system_type",
+    "信息系统类型":    "sub_type",
+    "IP地址":         "ip_address",
+    "域名/URL":       "domain",
+    "单位名称":        "org_name",
+    "运维单位":        "dept_name",
+    "联系人":         "contact",
+    "联系电话":       "contact_phone",
+    "填报类型":       "fill_type",
+    "所属部门ID":     "dept_id",
+    "管理员姓名":     "manager_name",
+    "管理员工号":     "manager_gh",
+    "负责人姓名":     "owner_name",
+    "负责人工号":     "owner_gh",
+    "等保状态":       "djdj_status",
+    "等保系统名称":   "djdj_sys_name",
+    "等保编号":       "djdj_no",
+    "等保等级":       "djdj_level",
+    "等保日期":       "djdj_date",
+    "测评单位":       "djdj_org",
+    "ICP备案号":      "icp_no",
+    "ICP备案日期":    "icp_date",
+    "开发厂商":       "vendor_name",
+    "产品名称":       "product_name",
+    "版本号":         "product_version",
+    "来源":           "source_type",
+    "厂商联系人":     "vendor_contact",
+    "厂商电话":       "vendor_phone",
+    "运维联系人":     "ops_contact",
+    "运维电话":       "ops_phone",
+    "是否有网站":     "has_website",
+    "内网URL":        "internal_url",
+    "IP地址段":       "ip_range",
+    "入口地址":       "entry_url",
+    "验证状态":       "url_status",
+    "备注":           "remark",
+}
+_SYSTEM_EXPORT_INT_FIELDS = {"dept_id"}
+_SYSTEM_EXPORT_DATE_FIELDS = {"djdj_date", "icp_date"}
+
+
+def _build_system_export_col_map(ws) -> dict:
+    """从第1行表头构建 列号→模型字段 的映射。"""
+    col_map = {}
+    for c in range(1, ws.max_column + 1):
+        header = _cell_str(ws.cell(1, c).value).strip()
+        if header in _SYSTEM_EXPORT_HEADER_MAP:
+            col_map[c] = _SYSTEM_EXPORT_HEADER_MAP[header]
+    return col_map
+
+
+def _parse_row_system_export(ws, row_idx: int, col_map: dict) -> dict:
+    """解析系统导出格式的一行数据。"""
+    data = {}
+    for c, field in col_map.items():
+        raw = ws.cell(row_idx, c).value
+        if field in _SYSTEM_EXPORT_DATE_FIELDS:
+            data[field] = _parse_excel_date(raw)
+        elif field in _SYSTEM_EXPORT_INT_FIELDS:
+            try:
+                data[field] = int(raw) if raw is not None and str(raw).strip() else None
+            except (ValueError, TypeError):
+                data[field] = None
+        else:
+            data[field] = _cell_str(raw)
+    return data
+
+
 def _build_asset_list_col_map(ws) -> dict:
     """从第2行表头构建 列号→模型字段 的映射。"""
     col_map = {}
@@ -464,32 +539,44 @@ def _do_import(file: UploadFile, mode: str, db: Session):
         raise HTTPException(400, "无法识别文件格式，请确认文件类型。支持：资产导出.xlsx、信息系统管理_*.xlsx")
 
     # 找到数据起始行
-    if fmt == "asset_export":
+    if fmt == "system_export":
+        start_row = 2  # 行1=表头, 行2起=数据
+        col_map = _build_system_export_col_map(ws)
+        parse_row = lambda ws, ri: _parse_row_system_export(ws, ri, col_map)
+        fmt_name = "系统导出"
+        # 系统导出按 asset_id 去重（保留原ID）
+        dedup_by = "asset_id"
+    elif fmt == "asset_export":
         start_row = _find_data_start(ws)
         parse_row = _parse_row_asset_export
         fmt_name = "资产导出"
+        dedup_by = "system_name"
     elif fmt == "asset_list":
         start_row = 3  # 行1=说明, 行2=表头, 行3起=数据
         col_map = _build_asset_list_col_map(ws)
         parse_row = lambda ws, ri: _parse_row_asset_list(ws, ri, col_map)
         fmt_name = "资产清单"
+        dedup_by = "system_name"
     else:
         start_row = 2  # 第1行是表头，第2行开始是数据
         parse_row = _parse_row_iso_report
         fmt_name = "信息系统管理"
+        dedup_by = "system_name"
 
     # 解析所有行
     parsed = []
-    system_names_seen = set()
+    seen_keys = set()
     for row_idx in range(start_row, ws.max_row + 1):
         row_data = parse_row(ws, row_idx)
-        sn = row_data.get("system_name", "").strip()
-        if not sn:
+        if dedup_by == "asset_id":
+            key = row_data.get("asset_id", "").strip()
+        else:
+            key = row_data.get("system_name", "").strip()
+        if not key:
             continue
-        # Excel 内重复的系统名称只取第一次
-        if sn in system_names_seen:
+        if key in seen_keys:
             continue
-        system_names_seen.add(sn)
+        seen_keys.add(key)
         parsed.append(row_data)
 
     # 统计 + 导入
@@ -615,11 +702,15 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                     except Exception:
                         db.rollback()
 
-            # 用 TRIM 匹配，容忍前后空格和不可见字符
+            # 匹配已有记录：系统导出按 asset_id，其他按 system_name
             from sqlalchemy import func as sa_func
-            existing = db.query(InfoSystem).filter(
-                sa_func.trim(InfoSystem.system_name) == system_name
-            ).first()
+            if dedup_by == "asset_id":
+                asset_id = row_data.get("asset_id", "").strip()
+                existing = db.query(InfoSystem).filter(InfoSystem.asset_id == asset_id).first() if asset_id else None
+            else:
+                existing = db.query(InfoSystem).filter(
+                    sa_func.trim(InfoSystem.system_name) == system_name
+                ).first()
 
             if existing:
                 if mode == "skip":
@@ -657,7 +748,8 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                             clean[k] = None
                         else:
                             clean[k] = v
-                clean["asset_id"] = _gen_asset_id(db)
+                if not clean.get("asset_id"):
+                    clean["asset_id"] = _gen_asset_id(db)
                 sys_obj = InfoSystem(**clean)
                 db.add(sys_obj)
                 stats["created"] += 1
