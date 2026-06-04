@@ -487,6 +487,18 @@ def _do_import(file: UploadFile, mode: str, db: Session):
     valid_cols = {c.name for c in InfoSystem.__table__.columns}
     date_cols = {"djdj_date", "icp_date"}
 
+    # 清理存量数据中前后带空格的系统名称
+    try:
+        dirty = db.query(InfoSystem).filter(
+            (InfoSystem.system_name.startswith(" ")) | (InfoSystem.system_name.endswith(" "))
+        ).all()
+        for d in dirty:
+            d.system_name = d.system_name.strip()
+        if dirty:
+            db.flush()
+    except Exception:
+        pass
+
     # 预加载部门代码映射（仅新格式需要）
     dept_code_map = {}
     if fmt == "iso_report":
@@ -524,6 +536,7 @@ def _do_import(file: UploadFile, mode: str, db: Session):
     for row_data in parsed:
         try:
             system_name = row_data["system_name"].strip()
+            row_data["system_name"] = system_name  # 确保写入DB的名称已去空格
 
             # 解析部门代码 → dept_id
             dept_code = row_data.pop("_dept_code", "")
