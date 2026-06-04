@@ -213,6 +213,7 @@
           <span style="color:#909399">跳过 <b>{{importResult.skipped}}</b></span>
           <span v-if="importResult.dept_matched" style="color:#67c23a">匹配部门 <b>{{importResult.dept_matched}}</b></span>
           <span v-if="importResult.users_created" style="color:#e6a23c">新增用户 <b>{{importResult.users_created}}</b></span>
+          <span v-if="importResult.supply_added" style="color:#e6a23c">新增供应链 <b>{{importResult.supply_added}}</b></span>
           <span v-if="importResult.errors" style="color:#f56c6c">失败 <b>{{importResult.errors}}</b></span>
         </div>
       </div>

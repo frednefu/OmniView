@@ -338,6 +338,11 @@ _FORMAT_ASSET_LIST_HEADER_MAP = {
     "供应链厂商情况-产品名称-1":   "product_name",
     "供应链厂商情况-版本号-1":     "product_version",
     "供应链厂商情况-来源-1":       "source_type",
+    # 供应链第2组
+    "供应链厂商情况-开发厂商名称-2": "_vendor2_name",
+    "供应链厂商情况-产品名称-2":   "_vendor2_product",
+    "供应链厂商情况-版本号-2":     "_vendor2_version",
+    "供应链厂商情况-来源-2":       "_vendor2_source",
 }
 # 资产清单中需要合并到 ip_address 的额外列
 _ASSET_LIST_EXTRA_IP_HEADERS = ["互联网接入IP地址", "IP"]
@@ -464,7 +469,9 @@ def _do_import(file: UploadFile, mode: str, db: Session):
 
     # 统计 + 导入
     stats = {"total": len(parsed), "created": 0, "updated": 0, "supplemented": 0, "skipped": 0, "errors": 0,
-             "dept_matched": 0, "users_created": 0, "format": fmt_name}
+             "dept_matched": 0, "users_created": 0, "supply_added": 0, "format": fmt_name}
+    # 预加载已有供应链公司名
+    existing_companies = {c[0] for c in db.query(SupplyChain.company_name).all()}
     valid_cols = {c.name for c in InfoSystem.__table__.columns}
     date_cols = {"djdj_date", "icp_date"}
 
@@ -611,6 +618,37 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                 sys_obj = InfoSystem(**clean)
                 db.add(sys_obj)
                 stats["created"] += 1
+
+            # 供应链自动入库：开发厂商名称不在 supply_chains 表中则自动添加
+            vendor = (row_data.get("vendor_name") or "").strip()
+            if vendor and vendor not in existing_companies:
+                try:
+                    sc = SupplyChain(company_name=vendor)
+                    db.add(sc)
+                    db.flush()
+                    existing_companies.add(vendor)
+                    stats["supply_added"] += 1
+                except Exception:
+                    db.rollback()
+
+            # 第2组供应链厂商 → 拼接到备注
+            v2_name = row_data.pop("_vendor2_name", "")
+            if v2_name and v2_name.strip():
+                parts = [v2_name.strip()]
+                for k2 in ("_vendor2_product", "_vendor2_version", "_vendor2_source"):
+                    v2 = row_data.pop(k2, "")
+                    if v2 and v2.strip():
+                        parts.append(v2.strip())
+                v2_text = " / ".join(parts)
+                existing_remark = row_data.get("remark", "") or (getattr(existing, "remark", None) if existing else "")
+                if existing_remark:
+                    row_data["remark"] = str(existing_remark) + " | 供应商2: " + v2_text
+                else:
+                    row_data["remark"] = "供应商2: " + v2_text
+            else:
+                for k2 in ("_vendor2_name", "_vendor2_product", "_vendor2_version", "_vendor2_source"):
+                    row_data.pop(k2, None)
+
         except Exception:
             db.rollback()
             stats["errors"] += 1
@@ -624,6 +662,7 @@ def _do_import(file: UploadFile, mode: str, db: Session):
     if stats['errors']: parts.append(f"失败 {stats['errors']}")
     if stats['dept_matched']: parts.append(f"匹配部门 {stats['dept_matched']}")
     if stats['users_created']: parts.append(f"创建账号 {stats['users_created']}")
+    if stats['supply_added']: parts.append(f"新增供应链 {stats['supply_added']}")
     stats["message"] = "，".join(parts)
     return stats
 
