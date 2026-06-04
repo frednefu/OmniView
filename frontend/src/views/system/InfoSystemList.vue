@@ -69,14 +69,14 @@
           <div class="sc-section">
             <div class="sc-section-title"><span class="sc-section-icon"><el-icon><DataBoard /></el-icon></span> 基本情况</div>
             <el-row :gutter="16">
-              <el-col :span="8"><el-form-item label="资产ID"><el-input v-model="form.asset_id" placeholder="自动生成"/></el-form-item></el-col>
+              <el-col :span="8"><el-form-item label="资产ID"><el-input v-model="form.asset_id" disabled/></el-form-item></el-col>
               <el-col :span="16"><el-form-item label="系统名称" required><el-input v-model="form.system_name" placeholder="信息系统的完整名称"/></el-form-item></el-col>
               <el-col :span="8"><el-form-item label="资产类型"><el-select v-model="form.system_type" style="width:100%"><el-option v-for="t in sysTypes" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
               <el-col :span="8"><el-form-item label="信息系统类型"><el-select v-model="form.sub_type" filterable style="width:100%" clearable><el-option v-for="t in subTypes" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
-              <el-col :span="8"><el-form-item label="填报类型"><el-select v-model="form.fill_type" style="width:100%"><el-option v-for="t in ['导入','手动','自动','离线','失效']" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
+              <el-col :span="8"><el-form-item label="填报类型"><el-select v-model="form.fill_type" style="width:100%"><el-option v-for="t in ['导入','手动','自动','注销','离线','失效']" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="IP地址"><el-input v-model="form.ip_address" placeholder="多个IP用逗号分隔"/></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="域名"><el-input v-model="form.domain" placeholder="多个域名逗号分隔，不含http"/></el-form-item></el-col>
-              <el-col :span="12"><el-form-item label="入口地址"><el-input v-model="form.entry_url" placeholder="https://xxx.nefu.edu.cn" readonly/></el-form-item></el-col>
+              <el-col :span="12"><el-form-item label="入口地址"><el-input v-model="form.entry_url" placeholder="https://xxx.nefu.edu.cn"/></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="单位名称"><el-input v-model="form.org_name"/></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="运维单位"><el-input v-model="form.dept_name"/></el-form-item></el-col>
               <el-col :span="8"><el-form-item label="联系人"><el-input v-model="form.contact"/></el-form-item></el-col>
@@ -101,10 +101,10 @@
               <el-col :span="12">
                 <el-form-item label="管理员">
                   <div style="display:flex;align-items:center;gap:6px;width:100%">
-                    <el-select v-model="managerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'manager')" :loading="managerSearching" placeholder="输入姓名或工号搜索" clearable style="flex:1" @change="onManagerSelect" :disabled="!!form.manager_gh">
+                    <el-select v-model="managerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'manager')" :loading="managerSearching" placeholder="输入姓名或工号搜索" clearable style="flex:1" @change="onManagerSelect">
                       <el-option v-for="u in managerOptions" :key="u.id" :label="`${u.name} (${u.gh||u.username})`" :value="u.id"/>
                     </el-select>
-                    <el-button :icon="Search" title="从教职工库查询" @click="openStaffLookup('manager')" :disabled="!!form.manager_gh">查教职工库</el-button>
+                    <el-button :icon="Search" title="从教职工库查询" @click="openStaffLookup('manager')" >查教职工库</el-button>
                   </div>
                   <div v-if="form.manager_name" style="margin-top:6px;display:flex;align-items:center;gap:8px">
                     <el-tag type="success" closable @close="clearManager">{{ form.manager_name }}</el-tag>
