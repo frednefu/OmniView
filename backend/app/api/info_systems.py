@@ -209,16 +209,20 @@ def delete_system(sys_id: int, db: Session = Depends(get_db), _=Depends(require_
 
 def _detect_import_format(ws) -> str:
     """检测 Excel 文件格式，返回格式名称。"""
-    # 读取第一行所有列值
-    headers = [_cell_str(ws.cell(1, c).value) for c in range(1, min(ws.max_column + 1, 80))]
-    header_text = " ".join(headers)
-    # 新格式特征：包含"单位名称"+"管理员姓名"等关键词
-    if "单位名称" in header_text and "管理员姓名" in header_text:
-        return "iso_report"  # 信息系统管理_*.xlsx
-    # 旧格式特征：第一行是长说明文字
-    first_cell = _cell_str(ws.cell(1, 1).value)
-    if "填写说明" in first_cell or "必填项" in first_cell or len(first_cell) > 50:
-        return "asset_export"  # 资产导出.xlsx
+    # 读取前两行的列值
+    row1 = [_cell_str(ws.cell(1, c).value) for c in range(1, min(ws.max_column + 1, 80))]
+    row2 = [_cell_str(ws.cell(2, c).value) for c in range(1, min(ws.max_column + 1, 80))]
+    r1 = " ".join(row1)
+    r2 = " ".join(row2)
+    # 格式1: 信息系统管理_*.xlsx（行1是中文表头，含"单位名称"+"管理员姓名"）
+    if "单位名称" in r1 and "管理员姓名" in r1:
+        return "iso_report"
+    # 格式2: 资产清单.xlsx（行1是说明文字，行2是"ID"+"所属单位"+"信息系统名称"等表头）
+    if ("说明" in r1 or "必填" in r1 or len(row1[0]) > 50) and "ID" in row2 and "所属单位" in r2:
+        return "asset_list"
+    # 格式3: 资产导出.xlsx（行1是长说明，行2直接是数据或无表头行）
+    if "填写说明" in r1 or "必填项" in r1 or len(row1[0]) > 50:
+        return "asset_export"
     return "unknown"
 
 
@@ -243,12 +247,12 @@ _FORMAT_ASSET_EXPORT = {
 # 新格式（信息系统管理_*.xlsx）列映射：列号 → (模型字段, 转换函数或None)
 _FORMAT_ISO_REPORT = {
     3:  "org_name",           # 单位名称
+    4:  "_dept_code",         # 单位名称_代码 → 查 departments.dwbm 得到 dept_id
     5:  "manager_name",       # 管理员姓名
-    6:  "manager_gh",         # 管理员工号_账号
-    7:  "owner_name",         # 负责人姓名
-    8:  "owner_phone",        # 负责人手机号码
+    6:  "manager_gh",         # 管理员工号_账号 → 无账号则自动创建
+    8:  "_manager_mobile",    # 管理员手机号码 → 创建账号时填入 mobile
     10: "system_type",        # 系统类型
-    11: "sub_type",           # 信息系统类型
+    11: "sub_type",           # 信息系统类型 (K列，主键)
     12: "product_name",       # 产品名称
     13: "product_version",    # 版本号
     14: "domain",             # 域名
@@ -256,15 +260,14 @@ _FORMAT_ISO_REPORT = {
     16: "ip_address2",        # 业务内网IP（合并到ip_address）
     18: "dept_name",          # 运维单位
     24: "source_type",        # 数据来源
-    30: "data_owner_name",    # 数据处理负责人
     41: "djdj_status",        # 等保定级情况
-    42: "djdj_sys_name",      # 等保二级系统名称
+    42: "djdj_sys_name",      # 等保二级系统名称 → 等保信息维护表联动
     43: "djdj_no",            # 等保定级编号
     44: "djdj_date",          # 等保定级时间
     47: "icp_no",             # ICP备案号
     49: "icp_date",           # ICP备案时间
     51: "remark",             # 备注
-    52: "vendor_name",        # 供应链单位名称
+    52: "vendor_name",        # 供应链单位名称 → 供应链信息维护表联动
     56: "vendor_contact",     # 供应链联系人
     57: "vendor_phone",       # 供应链联系电话
     70: "submitter",          # 提交人
@@ -312,6 +315,67 @@ def _parse_row_asset_export(ws, row_idx: int) -> dict:
     return data
 
 
+# 资产清单.xlsx 格式：表头名 → 模型字段
+_FORMAT_ASSET_LIST_HEADER_MAP = {
+    "所属单位":              "org_name",
+    "信息系统名称":          "system_name",
+    "资产类型":              "system_type",
+    "信息系统类型":          "sub_type",
+    "IP":                   "ip_address",
+    "域名":                 "domain",
+    "等保备案级别":          "djdj_level",
+    "备注":                 "remark",
+    "等保备案系统名称":      "djdj_sys_name",
+    "等保备案时间":          "djdj_date",
+    "等保备案编号":          "djdj_no",
+    "联系人":               "contact",
+    "联系人电话":           "contact_phone",
+    "系统运维单位":          "dept_name",
+    "内网URL":              "internal_url",
+    "内网IP地址段（只明确到C段）": "ip_range",
+    # 供应链第1组
+    "供应链厂商情况-开发厂商名称-1": "vendor_name",
+    "供应链厂商情况-产品名称-1":   "product_name",
+    "供应链厂商情况-版本号-1":     "product_version",
+    "供应链厂商情况-来源-1":       "source_type",
+}
+# 资产清单中需要合并到 ip_address 的额外列
+_ASSET_LIST_EXTRA_IP_HEADERS = ["互联网接入IP地址", "IP"]
+
+
+def _build_asset_list_col_map(ws) -> dict:
+    """从第2行表头构建 列号→模型字段 的映射。"""
+    col_map = {}
+    for c in range(1, ws.max_column + 1):
+        header = _cell_str(ws.cell(2, c).value).strip()
+        if header in _FORMAT_ASSET_LIST_HEADER_MAP:
+            col_map[c] = _FORMAT_ASSET_LIST_HEADER_MAP[header]
+    return col_map
+
+
+def _parse_row_asset_list(ws, row_idx: int, col_map: dict) -> dict:
+    """解析资产清单.xlsx 的一行数据。"""
+    data = {"fill_type": "导入"}
+    ip_parts = []
+    for c in range(1, ws.max_column + 1):
+        raw = ws.cell(row_idx, c).value
+        val_str = _cell_str(raw)
+        header = _cell_str(ws.cell(2, c).value).strip()
+        # 收集所有 IP 列（主IP + 内部IP等）
+        if header in _ASSET_LIST_EXTRA_IP_HEADERS and val_str:
+            ip_parts.append(val_str)
+        if c in col_map:
+            field = col_map[c]
+            if field == "djdj_date":
+                data[field] = _parse_excel_date(raw)
+            else:
+                data[field] = val_str
+    # 合并 IP
+    if ip_parts:
+        data["ip_address"] = ",".join(dict.fromkeys(ip_parts))  # 去重保序
+    return data
+
+
 def _parse_row_iso_report(ws, row_idx: int) -> dict:
     """解析新格式的一行数据。"""
     data = {"fill_type": "导入"}
@@ -320,11 +384,11 @@ def _parse_row_iso_report(ws, row_idx: int) -> dict:
         if field in ("djdj_date", "icp_date"):
             data[field] = _parse_excel_date(raw)
         elif field == "ip_address2":
-            # 内网IP暂存，后面合并
             data["_ip_internal"] = _cell_str(raw)
-        elif field == "data_owner_name":
-            # 数据处理负责人 → 如负责人为空则填充
-            data["_data_owner"] = _cell_str(raw)
+        elif field == "_dept_code":
+            data["_dept_code"] = _cell_str(raw)
+        elif field == "_manager_mobile":
+            data["_manager_mobile"] = _cell_str(raw)
         elif field == "submitter":
             data["contact"] = _cell_str(raw)
         else:
@@ -337,10 +401,6 @@ def _parse_row_iso_report(ws, row_idx: int) -> dict:
     ip_int = data.pop("_ip_internal", "")
     if ip_int:
         data["ip_address"] = (ip_ext + ("," if ip_ext and not ip_ext.endswith(",") else "") + ip_int) if ip_ext else ip_int
-    # 数据处理负责人 → owner_name fallback
-    data_owner = data.pop("_data_owner", "")
-    if data_owner and not data.get("owner_name"):
-        data["owner_name"] = data_owner
     return data
 
 
@@ -378,6 +438,11 @@ def _do_import(file: UploadFile, mode: str, db: Session):
         start_row = _find_data_start(ws)
         parse_row = _parse_row_asset_export
         fmt_name = "资产导出"
+    elif fmt == "asset_list":
+        start_row = 3  # 行1=说明, 行2=表头, 行3起=数据
+        col_map = _build_asset_list_col_map(ws)
+        parse_row = lambda ws, ri: _parse_row_asset_list(ws, ri, col_map)
+        fmt_name = "资产清单"
     else:
         start_row = 2  # 第1行是表头，第2行开始是数据
         parse_row = _parse_row_iso_report
@@ -398,13 +463,112 @@ def _do_import(file: UploadFile, mode: str, db: Session):
         parsed.append(row_data)
 
     # 统计 + 导入
-    stats = {"total": len(parsed), "created": 0, "updated": 0, "supplemented": 0, "skipped": 0, "errors": 0, "format": fmt_name}
+    stats = {"total": len(parsed), "created": 0, "updated": 0, "supplemented": 0, "skipped": 0, "errors": 0,
+             "dept_matched": 0, "users_created": 0, "format": fmt_name}
     valid_cols = {c.name for c in InfoSystem.__table__.columns}
     date_cols = {"djdj_date", "icp_date"}
+
+    # 预加载部门代码映射（仅新格式需要）
+    dept_code_map = {}
+    if fmt == "iso_report":
+        depts = db.query(Department).filter(Department.dwbm.isnot(None)).all()
+        dept_code_map = {d.dwbm: d.id for d in depts if d.dwbm}
+
+    # 预加载已有的用户工号
+    existing_ghs = {u.gh for u in db.query(User).filter(User.gh.isnot(None), User.gh != "").all()}
+
+    # 收集需要创建账号的管理员工号 → 通过外部 API 获取详细信息
+    staff_cache = {}  # gh → staff_dict (来自 fetch_staff API)
+    if fmt == "iso_report":
+        new_manager_ghs = []
+        for row_data in parsed:
+            gh = row_data.get("manager_gh", "").strip()
+            name = row_data.get("manager_name", "").strip()
+            if gh and name and gh not in existing_ghs:
+                new_manager_ghs.append(gh)
+        new_manager_ghs = list(dict.fromkeys(new_manager_ghs))  # 去重保序
+
+        if new_manager_ghs:
+            try:
+                from app.services.external_api_service import fetch_staff
+                for gh in new_manager_ghs:
+                    try:
+                        results = fetch_staff(db, gh=gh)
+                        if results:
+                            # 优先取工号完全匹配的第一条
+                            staff_cache[gh] = results[0]
+                    except Exception:
+                        pass  # API 不可用时跳过
+            except Exception:
+                pass  # 外部 API 模块不可用时跳过
 
     for row_data in parsed:
         try:
             system_name = row_data["system_name"].strip()
+
+            # 解析部门代码 → dept_id
+            dept_code = row_data.pop("_dept_code", "")
+            if dept_code and dept_code in dept_code_map:
+                row_data["dept_id"] = dept_code_map[dept_code]
+                stats["dept_matched"] += 1
+            # 清理内部字段
+            manager_mobile = row_data.pop("_manager_mobile", "")
+
+            # 管理员自动创建账号（参考 asset_match.py 的 fetch_staff 逻辑）
+            manager_gh = row_data.get("manager_gh", "").strip()
+            manager_name = row_data.get("manager_name", "").strip()
+            if manager_gh and manager_name and manager_gh not in existing_ghs:
+                staff = staff_cache.get(manager_gh, {})
+                staff_dept_code = (staff.get("SZDWBM") or "").strip()
+                staff_dept_id = dept_code_map.get(staff_dept_code) if staff_dept_code else None
+                email = (staff.get("DZYX") or "").strip() or None
+                phone = (staff.get("BGDH") or "").strip() or None
+                mobile = manager_mobile or (staff.get("YDDH") or "").strip() or None
+                gender = "男" if staff.get("XBM") == "1" else "女" if staff.get("XBM") == "2" else ""
+                # 检查 email 是否已被其他用户占用
+                if email:
+                    email_taken = db.query(User).filter(User.email == email, User.gh != manager_gh).first()
+                    if email_taken:
+                        email = None
+                try:
+                    new_user = User(
+                        username=manager_gh,
+                        gh=manager_gh,
+                        name=manager_name,
+                        user_type="internal",
+                        password_hash=hash_password("Abcd1234!"),
+                        email=email,
+                        phone=phone,
+                        mobile=mobile,
+                        gender=gender,
+                        department_id=staff_dept_id or (dept_code_map.get(dept_code) if dept_code else None),
+                    )
+                    db.add(new_user)
+                    db.flush()
+                    existing_ghs.add(manager_gh)
+                    stats["users_created"] += 1
+                except Exception:
+                    db.rollback()  # 重置会话状态
+                    # 重试：不带 email（可能是其它约束冲突）
+                    try:
+                        new_user2 = User(
+                            username=manager_gh,
+                            gh=manager_gh,
+                            name=manager_name,
+                            user_type="internal",
+                            password_hash=hash_password("Abcd1234!"),
+                            phone=phone,
+                            mobile=mobile,
+                            gender=gender,
+                            department_id=staff_dept_id or (dept_code_map.get(dept_code) if dept_code else None),
+                        )
+                        db.add(new_user2)
+                        db.flush()
+                        existing_ghs.add(manager_gh)
+                        stats["users_created"] += 1
+                    except Exception:
+                        db.rollback()
+
             existing = db.query(InfoSystem).filter(InfoSystem.system_name == system_name).first()
 
             if existing:
@@ -412,7 +576,6 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                     stats["skipped"] += 1
                     continue
                 elif mode == "overwrite":
-                    # 完全覆盖（保留 asset_id 和 id）
                     for k, v in row_data.items():
                         if k != "id" and k in valid_cols:
                             if k in date_cols and _is_empty(v):
@@ -422,7 +585,6 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                     existing.fill_type = "导入"
                     stats["updated"] += 1
                 elif mode == "supplement":
-                    # 只补充空白字段
                     changed = False
                     for k, v in row_data.items():
                         if k != "id" and k in valid_cols:
@@ -438,7 +600,6 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                     else:
                         stats["skipped"] += 1
             else:
-                # 创建新记录
                 clean = {}
                 for k, v in row_data.items():
                     if k in valid_cols:
@@ -451,6 +612,7 @@ def _do_import(file: UploadFile, mode: str, db: Session):
                 db.add(sys_obj)
                 stats["created"] += 1
         except Exception:
+            db.rollback()
             stats["errors"] += 1
 
     db.commit()
@@ -460,6 +622,8 @@ def _do_import(file: UploadFile, mode: str, db: Session):
     if stats['supplemented']: parts.append(f"补充 {stats['supplemented']}")
     if stats['skipped']: parts.append(f"跳过 {stats['skipped']}")
     if stats['errors']: parts.append(f"失败 {stats['errors']}")
+    if stats['dept_matched']: parts.append(f"匹配部门 {stats['dept_matched']}")
+    if stats['users_created']: parts.append(f"创建账号 {stats['users_created']}")
     stats["message"] = "，".join(parts)
     return stats
 

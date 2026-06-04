@@ -187,7 +187,7 @@
           <el-upload ref="uploadRef" :auto-upload="false" :limit="1" accept=".xlsx" :on-change="onImportFileSelect" :on-remove="onImportFileRemove" :file-list="importFileList" drag>
             <el-icon style="font-size:36px;color:#409eff"><component is="UploadFilled"/></el-icon>
             <div style="margin-top:8px">拖拽或点击选择 .xlsx 文件</div>
-            <template #tip><div style="font-size:12px;color:#909399;margin-top:4px">支持：资产导出.xlsx、信息系统管理_*.xlsx</div></template>
+            <template #tip><div style="font-size:12px;color:#909399;margin-top:4px">支持：资产导出.xlsx、资产清单.xlsx、信息系统管理_*.xlsx（自动识别格式）</div></template>
           </el-upload>
         </el-form-item>
         <el-form-item label="去重策略" v-if="importFile">
@@ -211,6 +211,9 @@
           <span style="color:#409eff">覆盖 <b>{{importResult.updated}}</b></span>
           <span style="color:#e6a23c">补充 <b>{{importResult.supplemented}}</b></span>
           <span style="color:#909399">跳过 <b>{{importResult.skipped}}</b></span>
+          <span v-if="importResult.dept_matched" style="color:#67c23a">匹配部门 <b>{{importResult.dept_matched}}</b></span>
+          <span v-if="importResult.users_created" style="color:#e6a23c">新增用户 <b>{{importResult.users_created}}</b></span>
+          <span v-if="importResult.errors" style="color:#f56c6c">失败 <b>{{importResult.errors}}</b></span>
         </div>
       </div>
       <template #footer>
