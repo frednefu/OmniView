@@ -387,7 +387,7 @@ async function loadAllDjdj(){
   if(allDjdjLoaded.value){djdjOptions.value=allDjdj.value;return}
   djdjSearching.value=true
   try{
-    const r=await api.get('/info-systems/djdj',{params:{size:1000}})
+    const r=await api.get('/info-systems/djdj',{params:{size:100}})
     allDjdj.value=r.data.items||[]
     djdjOptions.value=allDjdj.value
     allDjdjLoaded.value=true
