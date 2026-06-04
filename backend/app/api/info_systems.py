@@ -993,21 +993,15 @@ def delete_icp(rec_id: int, db: Session = Depends(get_db), _=Depends(require_adm
 
 @router.post("/sync-from-platform")
 def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
-    """域名清洗 + 入口地址验证 + ZDNS 匹配同步。"""
-    # 尝试加载 httpx，不可用时降级为不验证
+    """域名清洗 + ZDNS 匹配同步（不再验证URL可达性，直接用ZDNS数据判断）。"""
+    # 加载 ZDNS 域名→IP 映射
+    zdns_map = {}  # domain → ip
     try:
-        import httpx
-        _has_httpx = True
-    except ImportError:
-        _has_httpx = False
-
-    # 加载 ZDNS 域名集合
-    zdns_domains = set()
-    try:
-        for r in db.execute(text("SELECT DISTINCT LOWER(TRIM(domain_name)) FROM zdns_domain_map")).fetchall():
+        for r in db.execute(text("SELECT LOWER(TRIM(domain_name)), ip_address FROM zdns_domain_map WHERE ip_address IS NOT NULL AND ip_address != ''")).fetchall():
             d = (r[0] or "").strip()
-            if d:
-                zdns_domains.add(d)
+            ip = (r[1] or "").strip()
+            if d and d not in zdns_map:
+                zdns_map[d] = ip
     except Exception:
         pass
 
@@ -1027,16 +1021,6 @@ def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
             if d:
                 parts.append(d)
         return parts
-
-    def check_url(url: str) -> bool:
-        """快速检测 URL 是否可达（Head 请求，5秒超时）。"""
-        if not _has_httpx:
-            return False
-        try:
-            r = httpx.head(url, timeout=2, follow_redirects=True)
-            return r.status_code < 500
-        except Exception:
-            return False
 
     stats = {"cleaned": 0, "auto": 0, "deprecated": 0, "online": 0, "offline": 0, "skipped": 0}
     items = db.query(InfoSystem).all()
@@ -1063,33 +1047,33 @@ def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
                 sys.domain = new_domain
                 stats["cleaned"] += 1
 
-            # 入口地址：优先 https，验证可达性
-            primary_domain = clean[0]
-            entry_url = ""
-            url_status = "离线"
-            for scheme in ("https", "http"):
-                test_url = f"{scheme}://{primary_domain}"
-                if check_url(test_url):
-                    entry_url = test_url
-                    url_status = "在线"
-                    break
-            if not entry_url:
-                entry_url = f"https://{primary_domain}"
-            sys.entry_url = entry_url
-            sys.url_status = url_status
-            if url_status == "在线":
-                stats["online"] += 1
-            else:
-                stats["offline"] += 1
+            # 入口地址：直接拼 https://域名（不验证）
+            sys.entry_url = f"https://{clean[0]}"
 
-            # ZDNS 匹配：任意一个域名有匹配 → 自动，否则 → 注销
-            matched = any(d in zdns_domains for d in clean)
+            # ZDNS 匹配：任意域名有匹配 → 自动+在线，保存ZDNS IP
+            matched = None
+            for d in clean:
+                if d in zdns_map:
+                    matched = d
+                    break
+
             if matched:
                 sys.fill_type = "自动"
+                sys.url_status = "在线"
+                # 使用 ZDNS 的 IP 数据
+                zdns_ip = zdns_map[matched]
+                if zdns_ip:
+                    existing_ips = [i.strip() for i in (sys.ip_address or "").split(",") if i.strip()]
+                    if zdns_ip not in existing_ips:
+                        existing_ips.insert(0, zdns_ip)
+                        sys.ip_address = ",".join(existing_ips[:5])  # 最多保留5个IP
                 stats["auto"] += 1
+                stats["online"] += 1
             else:
                 sys.fill_type = "注销"
+                sys.url_status = "离线"
                 stats["deprecated"] += 1
+                stats["offline"] += 1
         except Exception:
             stats["skipped"] += 1
             continue
