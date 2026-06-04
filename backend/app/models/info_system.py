@@ -45,6 +45,8 @@ class InfoSystem(Base):
     vendor_phone = Column(String(32), nullable=True, comment="厂商联系电话")
     ops_contact = Column(String(64), nullable=True, comment="运维联系人")
     ops_phone = Column(String(32), nullable=True, comment="运维联系电话")
+    entry_url = Column(String(512), nullable=True, comment="入口地址（带https/http的完整URL）")
+    url_status = Column(String(16), nullable=True, comment="URL验证状态: 在线/离线")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

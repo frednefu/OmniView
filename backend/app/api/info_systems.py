@@ -747,6 +747,8 @@ def export_excel(db: Session = Depends(get_db), _=Depends(require_admin)):
         ("has_website", "是否有网站"),
         ("internal_url", "内网URL"),
         ("ip_range", "IP地址段"),
+        ("entry_url", "入口地址"),
+        ("url_status", "验证状态"),
         ("remark", "备注"),
     ]
     headers = [h for _, h in export_cols]
@@ -978,47 +980,96 @@ def delete_icp(rec_id: int, db: Session = Depends(get_db), _=Depends(require_adm
 
 @router.post("/sync-from-platform")
 def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
-    """根据 ZDNS 域名数据自动同步信息系统状态。"""
-    zdns_domains = {}
-    for r in db.execute(text("SELECT domain_name, ip_address, ip_status FROM zdns_domain_map")).fetchall():
-        d = (r.domain_name or "").strip().lower()
-        if d and d not in zdns_domains:
-            zdns_domains[d] = {"ip": r.ip_address or "", "status": r.ip_status or ""}
+    """域名清洗 + 入口地址验证 + ZDNS 匹配同步。"""
+    import httpx
 
-    def clean_domain(dom):
+    # 加载 ZDNS 域名集合
+    zdns_domains = set()
+    for r in db.execute(text("SELECT DISTINCT LOWER(TRIM(domain_name)) FROM zdns_domain_map")).fetchall():
+        d = (r[0] or "").strip()
+        if d:
+            zdns_domains.add(d)
+
+    def strip_domain(dom: str) -> str:
+        """去掉 http/https 前缀和路径，只保留纯域名。"""
         dom = (dom or "").strip().lower()
-        for prefix in ["https://", "http://"]:
-            if dom.startswith(prefix):
-                dom = dom[len(prefix):]
+        for p in ("https://", "http://"):
+            if dom.startswith(p):
+                dom = dom[len(p):]
         return dom.split("/")[0].split(":")[0]
 
-    updated, offline, deprecated = 0, 0, 0
+    def split_domains(raw: str) -> list[str]:
+        """按逗号/分号/空格拆分多个域名。"""
+        parts = []
+        for seg in (raw or "").replace(";", ",").replace(" ", ",").split(","):
+            d = seg.strip()
+            if d:
+                parts.append(d)
+        return parts
+
+    def check_url(url: str) -> bool:
+        """快速检测 URL 是否可达（Head 请求，5秒超时）。"""
+        try:
+            r = httpx.head(url, timeout=5, follow_redirects=True)
+            return r.status_code < 500
+        except Exception:
+            return False
+
+    stats = {"cleaned": 0, "auto": 0, "deprecated": 0, "online": 0, "offline": 0}
     items = db.query(InfoSystem).all()
+
     for sys in items:
-        dom = clean_domain(sys.domain)
-        if not dom:
+        raw_domains = split_domains(sys.domain or "")
+        if not raw_domains:
             continue
-        # 保存清洗后的域名
-        if sys.domain != dom:
-            sys.domain = dom
-        if dom in zdns_domains:
-            zdns = zdns_domains[dom]
-            zdns_ip = zdns["ip"]
-            # 始终带回 IP 地址
-            if sys.ip_address != zdns_ip:
-                sys.ip_address = zdns_ip
-            # 根据 IP 状态设置填报类型
-            if zdns["status"] == "离线":
-                sys.fill_type = "离线"
-                offline += 1
-            else:
-                sys.fill_type = "自动"
-                updated += 1
+
+        # 清洗域名：去掉 http/https/路径，只保留纯域名
+        clean = []
+        for d in raw_domains:
+            cd = strip_domain(d)
+            if cd and cd not in clean:
+                clean.append(cd)
+        if not clean:
+            continue
+
+        new_domain = ",".join(clean)
+        if sys.domain != new_domain:
+            sys.domain = new_domain
+            stats["cleaned"] += 1
+
+        # 入口地址：优先 https，验证可达性
+        primary_domain = clean[0]
+        entry_url = ""
+        url_status = "离线"
+        for scheme in ("https", "http"):
+            test_url = f"{scheme}://{primary_domain}"
+            if check_url(test_url):
+                entry_url = test_url
+                url_status = "在线"
+                break
+        if not entry_url:
+            entry_url = f"https://{primary_domain}"
+        sys.entry_url = entry_url
+        sys.url_status = url_status
+        if url_status == "在线":
+            stats["online"] += 1
         else:
-            sys.fill_type = "失效"
-            deprecated += 1
+            stats["offline"] += 1
+
+        # ZDNS 匹配：任意一个域名有匹配 → 自动，否则 → 注销
+        matched = any(d in zdns_domains for d in clean)
+        if matched:
+            sys.fill_type = "自动"
+            stats["auto"] += 1
+        else:
+            sys.fill_type = "注销"
+            stats["deprecated"] += 1
+
     db.commit()
-    return {"message": f"同步完成：在线 {updated} 条，离线 {offline} 条，失效 {deprecated} 条"}
+    return {
+        "message": f"同步完成：域名清洗 {stats['cleaned']}，自动 {stats['auto']}，注销 {stats['deprecated']}，在线 {stats['online']}，离线 {stats['offline']}",
+        "stats": stats,
+    }
 
 
 # ── 等保关联查询 ──

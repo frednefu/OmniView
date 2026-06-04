@@ -120,6 +120,11 @@ async def lifespan(app: FastAPI):
         ("owner_name", "VARCHAR(64)"),
         ("owner_gh", "VARCHAR(32)"),
     ])
+    # 信息系统入口地址 + URL验证状态
+    _migrate_columns("info_systems", [
+        ("entry_url", "VARCHAR(512)"),
+        ("url_status", "VARCHAR(16)"),
+    ])
     # 更新 scan_logs 表 status 列支持 queued
     try:
         with engine.connect() as conn:

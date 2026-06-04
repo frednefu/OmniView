@@ -27,10 +27,16 @@
       <el-table-column prop="system_type" label="类型" width="120" sortable/>
       <el-table-column prop="ip_address" label="IP" width="130" sortable/>
       <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip sortable/>
+      <el-table-column prop="entry_url" label="入口地址" min-width="160" show-overflow-tooltip sortable/>
+      <el-table-column prop="url_status" label="验证" width="65" sortable>
+        <template #default="{row}">
+          <el-tag :type="row.url_status==='在线'?'success':'danger'" size="small">{{row.url_status||'-'}}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="manager_name" label="管理员" width="80" sortable/>
       <el-table-column prop="fill_type" label="填报" width="65" sortable>
         <template #default="{row}">
-          <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'danger':row.fill_type==='手动'?'':''" size="small">{{row.fill_type||'手动'}}</el-tag>
+          <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'info':row.fill_type==='手动'?'':''" size="small">{{row.fill_type||'手动'}}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
@@ -57,7 +63,8 @@
               <el-col :span="8"><el-form-item label="信息系统类型"><el-select v-model="form.sub_type" filterable style="width:100%" clearable><el-option v-for="t in subTypes" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
               <el-col :span="8"><el-form-item label="填报类型"><el-select v-model="form.fill_type" style="width:100%"><el-option v-for="t in ['导入','手动','自动','离线','失效']" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="IP地址"><el-input v-model="form.ip_address" placeholder="多个IP用逗号分隔"/></el-form-item></el-col>
-              <el-col :span="12"><el-form-item label="域名/URL"><el-input v-model="form.domain" placeholder="https://xxx.nefu.edu.cn"/></el-form-item></el-col>
+              <el-col :span="12"><el-form-item label="域名"><el-input v-model="form.domain" placeholder="多个域名逗号分隔，不含http"/></el-form-item></el-col>
+              <el-col :span="12"><el-form-item label="入口地址"><el-input v-model="form.entry_url" placeholder="https://xxx.nefu.edu.cn" readonly/></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="单位名称"><el-input v-model="form.org_name"/></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="运维单位"><el-input v-model="form.dept_name"/></el-form-item></el-col>
               <el-col :span="8"><el-form-item label="联系人"><el-input v-model="form.contact"/></el-form-item></el-col>
@@ -261,6 +268,7 @@ const form=reactive({
   org_name:'',dept_name:'',contact:'',contact_phone:'',fill_type:'手动',
   dept_id:null, manager_name:'',manager_gh:'',owner_name:'',owner_gh:'',
   djdj_no:'',djdj_level:'',djdj_date:null,djdj_sys_name:'',djdj_status:'',djdj_org:'',icp_no:'',icp_date:null,
+  entry_url:'',url_status:'',
   remark:'',vendor_name:'',product_name:'',product_version:'',source_type:'',
   vendor_contact:'',vendor_phone:'',ops_contact:'',ops_phone:''
 })
@@ -270,6 +278,7 @@ const baseForm=()=>({
   org_name:'',dept_name:'',contact:'',contact_phone:'',fill_type:'手动',
   dept_id:null, manager_name:'',manager_gh:'',owner_name:'',owner_gh:'',
   djdj_no:'',djdj_level:'',djdj_date:null,djdj_sys_name:'',djdj_status:'',djdj_org:'',icp_no:'',icp_date:null,
+  entry_url:'',url_status:'',
   remark:'',vendor_name:'',product_name:'',product_version:'',source_type:'',
   vendor_contact:'',vendor_phone:'',ops_contact:'',ops_phone:''
 })
@@ -420,7 +429,7 @@ async function handleSave(){
 
 async function handleDelete(r){try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'});await api.delete('/info-systems/'+r.id);ElMessage.success('已删除');fetchList()}catch{}}
 async function handleBatchDelete(){try{await ElMessageBox.confirm('确定删除选中的 '+selectedIds.value.length+' 条记录?','批量删除',{type:'error'});await api.post('/info-systems/batch-delete',{ids:selectedIds.value});ElMessage.success('已删除');selectedIds.value=[];fetchList()}catch{}}
-async function handleSync(){syncLoading.value=true;try{const r=await api.post('/info-systems/sync-from-platform');ElMessage.success(r.data.message);fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'同步失败')}finally{syncLoading.value=false}}
+async function handleSync(){syncLoading.value=true;try{const r=await api.post('/info-systems/sync-from-platform');ElMessage.success(r.data.message);console.log('Sync stats:',r.data.stats);fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'同步失败')}finally{syncLoading.value=false}}
 function openImportDlg(){importDlg.value=true;importFile.value=null;importFileList.value=[];importResult.value=null;importMode.value='supplement'}
 function onImportFileSelect(uploadFile){importFile.value=uploadFile.raw}
 function onImportFileRemove(){importFile.value=null;importResult.value=null}
