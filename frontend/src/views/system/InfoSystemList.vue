@@ -11,32 +11,43 @@
       </div>
     </div>
     <div class="filter-bar">
-      <el-input v-model="search" placeholder="搜索名称/IP/域名" clearable style="width:260px" @keyup.enter="fetchList" @clear="fetchList">
+      <el-input v-model="search" placeholder="搜索名称/IP/域名" clearable style="width:220px" @keyup.enter="fetchList" @clear="fetchList">
         <template #append><el-button :icon="Search" @click="fetchList"/></template>
       </el-input>
-      <el-select v-model="fillTypeFilter" placeholder="填报类型" clearable style="width:120px" @change="fetchList">
-        <el-option v-for="t in ['导入','手动','自动','离线','失效']" :key="t" :label="t" :value="t"/>
+      <el-select v-model="filterSysType" placeholder="资产类型" clearable style="width:130px" @change="fetchList">
+        <el-option v-for="t in sysTypes" :key="t" :label="t" :value="t"/>
       </el-select>
-      <span style="color:#909399;font-size:13px;line-height:32px">共 {{total}} 条</span>
+      <el-select v-model="filterSubType" placeholder="信息系统类型" clearable filterable style="width:150px" @change="fetchList">
+        <el-option v-for="t in subTypes" :key="t" :label="t" :value="t"/>
+      </el-select>
+      <el-input v-model="filterManager" placeholder="管理员" clearable style="width:100px" @keyup.enter="fetchList" @clear="fetchList"/>
+      <el-input v-model="filterOwner" placeholder="负责人" clearable style="width:100px" @keyup.enter="fetchList" @clear="fetchList"/>
+      <el-select v-model="filterFillType" placeholder="填报状态" clearable style="width:110px" @change="fetchList">
+        <el-option v-for="t in ['导入','手动','自动','注销','离线','失效']" :key="t" :label="t" :value="t"/>
+      </el-select>
+      <el-select v-model="filterUrlStatus" placeholder="验证状态" clearable style="width:110px" @change="fetchList">
+        <el-option v-for="t in ['在线','离线']" :key="t" :label="t" :value="t"/>
+      </el-select>
+      <span style="color:#909399;font-size:13px;line-height:32px;white-space:nowrap">共 {{total}} 条</span>
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
     </div>
     <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" :default-sort="{prop:'id',order:'descending'}">
       <el-table-column type="selection" width="40" v-if="authStore.isAdmin"/>
-      <el-table-column prop="asset_id" label="资产ID" width="165" show-overflow-tooltip sortable/>
       <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip sortable/>
-      <el-table-column prop="system_type" label="类型" width="120" sortable/>
-      <el-table-column prop="ip_address" label="IP" width="130" sortable/>
+      <el-table-column prop="system_type" label="资产类型" width="120" sortable/>
+      <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip sortable/>
+      <el-table-column prop="ip_address" label="IP" width="130" show-overflow-tooltip sortable/>
       <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip sortable/>
-      <el-table-column prop="entry_url" label="入口地址" min-width="160" show-overflow-tooltip sortable/>
-      <el-table-column prop="url_status" label="验证" width="65" sortable>
+      <el-table-column prop="manager_name" label="管理员" width="80" sortable/>
+      <el-table-column prop="owner_name" label="负责人" width="80" sortable/>
+      <el-table-column prop="fill_type" label="填报状态" width="80" sortable>
         <template #default="{row}">
-          <el-tag :type="row.url_status==='在线'?'success':'danger'" size="small">{{row.url_status||'-'}}</el-tag>
+          <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'info':''" size="small">{{row.fill_type||'手动'}}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="manager_name" label="管理员" width="80" sortable/>
-      <el-table-column prop="fill_type" label="填报" width="65" sortable>
+      <el-table-column prop="url_status" label="验证状态" width="80" sortable>
         <template #default="{row}">
-          <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'info':row.fill_type==='手动'?'':''" size="small">{{row.fill_type||'手动'}}</el-tag>
+          <el-tag :type="row.url_status==='在线'?'success':'danger'" size="small">{{row.url_status||'-'}}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
@@ -240,7 +251,8 @@ import { useAuthStore } from '@/store/auth'
 import api from '@/api/index'
 
 const authStore=useAuthStore()
-const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref(''),fillTypeFilter=ref('')
+const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
+const filterSysType=ref(''),filterSubType=ref(''),filterManager=ref(''),filterOwner=ref(''),filterFillType=ref(''),filterUrlStatus=ref('')
 const selectedIds=ref([]),dlg=ref(false),isEdit=ref(false),editId=ref(null),fileInput=ref(null),syncLoading=ref(false),saving=ref(false)
 const djdjSearching=ref(false),djdjOptions=ref([]),vendorNames=ref([]),deptOptions=ref([])
 // 导入相关
@@ -292,7 +304,7 @@ function resetForm(){
   djdjOptions.value=[]
 }
 
-async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems',{params:{page:page.value,size:size.value,search:search.value,fill_type:fillTypeFilter.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
+async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems',{params:{page:page.value,size:size.value,search:search.value,system_type:filterSysType.value,sub_type:filterSubType.value,manager_name:filterManager.value,owner_name:filterOwner.value,fill_type:filterFillType.value,url_status:filterUrlStatus.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
 function openEdit(r){
   editId.value=r.id; isEdit.value=true

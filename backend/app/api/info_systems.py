@@ -143,13 +143,26 @@ def register_staff(body: dict, db: Session = Depends(get_db), _=Depends(require_
 @router.get("")
 def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
                  search: str = Query(""), fill_type: str = Query(""),
+                 system_type: str = Query(""), sub_type: str = Query(""),
+                 manager_name: str = Query(""), owner_name: str = Query(""),
+                 url_status: str = Query(""),
                  db: Session = Depends(get_db), _=Depends(get_current_user)):
     q = db.query(InfoSystem)
     if search:
         kw = f"%{search}%"
-        q = q.filter(InfoSystem.system_name.like(kw) | InfoSystem.ip_address.like(kw) | InfoSystem.domain.like(kw))
+        q = q.filter(InfoSystem.system_name.like(kw) | InfoSystem.ip_address.like(kw) | InfoSystem.domain.like(kw) | InfoSystem.manager_name.like(kw) | InfoSystem.owner_name.like(kw))
     if fill_type:
         q = q.filter(InfoSystem.fill_type == fill_type)
+    if system_type:
+        q = q.filter(InfoSystem.system_type == system_type)
+    if sub_type:
+        q = q.filter(InfoSystem.sub_type == sub_type)
+    if manager_name:
+        q = q.filter(InfoSystem.manager_name.like(f"%{manager_name}%"))
+    if owner_name:
+        q = q.filter(InfoSystem.owner_name.like(f"%{owner_name}%"))
+    if url_status:
+        q = q.filter(InfoSystem.url_status == url_status)
     total = q.count()
     items = q.order_by(InfoSystem.id).offset((page - 1) * size).limit(size).all()
     return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
