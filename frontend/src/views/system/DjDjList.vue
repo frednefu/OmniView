@@ -21,23 +21,21 @@
       <el-table-column prop="record_no" label="备案编号" width="200" />
       <el-table-column prop="system_name" label="系统名称" min-width="180" show-overflow-tooltip />
       <el-table-column prop="org_name" label="备案单位" min-width="160" />
-      <el-table-column prop="dept_name" label="所属部门" min-width="180" />
+      <el-table-column prop="eval_org" label="测评单位" min-width="160" />
       <el-table-column prop="level" label="等级" width="80" />
       <el-table-column prop="record_date" label="备案日期" width="120" />
       <el-table-column label="操作" width="140" fixed="right" v-if="authStore.isAdmin">
         <template #default="{row}"><el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button><el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button></template>
       </el-table-column>
     </el-table>
-    <el-pagination v-if="total>size" v-model:current-page="page" :page-size="size" :total="total" layout="prev,pager,next" @current-change="fetchList" style="justify-content:center;margin-top:16px"/>
+    <el-pagination v-if="total>0" v-model:current-page="page" v-model:page-size="size" :page-sizes="[10,20,50,100]" :total="total" layout="total,sizes,prev,pager,next" @current-change="fetchList" @size-change="fetchList" style="justify-content:center;margin-top:16px"/>
 
     <el-dialog v-model="dlg" :title="isEdit?'编辑':'添加'" width="550px">
       <el-form :model="form" label-width="80px" size="small">
         <el-form-item label="备案编号"><el-input v-model="form.record_no"/></el-form-item>
         <el-form-item label="系统名称"><el-input v-model="form.system_name"/></el-form-item>
         <el-form-item label="备案单位"><el-input v-model="form.org_name"/></el-form-item>
-        <el-form-item label="所属部门">
-          <el-tree-select v-model="form.dept_name" :data="deptOptions" :props="{label:'dwmc',value:'dwmc',children:'children'}" placeholder="选择部门" clearable filterable check-strictly style="width:100%"/>
-        </el-form-item>
+        <el-form-item label="测评单位"><el-input v-model="form.eval_org" placeholder="等保测评机构名称"/></el-form-item>
         <el-form-item label="等级">
           <el-select v-model="form.level"><el-option v-for="l in ['一级','二级','三级','四级']" :key="l" :label="l" :value="l"/></el-select>
         </el-form-item>
@@ -70,19 +68,17 @@ import api from '@/api/index'
 const authStore=useAuthStore()
 const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
 const selectedIds=ref([]),dlg=ref(false),isEdit=ref(false),editId=ref(null),fileInput=ref(null),previewVisible=ref(false)
-const deptOptions=ref([])
-const form=reactive({record_no:'',system_name:'',org_name:'',dept_name:'',level:'',record_date:'',remark:'',image_path:''})
+const form=reactive({record_no:'',system_name:'',org_name:'',eval_org:'',level:'',record_date:'',remark:'',image_path:''})
 
-function resetForm(){Object.assign(form,{record_no:'',system_name:'',org_name:'',dept_name:'',level:'',record_date:'',remark:'',image_path:''})}
+function resetForm(){Object.assign(form,{record_no:'',system_name:'',org_name:'',eval_org:'',level:'',record_date:'',remark:'',image_path:''})}
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
 async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems/djdj',{params:{page:page.value,size:size.value,search:search.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
-async function loadDepts(){try{const r=await api.get('/sys/departments/tree?all=true');deptOptions.value=r.data}catch{}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
-function openEdit(r){editId.value=r.id;isEdit.value=true;Object.keys(form).forEach(k=>{if(r[k]!==undefined)form[k]=r[k]||''});form.image_path=r.image_path||null;form.dept_name=r.dept_name||r.eval_org||'';dlg.value=true}
+function openEdit(r){editId.value=r.id;isEdit.value=true;Object.keys(form).forEach(k=>{if(r[k]!==undefined)form[k]=r[k]||''});form.image_path=r.image_path||null;form.eval_org=r.eval_org||r.dept_name||'';dlg.value=true}
 async function handleSave(){
   try{
-    const data={...form, eval_org:form.dept_name}
-    if(!data.image_path) delete data.image_path  // 空值不覆盖已上传的图片
+    const data={...form}
+    if(!data.image_path) delete data.image_path
     if(isEdit.value){await api.put('/info-systems/djdj/'+editId.value,data);ElMessage.success('已更新')}
     else{await api.post('/info-systems/djdj',data);ElMessage.success('已创建')}
     dlg.value=false;fetchList()
@@ -95,6 +91,6 @@ async function onFileChange(e){const file=e.target.files[0];if(!file)return;cons
 async function onImageUpload(e){const file=e.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await api.post('/info-systems/djdj/upload-image/'+editId.value,fd);form.image_path=r.data.image_path;ElMessage.success('已上传')}catch{ElMessage.error('上传失败')}}
 async function handleDeleteImage(){try{await api.delete('/info-systems/djdj/delete-image/'+editId.value);form.image_path='';ElMessage.success('已删除')}catch{ElMessage.error('删除失败')}}
 async function handleExport(){try{const r=await api.get('/info-systems/djdj/export',{responseType:'blob'});const url=URL.createObjectURL(r.data);const a=document.createElement('a');a.href=url;a.download='djdj_export.xlsx';a.click();URL.revokeObjectURL(url)}catch{}}
-onMounted(()=>{fetchList();loadDepts()})
+onMounted(()=>{fetchList()})
 </script>
 <style scoped>.page{padding:20px}.page-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.page-header h2{margin:0;font-size:20px}.header-actions{display:flex;gap:8px}.filter-bar{margin-bottom:14px;display:flex;gap:10px;align-items:center}</style>

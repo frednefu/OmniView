@@ -734,15 +734,17 @@ def list_djdj(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
     result = []
     for r in items:
         d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
-        d["dept_name"] = r.eval_org or ""
         result.append(d)
     return {"items": result, "total": total}
 
 @router.post("/djdj")
 def create_djdj(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     data = dict(body)
-    if "dept_name" in data:
+    # 兼容旧字段名 dept_name → eval_org
+    if "dept_name" in data and "eval_org" not in data:
         data["eval_org"] = data.pop("dept_name")
+    elif "dept_name" in data:
+        data.pop("dept_name")
     rec = DjDjRecord(**{k: v for k, v in data.items() if hasattr(DjDjRecord, k)})
     db.add(rec); db.commit(); db.refresh(rec)
     return {"id": rec.id, "message": "已创建"}
@@ -752,8 +754,10 @@ def update_djdj(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depend
     rec = db.query(DjDjRecord).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
     data = dict(body)
-    if "dept_name" in data:
+    if "dept_name" in data and "eval_org" not in data:
         data["eval_org"] = data.pop("dept_name")
+    elif "dept_name" in data:
+        data.pop("dept_name")
     for k, v in data.items():
         if hasattr(rec, k) and k != "id": setattr(rec, k, v)
     db.commit()

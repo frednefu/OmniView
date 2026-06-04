@@ -299,7 +299,7 @@ function openEdit(r){
   }
   // 预加载等保选项（编辑时需显示已选值）
   if(r.djdj_sys_name){
-    djdjOptions.value=[{system_name:r.djdj_sys_name,record_no:r.djdj_no,level:r.djdj_level,record_date:r.djdj_date,org_name:r.djdj_org}]
+    djdjOptions.value=[{system_name:r.djdj_sys_name,record_no:r.djdj_no,level:r.djdj_level,record_date:r.djdj_date,eval_org:r.djdj_org}]
   }else{
     djdjOptions.value=[]
   }
@@ -399,7 +399,7 @@ function searchDjdj(q){
 }
 function onDjdjSelect(name){
   const d=djdjOptions.value.find(d=>d.system_name===name)
-  if(d){form.djdj_no=d.record_no;form.djdj_level=d.level;form.djdj_date=d.record_date;form.djdj_org=d.org_name||'';form.djdj_status=form.djdj_status||'已备案';form.org_name=form.org_name||d.org_name}
+  if(d){form.djdj_no=d.record_no;form.djdj_level=d.level;form.djdj_date=d.record_date;form.djdj_org=d.eval_org||d.dept_name||'';form.djdj_status=form.djdj_status||'已备案';form.org_name=form.org_name||d.org_name}
 }
 
 // ── 保存 ──
