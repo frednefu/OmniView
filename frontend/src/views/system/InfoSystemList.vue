@@ -497,13 +497,14 @@ onMounted(async()=>{fetchList();try{const r=await api.get('/info-systems/supply-
 
 /* 人员查询结果 */
 .staff-radio-group{display:flex;flex-direction:column;gap:6px;width:100%}
-.staff-radio-item{width:100%;margin:0!important;padding:10px 14px}
+.staff-radio-item{width:100%;margin:0!important;padding:12px 16px;min-height:56px}
+.staff-radio-item .el-radio__label{width:100%;padding-left:10px}
 .staff-card{display:flex;flex-direction:column;gap:6px;width:100%}
-.staff-card-row{display:flex;align-items:center;gap:12px}
-.staff-card-name{font-size:14px;min-width:50px}
-.staff-card-gh{font-size:12px;color:#909399}
-.staff-card-meta{gap:16px}
-.staff-card-info{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#606266}
+.staff-card-row{display:flex;align-items:center;gap:12px;line-height:1.6}
+.staff-card-name{font-size:14px;min-width:50px;white-space:nowrap}
+.staff-card-gh{font-size:12px;color:#909399;white-space:nowrap}
+.staff-card-meta{gap:16px;flex-wrap:wrap}
+.staff-card-info{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#606266;white-space:nowrap}
 .staff-card-info .el-icon{font-size:13px;color:#909399}
 /* 导入结果 */
 .import-result{margin-top:16px}
