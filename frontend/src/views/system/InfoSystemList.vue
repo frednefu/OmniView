@@ -38,14 +38,15 @@
       <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip sortable/>
       <el-table-column prop="ip_address" label="IP" width="130" show-overflow-tooltip sortable/>
       <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip sortable/>
+      <el-table-column prop="entry_url" label="入口地址" min-width="160" show-overflow-tooltip sortable/>
       <el-table-column prop="manager_name" label="管理员" width="80" sortable/>
       <el-table-column prop="owner_name" label="负责人" width="80" sortable/>
-      <el-table-column prop="fill_type" label="填报状态" width="80" sortable>
+      <el-table-column prop="fill_type" label="填报状态" width="90" sortable>
         <template #default="{row}">
           <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'info':''" size="small">{{row.fill_type||'手动'}}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="url_status" label="验证状态" width="80" sortable>
+      <el-table-column prop="url_status" label="验证状态" width="90" sortable>
         <template #default="{row}">
           <el-tag :type="row.url_status==='在线'?'success':'danger'" size="small">{{row.url_status||'-'}}</el-tag>
         </template>
