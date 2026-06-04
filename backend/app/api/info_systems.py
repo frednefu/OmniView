@@ -1234,13 +1234,10 @@ def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
             if matched:
                 sys.fill_type = "自动"
                 sys.url_status = "在线"
-                # 使用 ZDNS 的 IP 数据
+                # ZDNS IP 替换系统记录的 IP
                 zdns_ip = zdns_map[matched]
-                if zdns_ip:
-                    existing_ips = [i.strip() for i in (sys.ip_address or "").split(",") if i.strip()]
-                    if zdns_ip not in existing_ips:
-                        existing_ips.insert(0, zdns_ip)
-                        sys.ip_address = ",".join(existing_ips[:5])  # 最多保留5个IP
+                if zdns_ip and zdns_ip != (sys.ip_address or "").strip():
+                    sys.ip_address = zdns_ip
                 stats["auto"] += 1
                 stats["online"] += 1
             else:
