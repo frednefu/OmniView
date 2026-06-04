@@ -100,27 +100,29 @@
             <el-row :gutter="16">
               <el-col :span="12">
                 <el-form-item label="管理员">
-                  <div class="user-pick">
-                    <el-select v-model="managerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'manager')" :loading="managerSearching" placeholder="搜索系统用户" clearable style="flex:1" @change="onManagerSelect">
+                  <div style="display:flex;align-items:center;gap:6px;width:100%">
+                    <el-select v-model="managerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'manager')" :loading="managerSearching" placeholder="输入姓名或工号搜索" clearable style="flex:1" @change="onManagerSelect" :disabled="!!form.manager_gh">
                       <el-option v-for="u in managerOptions" :key="u.id" :label="`${u.name} (${u.gh||u.username})`" :value="u.id"/>
                     </el-select>
-                    <el-button :icon="Search" circle size="small" title="从教职工库查询" @click="openStaffLookup('manager')"/>
+                    <el-button :icon="Search" title="从教职工库查询" @click="openStaffLookup('manager')" :disabled="!!form.manager_gh">查教职工库</el-button>
                   </div>
-                  <div class="user-pick-meta" v-if="form.manager_name">
-                    <el-tag size="small" effect="plain" type="success" closable @close="clearManager">已选: {{ form.manager_name }} ({{ form.manager_gh }})</el-tag>
+                  <div v-if="form.manager_name" style="margin-top:6px;display:flex;align-items:center;gap:8px">
+                    <el-tag type="success" closable @close="clearManager">{{ form.manager_name }}</el-tag>
+                    <span style="font-size:12px;color:#909399">工号：{{ form.manager_gh }}</span>
                   </div>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
                 <el-form-item label="负责人">
-                  <div class="user-pick">
-                    <el-select v-model="ownerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'owner')" :loading="ownerSearching" placeholder="搜索系统用户" clearable style="flex:1" @change="onOwnerSelect">
+                  <div style="display:flex;align-items:center;gap:6px;width:100%">
+                    <el-select v-model="ownerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'owner')" :loading="ownerSearching" placeholder="输入姓名或工号搜索" clearable style="flex:1" @change="onOwnerSelect" :disabled="!!form.owner_gh">
                       <el-option v-for="u in ownerOptions" :key="u.id" :label="`${u.name} (${u.gh||u.username})`" :value="u.id"/>
                     </el-select>
-                    <el-button :icon="Search" circle size="small" title="从教职工库查询" @click="openStaffLookup('owner')"/>
+                    <el-button :icon="Search" title="从教职工库查询" @click="openStaffLookup('owner')" :disabled="!!form.owner_gh">查教职工库</el-button>
                   </div>
-                  <div class="user-pick-meta" v-if="form.owner_name">
-                    <el-tag size="small" effect="plain" type="success" closable @close="clearOwner">已选: {{ form.owner_name }} ({{ form.owner_gh }})</el-tag>
+                  <div v-if="form.owner_name" style="margin-top:6px;display:flex;align-items:center;gap:8px">
+                    <el-tag type="success" closable @close="clearOwner">{{ form.owner_name }}</el-tag>
+                    <span style="font-size:12px;color:#909399">工号：{{ form.owner_gh }}</span>
                   </div>
                 </el-form-item>
               </el-col>
@@ -480,6 +482,7 @@ onMounted(async()=>{fetchList();try{const r=await api.get('/info-systems/supply-
 
 .user-pick{display:flex;gap:8px;align-items:center}
 .user-pick-meta{margin-top:4px}
+/* 已选人员信息行 */
 .sc-footer{display:flex;justify-content:space-between;align-items:center;width:100%}
 .sc-footer-hint{font-size:12px;color:#909399}
 .sc-footer-actions{display:flex;gap:8px}
