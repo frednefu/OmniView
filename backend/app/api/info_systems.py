@@ -260,14 +260,35 @@ def batch_delete_systems(body: dict, db: Session = Depends(get_db), _=Depends(re
     return {"message": f"已删除 {len(ids)} 条"}
 
 
-def _clean_empty_dates(data: dict) -> dict:
-    """将 Date 类型字段的空字符串转为 None，避免 MySQL 1292 错误。"""
-    from sqlalchemy import Date
-    date_cols = {c.name for c in InfoSystem.__table__.columns if isinstance(c.type, Date)}
+# 不可由前端直接修改的只读列
+_READONLY_COLS = {"id", "created_at", "updated_at"}
+
+def _sanitize_body(data: dict, model_class=None) -> dict:
+    """将非字符串列的空字符串转为 None，避免 MySQL 数据类型错误。
+
+    对 Date/DateTime/Integer/Float/Numeric 等列，空字符串 "" → None。
+    对 String/Text 列保留空字符串（合法值）。
+    始终排除 id/created_at/updated_at 只读列。
+    """
+    from sqlalchemy import Date, DateTime, Integer, Float, Numeric, BigInteger, SmallInteger
+    if model_class is None:
+        model_class = InfoSystem
+    non_str_types = (Date, DateTime, Integer, Float, Numeric, BigInteger, SmallInteger)
+    # 获取需要特殊处理的列名
+    cols_needing_none = set()
+    for c in model_class.__table__.columns:
+        if isinstance(c.type, non_str_types):
+            cols_needing_none.add(c.name)
+    # 也加入 Date 列（来自旧版兼容）
+    result = {}
     for k, v in data.items():
-        if k in date_cols and v == "":
-            data[k] = None
-    return data
+        if k in _READONLY_COLS:
+            continue  # 静默排除只读列
+        if k in cols_needing_none and v == "":
+            result[k] = None
+        else:
+            result[k] = v
+    return result
 
 
 @router.post("")
@@ -276,8 +297,10 @@ def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_a
         body["asset_id"] = _gen_asset_id(db)
     if db.query(InfoSystem).filter(InfoSystem.asset_id == body["asset_id"]).first():
         raise HTTPException(400, "资产ID已存在")
-    valid_cols = {c.name for c in InfoSystem.__table__.columns}
-    sys = InfoSystem(**_clean_empty_dates({k: v for k, v in body.items() if k in valid_cols and k != 'id'}))
+    clean = _sanitize_body(body, InfoSystem)
+    if not clean.get("system_name"):
+        raise HTTPException(400, "系统名称不能为空")
+    sys = InfoSystem(**clean)
     try:
         db.add(sys); db.commit(); db.refresh(sys)
     except Exception as e:
@@ -289,14 +312,14 @@ def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_a
 @router.put("/{sys_id}")
 def update_system(sys_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     sys = db.query(InfoSystem).get(sys_id)
-    if not sys: raise HTTPException(404, "不存在")
-    valid_cols = {c.name for c in sys.__table__.columns}
-    body = _clean_empty_dates(body)
-    for k, v in body.items():
-        if k != "id" and k in valid_cols:
-            setattr(sys, k, v)
+    if not sys:
+        raise HTTPException(404, "记录不存在")
+    clean = _sanitize_body(body, InfoSystem)
     try:
+        for k, v in clean.items():
+            setattr(sys, k, v)
         db.commit()
+        print(f"[UPDATE] sys_id={sys_id} 更新成功, 接收字段数={len(clean)}")
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"保存失败：{e}")
@@ -1016,9 +1039,14 @@ def update_djdj(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depend
         data["eval_org"] = data.pop("dept_name")
     elif "dept_name" in data:
         data.pop("dept_name")
-    for k, v in data.items():
-        if hasattr(rec, k) and k != "id": setattr(rec, k, v)
-    db.commit()
+    try:
+        for k, v in data.items():
+            if hasattr(rec, k) and k != "id" and k not in _READONLY_COLS:
+                setattr(rec, k, v)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"保存失败：{e}")
     return {"message": "已更新"}
 
 @router.delete("/djdj/{rec_id}")
@@ -1151,9 +1179,14 @@ def create_icp(body: dict, db: Session = Depends(get_db), _=Depends(require_admi
 def update_icp(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     rec = db.query(IcpRecord).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
-    for k, v in body.items():
-        if hasattr(rec, k) and k != "id": setattr(rec, k, v)
-    db.commit()
+    try:
+        for k, v in body.items():
+            if hasattr(rec, k) and k != "id" and k not in _READONLY_COLS:
+                setattr(rec, k, v)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"保存失败：{e}")
     return {"message": "已更新"}
 
 @router.delete("/icp/{rec_id}")
@@ -1410,9 +1443,14 @@ def batch_delete_supply_chain(body: dict, db: Session = Depends(get_db), _=Depen
 def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     rec = db.query(SupplyChain).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
-    for k, v in body.items():
-        if hasattr(rec, k) and k != "id": setattr(rec, k, v)
-    db.commit()
+    try:
+        for k, v in body.items():
+            if hasattr(rec, k) and k != "id" and k not in _READONLY_COLS:
+                setattr(rec, k, v)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"保存失败：{e}")
     return {"message": "已更新"}
 
 @router.delete("/supply-chain/{rec_id}")

@@ -55,6 +55,7 @@ def list_users(
             (User.username.contains(search))
             | (User.email.contains(search))
             | (User.gh.contains(search))
+            | (User.name.contains(search))
         )
     if department_id is not None:
         q = q.filter(User.department_id == department_id)

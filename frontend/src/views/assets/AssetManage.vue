@@ -9,9 +9,7 @@
         <el-button type="primary" @click="handleAutoMatch" :loading="autoMatchLoading">自动分组</el-button>
         <el-button type="success" plain @click="handleMatchOwner" :loading="ownerMatchLoading">匹配负责人</el-button>
         <el-button type="danger" plain @click="handleResetAll">重置关联</el-button>
-        <el-button type="success" @click="showClaimDialog">资产认领</el-button>
         <el-button v-if="authStore.isAdmin && selectedVMs.length > 0" type="warning" @click="showAssignDialog(selectedVMs)">指派选中 ({{ selectedVMs.length }})</el-button>
-        <el-button v-if="authStore.isAdmin" type="warning" plain @click="showAssignDialog([])">搜索指派</el-button>
       </div>
     </div>
 
@@ -235,9 +233,9 @@
         <template #append><el-button :icon="Search" @click="handleAssignSearch" :loading="assignSearching" /></template>
       </el-input>
       <div style="margin-top:12px;display:flex;gap:10px">
-        <el-tree-select v-model="assignDeptId" :data="deptTreeAll" :props="{label:'dwmc',value:'id',children:'children'}" placeholder="选择目标部门" clearable filterable check-strictly style="flex:1" />
-        <el-select v-model="assignUserId" placeholder="搜索人员姓名" clearable filterable remote :remote-method="searchUsers" :loading="userSearching" style="width:200px">
-          <el-option v-for="u in userOptions" :key="u.id" :label="`${u.name||''} - ${u.gh||''} (${u.department_name||''})`" :value="u.id" />
+        <el-tree-select v-model="assignDeptId" :data="deptTreeAll" :props="{label:'dwmc',value:'id',children:'children'}" placeholder="选择目标部门" clearable filterable check-strictly style="flex:1" @change="onAssignDeptChange" />
+        <el-select v-model="assignUserId" placeholder="搜索人员姓名" clearable filterable remote :remote-method="searchUsers" :loading="userSearching" style="width:200px" @change="onAssignUserChange">
+          <el-option v-for="u in userOptions" :key="u.id" :label="`${u.name||u.username} - ${u.gh||''} (${u.department_name||''})`" :value="u.id" />
         </el-select>
       </div>
       <el-table :data="assignSearchResult" stripe size="small" style="margin-top:12px" max-height="300" @selection-change="onAssignSelect">
@@ -364,12 +362,45 @@ const assignUserId = ref(null)
 const userOptions = ref([])
 const userSearching = ref(false)
 async function searchUsers(query) {
-  if (!query || query.length < 1) { userOptions.value = []; return }
+  if (!query || query.length < 1) {
+    // 没输入时，如果选了部门就列出该部门的人
+    if (assignDeptId.value) {
+      userSearching.value = true
+      try {
+        const res = await getUsers({ department_id: assignDeptId.value, size: 50 })
+        userOptions.value = res.items
+      } catch { userOptions.value = [] } finally { userSearching.value = false }
+    } else {
+      userOptions.value = []
+    }
+    return
+  }
   userSearching.value = true
   try {
-    const res = await getUsers({ search: query, size: 20 })
+    const params = { search: query, size: 20 }
+    if (assignDeptId.value) params.department_id = assignDeptId.value
+    const res = await getUsers(params)
     userOptions.value = res.items
   } catch { userOptions.value = [] } finally { userSearching.value = false }
+}
+
+// 选择目标部门时，同步加载该部门的人员列表
+function onAssignDeptChange(deptId) {
+  if (deptId) {
+    userOptions.value = []
+    assignUserId.value = null
+    searchUsers('')  // 加载该部门下的人员
+  }
+}
+
+// 选择人员时，自动回填目标部门
+function onAssignUserChange(userId) {
+  if (userId) {
+    const u = userOptions.value.find(x => x.id === userId)
+    if (u && u.department_id && !assignDeptId.value) {
+      assignDeptId.value = u.department_id
+    }
+  }
 }
 
 const syncLoading = ref(false)

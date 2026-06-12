@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "mysql+pymysql://ipam:IpamDb2024!@localhost:3306/ipam"
+    database_url: str = "mysql+pymysql://ipam:IpamDb2024!@localhost:13306/ipam"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "change-this-to-a-random-string"
     jwt_algorithm: str = "HS256"

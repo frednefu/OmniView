@@ -104,7 +104,7 @@
                     <el-select v-model="managerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'manager')" :loading="managerSearching" placeholder="输入姓名或工号搜索" clearable style="flex:1" @change="onManagerSelect">
                       <el-option v-for="u in managerOptions" :key="u.id" :label="`${u.name} (${u.gh||u.username})`" :value="u.id"/>
                     </el-select>
-                    <el-button :icon="Search" title="从教职工库查询" @click="openStaffLookup('manager')" >查教职工库</el-button>
+                    <el-button :icon="Search" title="从教职工库查询管理员" @click="openStaffLookup('manager')" >查管理员</el-button>
                   </div>
                   <div v-if="form.manager_name" style="margin-top:6px;display:flex;align-items:center;gap:8px">
                     <el-tag type="success" closable @close="clearManager">{{ form.manager_name }}</el-tag>
@@ -118,7 +118,7 @@
                     <el-select v-model="ownerSelected" filterable remote :remote-method="(q)=>searchUsers(q,'owner')" :loading="ownerSearching" placeholder="输入姓名或工号搜索" clearable style="flex:1" @change="onOwnerSelect" :disabled="!!form.owner_gh">
                       <el-option v-for="u in ownerOptions" :key="u.id" :label="`${u.name} (${u.gh||u.username})`" :value="u.id"/>
                     </el-select>
-                    <el-button :icon="Search" title="从教职工库查询" @click="openStaffLookup('owner')" :disabled="!!form.owner_gh">查教职工库</el-button>
+                    <el-button :icon="Search" title="从教职工库查询负责人" @click="openStaffLookup('owner')" :disabled="!!form.owner_gh">查负责人</el-button>
                   </div>
                   <div v-if="form.owner_name" style="margin-top:6px;display:flex;align-items:center;gap:8px">
                     <el-tag type="success" closable @close="clearOwner">{{ form.owner_name }}</el-tag>
@@ -304,6 +304,20 @@ const baseForm=()=>({
   vendor_contact:'',vendor_phone:'',ops_contact:'',ops_phone:''
 })
 
+// 显式列出所有可编辑字段（不依赖 Object.keys 枚举 Vue reactive Proxy，避免枚举遗漏）
+const SAVE_FIELDS = [
+  'asset_id','system_name','system_type','sub_type','ip_address','domain',
+  'org_name','dept_name','contact','contact_phone','fill_type',
+  'dept_id','manager_name','manager_gh','owner_name','owner_gh',
+  'djdj_no','djdj_level','djdj_date','djdj_sys_name','djdj_status','djdj_org',
+  'icp_no','icp_date',
+  'entry_url','url_status',
+  'remark','vendor_name','product_name','product_version','source_type',
+  'vendor_contact','vendor_phone','ops_contact','ops_phone'
+]
+const INT_FIELDS = ['dept_id']
+const DATE_FIELDS = ['djdj_date','icp_date']
+
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
 
 function resetForm(){
@@ -316,8 +330,18 @@ function resetForm(){
 async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems',{params:{page:page.value,size:size.value,search:search.value,system_type:filterSysType.value,sub_type:filterSubType.value,manager_name:filterManager.value,owner_name:filterOwner.value,fill_type:filterFillType.value,url_status:filterUrlStatus.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
 function openEdit(r){
+  resetForm()  // 先清空所有字段，防止上次编辑/新建的残留数据泄漏
   editId.value=r.id; isEdit.value=true
-  Object.keys(form).forEach(k=>{if(r[k]!==undefined)form[k]=r[k]||''})
+  // 使用显式字段列表逐字段赋值（避免 Proxy 枚举问题）
+  for(const k of SAVE_FIELDS){
+    if(r[k] !== undefined){
+      if(k === 'dept_id'){
+        form.dept_id = (r[k] != null && r[k] !== '') ? parseInt(r[k]) : null
+      }else{
+        form[k] = (r[k] != null) ? r[k] : ''
+      }
+    }
+  }
   // 还原管理员/负责人显示
   managerSelected.value=null; ownerSelected.value=null; managerOptions.value=[]; ownerOptions.value=[]
   if(r.manager_name){
@@ -404,10 +428,12 @@ function applyStaffToForm(u){
     managerOptions.value=[{id:u.id,name:u.name,gh:u.gh,username:u.username}]
     managerSelected.value=u.id
     form.manager_name=u.name;form.manager_gh=u.gh||u.username
+    console.log('[applyStaffToForm] 设置管理员:', u.name, u.gh)
   }else{
     ownerOptions.value=[{id:u.id,name:u.name,gh:u.gh,username:u.username}]
     ownerSelected.value=u.id
     form.owner_name=u.name;form.owner_gh=u.gh||u.username
+    console.log('[applyStaffToForm] 设置负责人:', u.name, u.gh)
   }
 }
 
@@ -433,18 +459,53 @@ function onDjdjSelect(name){
   if(d){form.djdj_no=d.record_no;form.djdj_level=d.level;form.djdj_date=d.record_date;form.djdj_org=d.eval_org||d.dept_name||'';form.djdj_status=form.djdj_status||'已备案';form.org_name=form.org_name||d.org_name}
 }
 
-// ── 保存 ──
 async function handleSave(){
   saving.value=true
   try{
-    if(!form.system_name){ElMessage.warning('请输入系统名称');return}
-    const data={...form}
-    data.dept_id=form.dept_id?parseInt(form.dept_id):null
+    // 必填校验
+    if(!form.system_name||!form.system_name.trim()){ElMessage.warning('请输入系统名称');saving.value=false;return}
+    // 从 form 显式提取每个字段（避免 Proxy 枚举问题）
+    const data={}
+    for(const k of SAVE_FIELDS){
+      let v=form[k]
+      if(v===undefined)continue
+      // Integer 字段：空值 → null
+      if(INT_FIELDS.includes(k)){
+        data[k]=(v!=null&&v!=='')?parseInt(v):null
+        continue
+      }
+      // Date 字段：空值 → null
+      if(DATE_FIELDS.includes(k)){
+        if(v===''||v===null||v===undefined)data[k]=null
+        else data[k]=v
+        continue
+      }
+      // 字符串字段：保留原值
+      data[k]=(v!=null)?v:''
+    }
     console.log('Saving:', isEdit.value?'PUT':'POST', JSON.stringify(data))
-    if(isEdit.value){await api.put('/info-systems/'+editId.value,data);ElMessage.success('已更新')}
-    else{const r=await api.post('/info-systems',data);console.log('Created:',r.data);ElMessage.success('已创建')}
+    if(isEdit.value){
+      await api.put('/info-systems/'+editId.value,data)
+      ElMessage.success('已更新')
+    }else{
+      const r=await api.post('/info-systems',data)
+      console.log('Created:',r.data)
+      ElMessage.success('已创建')
+    }
     dlg.value=false;fetchList()
-  }catch(e){console.error('Save error:',e);ElMessage.error(e.response?.data?.detail||e.message||'保存失败')}
+  }catch(e){
+    console.error('Save error:',e)
+    const detail=e.response?.data?.detail
+    if(detail&&typeof detail==='string'&&e.response?.status<500){
+      ElMessage.error(detail)
+    }else if(!e.response){
+      // 网络错误已在拦截器处理
+    }else if(e.response?.status>=500){
+      // 已在拦截器显示
+    }else{
+      ElMessage.error('保存失败，请稍后重试')
+    }
+  }
   finally{saving.value=false}
 }
 

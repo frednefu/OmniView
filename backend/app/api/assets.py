@@ -121,20 +121,47 @@ def _get_visible_dept_ids(db: Session, user: User) -> set[int] | None:
 
 @router.post("/sync")
 def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
-    """从 vm_inventory 同步新 VM 到 asset_inventory。"""
-    # 新增的 VM
+    """从 vm_inventory 同步新 VM 到 asset_inventory（新 VM 标记为 unlinked）。
+
+    还清理 asset_inventory 中在 vm_inventory 已不存在的僵尸记录。
+    """
+    vi_total = db.execute(text("SELECT COUNT(*) FROM vm_inventory")).scalar() or 0
+    ai_before = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
+
+    # 1. 将 vm_inventory 中新增的 VM 插入 asset_inventory（显式设为 unlinked）
     new_rows = db.execute(text(
-        "INSERT IGNORE INTO asset_inventory (vm_name, department_id, owner_user_id, claim_status, claimed_by, claimed_at) "
-        "SELECT v.vm_name, a.department_id, a.owner_user_id, COALESCE(a.claim_status,'unlinked'), a.claimed_by, a.claimed_at "
-        "FROM vm_inventory v LEFT JOIN asset_inventory a2 ON v.vm_name = a2.vm_name "
-        "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name WHERE a2.id IS NULL"
+        "INSERT IGNORE INTO asset_inventory (vm_name, claim_status) "
+        "SELECT vm_name, 'unlinked' FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != ''"
     ))
     db.commit()
     new_count = new_rows.rowcount
 
-    # 总数
-    total = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
-    return {"message": f"同步完成：新增 {new_count} 个 VM，共 {total} 个", "new": new_count, "total": total}
+    # 1a. 修复已有的 NULL claim_status → 'unlinked'（历史遗留）
+    fixed_rows = db.execute(text(
+        "UPDATE asset_inventory SET claim_status = 'unlinked' WHERE claim_status IS NULL"
+    ))
+    db.commit()
+
+    # 2. 清理 asset_inventory 中在 vm_inventory 已不存在的僵尸记录
+    stale_rows = db.execute(text(
+        "DELETE FROM asset_inventory "
+        "WHERE vm_name NOT IN (SELECT vm_name FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != '')"
+    ))
+    db.commit()
+    stale_count = stale_rows.rowcount
+
+    ai_after = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
+    unlinked = db.execute(text(
+        "SELECT COUNT(*) FROM asset_inventory WHERE claim_status = 'unlinked'"
+    )).scalar() or 0
+
+    return {
+        "message": f"同步完成：新增 {new_count} 个 VM，清理 {stale_count} 条僵尸，共 {ai_after} 个（{unlinked} 个未关联）",
+        "new": new_count,
+        "stale": stale_count,
+        "total": ai_after,
+        "unlinked": unlinked,
+    }
 
 
 @router.get("/tree")

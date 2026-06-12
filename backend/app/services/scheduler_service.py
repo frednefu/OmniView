@@ -184,18 +184,26 @@ def start_scheduler():
 
 
 def _asset_sync_job():
-    """定时同步 vm_inventory → asset_inventory。"""
+    """定时同步 vm_inventory → asset_inventory（新增 VM 标记为 unlinked）。"""
     from sqlalchemy import text
     db = SessionLocal()
     try:
         r = db.execute(text(
-            "INSERT IGNORE INTO asset_inventory (vm_name) SELECT vm_name FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != ''"
+            "INSERT IGNORE INTO asset_inventory (vm_name, claim_status) "
+            "SELECT vm_name, 'unlinked' FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != ''"
+        ))
+        d = db.execute(text(
+            "DELETE FROM asset_inventory "
+            "WHERE vm_name NOT IN (SELECT vm_name FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != '')"
         ))
         db.commit()
         if r.rowcount > 0:
             logger.info(f"资产同步：新增 {r.rowcount} 个 VM")
+        if d.rowcount > 0:
+            logger.info(f"资产同步：清理 {d.rowcount} 条僵尸记录")
     except Exception as e:
         logger.error(f"资产同步失败：{e}")
+        db.rollback()
     finally:
         db.close()
 
