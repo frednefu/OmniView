@@ -42,6 +42,7 @@ class DingJiaBackupRecord(Base):
     last_run_time = Column(DateTime, nullable=True, comment="最近运行时间")
     last_completed_time = Column(DateTime, nullable=True, comment="最近完成时间")
     next_run_time = Column(DateTime, nullable=True, comment="下次运行时间")
-    backup_versions = Column(Integer, default=1, comment="备份版本数")
+    backup_versions = Column(Integer, default=1, comment="备份版本数(可恢复的还原点)")
+    backup_versions_detail = Column(Text, nullable=True, comment="备份版本详情(JSON数组: [{time,type,size}])")
     vm_size_gb = Column(Float, nullable=True, comment="VM 大小(GB)")
     scanned_at = Column(DateTime, server_default=func.now(), comment="扫描时间")

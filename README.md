@@ -54,8 +54,8 @@
 - **资产画像** — 五源关联（ZDNS/F5/vCenter/交换机/椒图），双栏布局（左域名列表 + 右资产链路树），域名→VIP→Pool成员→VM→网络/VLAN 完整链路追踪，F5 Rules/Pool 双模式精准匹配 + HTTP→HTTPS 重定向检测，VIP 入口智能分类（内网/IPv4公网/IPv6公网），ESXi 宿主机/椒图主机详情联动展示，五源筛选 + 域名搜索 + Excel 导出
 - **奇安信椒图管理** — CRUD、连接测试、批量采集服务器清单（名称/IP/OS/CPU/内存/磁盘/在线状态/分组），端口/进程/软件三级详情自动采集，定时调度（默认 24h），扫描日志
 - **信息系统管理** — 信息系统资产台账维护（38字段），Excel 四格式智能导入（系统导出/资产导出/资产清单/信息系统管理，表头驱动映射，3种去重策略，asset_id/system_name双键匹配，TRIM防重复），供应链厂商自动入库，38列中文全字段导出，批量删除/字段排序/多维筛选（6个筛选器），数据同步（域名清洗→ZDNS匹配→自动/注销→IP替换→入口地址→验证状态），人员查询三步检索（系统用户→本地教职工库→数据中台API），自动注册补全信息（邮箱/电话/手机/部门/性别），等保系统名称本地下拉联动，导入时管理员自动建号，等保/ICP/供应链三页面统一样式分页，显式字段枚举消除 Proxy 枚举遗漏，通用类型清洗（Date/Integer/Float 空值→NULL），管理员/负责人按钮区分标签，保存成功后返回变更字段列表
-- **鼎甲备份对接** — 备份记录自动采集（任务名称/策略/时间/数据量/速度/状态），VM UUID 关联，定时调度
-- **菜单重构** — 分组标题改为子菜单，仪表盘管理员/普通用户分流，系统管理增加角色管理占位（待开发），对接资产信息管理/日志信息/网络资产信息 三级菜单收纳
+- **鼎甲备份对接** — 备份记录自动采集，双源数据融合（jobs作业定义 + instances恢复实例），可恢复版本详情（JSON数组，含每个版本时间/类型/大小），VM UUID 关联，定时调度，字段排序/分页选择/记录统计
+- **菜单重构** — 分组标题改为子菜单，仪表盘管理员/普通用户分流，系统管理增加角色管理占位（待开发），集成管理/日志信息/网络资产信息 三级菜单收纳
 
 ### 快速开始
 
@@ -325,7 +325,7 @@ npm run dev
 ├── frontend/
 │   ├── src/
 │   │   ├── views/               # Dashboard, AssetProfile, InfoSystem, DjDj, Icp, SupplyChain, SwitchList, VCenterList, F5List, ZDNSList, QAXList, DingJia, Results, Routes, Subnets, ScanLogs, ScanMonitor, History, AccountManage, Departments, Workers, Scheduler, ApiConfig, Profile
-│   │   ├── components/          # AppLayout（菜单：信息资产/网络资产/对接资产/日志/系统管理）
+│   │   ├── components/          # AppLayout（菜单：信息资产/网络资产/集成管理/日志/系统管理）
 │   │   ├── api/                 # Axios 封装
 │   │   ├── store/               # Pinia auth
 │   │   └── router/              # Vue Router（含角色守卫）

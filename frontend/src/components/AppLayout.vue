@@ -78,7 +78,7 @@
         <el-sub-menu index="/sys/asset-mgmt">
           <template #title>
             <el-icon><Monitor /></el-icon>
-            <span>对接资产信息管理</span>
+            <span>集成管理</span>
           </template>
           <el-menu-item index="/switches">
             <el-icon><Monitor /></el-icon>

@@ -110,6 +110,7 @@ async def lifespan(app: FastAPI):
     _migrate_columns("dingjia_backup_records", [
         ("vm_uuid", "VARCHAR(128)"),
         ("backup_versions", "INTEGER DEFAULT 1"),
+        ("backup_versions_detail", "TEXT"),
         ("vm_size_gb", "FLOAT"),
     ])
     # 信息系统新增归属字段

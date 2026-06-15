@@ -96,10 +96,19 @@ def scan_device(dev_id: int, db: Session = Depends(get_db), admin=Depends(requir
     return {"message": "扫描任务已提交，请稍后查看扫描日志", "scan_log_id": scan_log.id}
 
 
+# 允许排序的列名白名单（防 SQL 注入）
+_SORTABLE_COLS = {
+    "vm_name", "vm_size_gb", "backup_versions", "backup_subtype",
+    "last_run_result", "last_run_time", "last_completed_time",
+    "next_run_time", "host_ip", "job_name", "backup_type", "state",
+}
+
 @router.get("/{dev_id}/records")
 def list_records(
     dev_id: int, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-    search: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user),
+    search: str = Query(""), sort_field: str = Query(""),
+    sort_order: str = Query("desc", max_length=4),
+    db: Session = Depends(get_db), _=Depends(get_current_user),
 ):
     q = db.query(DingJiaBackupRecord).filter(DingJiaBackupRecord.device_id == dev_id)
     if search:
@@ -109,7 +118,16 @@ def list_records(
             DingJiaBackupRecord.vm_name.contains(search)
         )
     total = q.count()
-    items = q.order_by(DingJiaBackupRecord.id).offset((page - 1) * size).limit(size).all()
+    # 排序
+    if sort_field and sort_field in _SORTABLE_COLS:
+        col = getattr(DingJiaBackupRecord, sort_field, None)
+        if col is not None:
+            q = q.order_by(col.desc()) if sort_order == "desc" else q.order_by(col.asc())
+        else:
+            q = q.order_by(DingJiaBackupRecord.id.desc())
+    else:
+        q = q.order_by(DingJiaBackupRecord.id.desc())
+    items = q.offset((page - 1) * size).limit(size).all()
     return {"items": [{
         "id": r.id, "job_name": r.job_name, "host_name": r.host_name, "host_ip": r.host_ip,
         "vm_name": r.vm_name, "backup_type": r.backup_type, "backup_subtype": r.backup_subtype,
