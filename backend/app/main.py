@@ -112,6 +112,7 @@ async def lifespan(app: FastAPI):
         ("backup_versions", "INTEGER DEFAULT 1"),
         ("backup_versions_detail", "TEXT"),
         ("vm_size_gb", "FLOAT"),
+        ("duration_seconds", "INTEGER"),
     ])
     # 信息系统新增归属字段
     _migrate_columns("info_systems", [

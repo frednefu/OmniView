@@ -100,7 +100,7 @@ def scan_device(dev_id: int, db: Session = Depends(get_db), admin=Depends(requir
 _SORTABLE_COLS = {
     "vm_name", "vm_size_gb", "backup_versions", "backup_subtype",
     "last_run_result", "last_run_time", "last_completed_time",
-    "next_run_time", "host_ip", "job_name", "backup_type", "state",
+    "duration_seconds", "host_ip", "job_name", "backup_type", "state",
 }
 
 @router.get("/{dev_id}/records")
@@ -126,7 +126,7 @@ def list_records(
         else:
             q = q.order_by(DingJiaBackupRecord.id.desc())
     else:
-        q = q.order_by(DingJiaBackupRecord.id.desc())
+        q = q.order_by(DingJiaBackupRecord.last_run_time.desc(), DingJiaBackupRecord.vm_name.asc())
     items = q.offset((page - 1) * size).limit(size).all()
     return {"items": [{
         "id": r.id, "job_name": r.job_name, "host_name": r.host_name, "host_ip": r.host_ip,
@@ -134,6 +134,8 @@ def list_records(
         "agent": r.agent, "state": r.state, "last_run_result": r.last_run_result,
         "last_run_time": r.last_run_time.isoformat() if r.last_run_time else None,
         "last_completed_time": r.last_completed_time.isoformat() if r.last_completed_time else None,
-        "next_run_time": r.next_run_time.isoformat() if r.next_run_time else None,
-        "backup_versions": r.backup_versions, "vm_size_gb": r.vm_size_gb,
+        "duration_seconds": r.duration_seconds,
+        "backup_versions": r.backup_versions,
+        "backup_versions_detail": r.backup_versions_detail,
+        "vm_size_gb": r.vm_size_gb,
     } for r in items], "total": total}

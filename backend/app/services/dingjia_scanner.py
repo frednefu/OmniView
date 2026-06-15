@@ -1,9 +1,9 @@
 """鼎甲备份系统扫描服务。
 
 数据来源：
-  /d2/r/v2/jobs       — 作业定义（策略名、类型、主机ID等）
-  /d2/r/v2/instances  — 作业执行实例（恢复点/备份版本），每次成功执行 = 一个可恢复版本
-  /d2/r/v2/hosts      — 主机列表（IP 映射）
+  /d2/r/v2/jobs  — 作业定义（策略名、类型、主机ID等），按 job_id 关联补全信息
+  /d2/r/v2/sets  — 备份集（每个 VM 的每次备份 = 一个 set，含 backup_start_time/backup_end_time/duration）
+  /d2/r/v2/hosts — 主机列表（IP 映射）
 """
 import json
 import logging
@@ -27,7 +27,13 @@ def test_connection(host: str, api_key: str, access_key: str) -> dict:
 
 
 def _parse_dt(val) -> Optional[datetime]:
-    """解析时间戳或时间字符串为本地时间。"""
+    """解析时间戳或时间字符串，统一转为东八区本地时间（naive datetime）。
+
+    鼎甲 API 返回的时间可能有：
+    - Unix 时间戳（秒）：从 epoch 转换，指定 tz=TZ
+    - 字符串 "YYYY-MM-DD HH:MM:SS"：无时区标记 → 假定已是东八区
+    - 字符串 UTC："2026-06-05T00:49:38Z" / "2026-06-05T00:49:38+00:00" → 转为东八区
+    """
     if val is None:
         return None
     try:
@@ -35,18 +41,23 @@ def _parse_dt(val) -> Optional[datetime]:
             return datetime.fromtimestamp(val, tz=TZ).replace(tzinfo=None)
         if isinstance(val, str) and val.strip():
             s = val.strip()
-            # 尝试多种格式
-            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z"]:
+            # ISO 格式带时区
+            if s.endswith("Z") or "+" in s[10:] or (s.count("-") > 2 and "T" in s):
                 try:
-                    return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+                    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                    if dt.tzinfo is not None:
+                        dt = dt.astimezone(TZ)
+                    return dt.replace(tzinfo=None)
+                except Exception:
+                    pass
+            # 无时区字符串 → API 返回的是 UTC 时间，需转为东八区
+            for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"]:
+                try:
+                    dt_utc = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+                    dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+                    return dt_utc.astimezone(TZ).replace(tzinfo=None)
                 except Exception:
                     continue
-            # 尝试ISO格式
-            try:
-                dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-                return dt.astimezone(TZ).replace(tzinfo=None)
-            except Exception:
-                pass
     except Exception:
         pass
     return None
@@ -74,17 +85,29 @@ def _paginate(host: str, path: str, headers: dict, limit: int = 100) -> list[dic
 
 def fetch_backup_data(host: str, api_key: str, access_key: str) -> list[dict]:
     """
-    从鼎甲备份系统获取完整备份数据。
+    从鼎甲备份系统获取每个 VM 的备份记录。
 
-    流程：
-    1. 获取所有作业定义 (jobs) — 获取策略/类型/主机映射
-    2. 获取所有备份实例 (instances) — 获取每个版本的执行时间、大小、状态
-    3. 获取主机列表 (hosts) — IP 映射
-    4. 按 VM 聚合：从 instances 统计版本数和版本详情
+    数据流：
+    1. /d2/r/v2/jobs  — 作业定义，按 job_id 索引（补全策略名、主机ID等）
+    2. /d2/r/v2/sets  — 备份集，每个 set = 一个 VM 的一次备份
+       { resource_name, backup_start_time, backup_end_time, duration,
+         backup_type, state, source_size, resource_uuid, job_id, ... }
+    3. /d2/r/v2/hosts — 主机列表，按 host_id 索引（补全主机名、IP）
+    4. 按 VM 去重聚合：每个 VM 保留最新备份信息 + 所有版本详情
     """
     headers = {"X-Api-Key": api_key, "X-Access-Key": access_key}
 
-    # ── 1. 获取主机列表 ──
+    # ── 1. 获取作业定义（补全信息）──
+    all_jobs = _paginate(host, "/d2/r/v2/jobs", headers, limit=100)
+    logger.info(f"获取到 {len(all_jobs)} 个作业")
+
+    job_map = {}
+    for job in all_jobs:
+        jid = job.get("id", "")
+        if jid:
+            job_map[jid] = job
+
+    # ── 2. 获取主机列表 ──
     host_map = {}
     try:
         hosts = _paginate(host, "/d2/r/v2/hosts", headers, limit=500)
@@ -96,191 +119,184 @@ def fetch_backup_data(host: str, api_key: str, access_key: str) -> list[dict]:
                        and iface.get("address") != "127.0.0.1"
                        and ":" not in iface.get("address", "")]
                 host_map[huuid] = {
-                    "name": h.get("nodename") or h.get("sysname") or f"Host-{h.get('id','')}",
+                    "name": h.get("nodename") or h.get("sysname") or f"Host-{h.get('id', '')}",
                     "ips": ips,
                     "address": h.get("address", "")
                 }
     except Exception as e:
         logger.warning(f"获取主机列表失败: {e}")
 
-    # ── 2. 获取所有作业 ──
-    all_jobs = _paginate(host, "/d2/r/v2/jobs", headers, limit=100)
-    logger.info(f"获取到 {len(all_jobs)} 个作业")
+    # ── 3. 获取所有备份集（每个 VM 每次备份 = 一个 set）──
+    all_sets = _paginate(host, "/d2/r/v2/sets", headers, limit=200)
+    logger.info(f"获取到 {len(all_sets)} 个备份集")
 
-    # 构建 job_id → job 映射
-    job_map = {}
-    for job in all_jobs:
-        jid = job.get("id", "")
-        if jid:
-            job_map[jid] = job
+    # ── 4. 按 VM 去重聚合 ──
+    # vm_name → { info, versions: [...] }
+    vm_map = {}
 
-    # ── 3. 获取所有备份实例（恢复点/版本） ──
-    all_instances = []
-    try:
-        all_instances = _paginate(host, "/d2/r/v2/instances", headers, limit=200)
-        logger.info(f"获取到 {len(all_instances)} 个备份实例")
-    except Exception as e:
-        logger.warning(f"获取实例列表失败（回退到仅用作业数据）: {e}")
+    for s in all_sets:
+        # VM 名称：sets API 用 minor_resource_name 存储 VM 名
+        vm_name = (s.get("minor_resource_name") or s.get("resource_name")
+                   or s.get("item_name") or "").strip()
+        if not vm_name:
+            continue
 
-    # ── 4. 按 VM 聚合版本数据 ──
-    # vm_key → { versions: [{time, type, subtype, size, state, result}], ... }
-    vm_aggregate = {}
+        # 时间：sets API 字段名为 backup_start_time / backup_end_time
+        start_dt = _parse_dt(s.get("backup_start_time"))
+        end_dt = _parse_dt(s.get("backup_end_time"))
 
-    def _ensure_vm(vm_name: str, job: dict, hid: str):
-        """初始化 VM 聚合条目。"""
-        key = vm_name
-        if key not in vm_aggregate:
-            host_info = host_map.get(hid, {})
-            vm_aggregate[key] = {
-                "job_id": job.get("id", ""),
-                "job_name": job.get("name", ""),
+        # 持续时间：sets API 不返回 duration，从起止时间计算
+        dur = None
+        if start_dt and end_dt:
+            dur = int((end_dt - start_dt).total_seconds())
+            if dur < 0:
+                dur = None
+
+        # 大小
+        size_bytes = s.get("source_size") or 0
+        try:
+            size_gb = round(float(size_bytes) / (1024 ** 3), 1) if size_bytes else None
+        except (ValueError, TypeError):
+            size_gb = None
+
+        # 类型：full / incremental
+        backup_type = s.get("type", "")
+        backup_subtype = ""  # sets API 无 subtype
+
+        # 主机：sets 用 host_uuid，直接查 host_map
+        hid = s.get("host_uuid", "")
+        host_info = host_map.get(hid, {})
+
+        # VM UUID
+        vm_uuid = s.get("resource_uuid") or s.get("minor_resource_id") or ""
+
+        # 初始化或更新 VM 条目
+        if vm_name not in vm_map:
+            vm_map[vm_name] = {
+                "job_id": s.get("definition_uuid", ""),
+                "job_name": s.get("name", ""),
                 "host_id": hid,
                 "host_name": host_info.get("name", ""),
                 "host_ip": (host_info.get("ips") or [None])[0] or host_info.get("address", "") or "",
                 "vm_name": vm_name,
-                "vm_uuid": "",
-                "backup_type": job.get("type", ""),
-                "backup_subtype": job.get("subtype", ""),
-                "agent": job.get("agent", ""),
-                "state": job.get("state", ""),
-                "last_run_result": job.get("last_run_result", ""),
+                "vm_uuid": vm_uuid,
+                "backup_type": backup_type,
+                "backup_subtype": "",
+                "agent": "",
+                "state": "completed",
+                "last_run_result": "completed",
                 "last_run_time": None,
                 "last_completed_time": None,
-                "next_run_time": _parse_dt(job.get("next_run_time")),
+                "duration_seconds": None,
                 "vm_size_gb": None,
-                "versions": [],  # 可恢复版本列表
+                "versions": [],
             }
 
-    # 4a. 从 instances 提取版本信息（主要数据来源）
-    for inst in all_instances:
-        job_id = inst.get("job_id") or inst.get("id")
-        job = job_map.get(job_id, {})
-        hid = job.get("host_id", "")
+        entry = vm_map[vm_name]
 
-        # 实例来源 entries — 包含 VM 列表
-        source = inst.get("source", {}) or {}
-        entries = source.get("entries", [])
-        if not isinstance(entries, list):
-            entries = []
+        # 更新 UUID（取第一个非空值）
+        if vm_uuid and not entry["vm_uuid"]:
+            entry["vm_uuid"] = vm_uuid
+        # 更新大小（取最大值）
+        if size_gb and (not entry["vm_size_gb"] or size_gb > entry["vm_size_gb"]):
+            entry["vm_size_gb"] = size_gb
 
-        inst_time = _parse_dt(inst.get("start_time") or inst.get("begin_time"))
-        inst_end = _parse_dt(inst.get("end_time") or inst.get("completed_time"))
-        inst_state = inst.get("state", "")
-        inst_result = inst.get("last_run_result") or inst.get("result", "")
-        inst_type = inst.get("type") or job.get("type", "")
-        inst_subtype = inst.get("subtype") or job.get("subtype", "")
+        # 收集版本（sets 中每条记录都是一个可恢复的备份版本）
+        if start_dt:
+            entry["versions"].append({
+                "time": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": end_dt.strftime("%Y-%m-%d %H:%M:%S") if end_dt else None,
+                "duration_seconds": dur,
+                "type": backup_type,
+                "subtype": "",
+                "size_gb": size_gb,
+            })
 
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            vm_name = entry.get("name", "")
-            if not vm_name:
-                continue
-            vm_size = entry.get("size", 0)
+            # 更新主记录为最新版本
+            if not entry["last_run_time"] or start_dt > entry["last_run_time"]:
+                entry["last_run_time"] = start_dt
+                entry["last_completed_time"] = end_dt
+                entry["duration_seconds"] = dur
+                entry["backup_type"] = backup_type
+                entry["job_name"] = s.get("name", entry["job_name"])
 
-            _ensure_vm(vm_name, job, hid)
-            agg = vm_aggregate[vm_name]
-
-            # 更新 VM UUID 和大小
-            if entry.get("uuid"):
-                agg["vm_uuid"] = entry.get("uuid", "")
-            if vm_size:
-                size_gb = round(vm_size / (1024**3), 1)
-                if not agg["vm_size_gb"] or size_gb > (agg["vm_size_gb"] or 0):
-                    agg["vm_size_gb"] = size_gb
-
-            # 只统计成功完成的实例（可恢复版本）
-            if inst_state in ("completed", "") and inst_result not in ("failed", "error"):
-                agg["versions"].append({
-                    "time": inst_time.strftime("%Y-%m-%d %H:%M:%S") if inst_time else None,
-                    "end_time": inst_end.strftime("%Y-%m-%d %H:%M:%S") if inst_end else None,
-                    "type": inst_type,
-                    "subtype": inst_subtype,
-                    "size_gb": size_gb,
-                })
-
-    # 4b. 从 jobs 补全没有实例的 VM（兼容旧版/只有作业数据的情况）
-    for job in all_jobs:
-        hid = job.get("host_id", "")
-        source = job.get("source", {}) or {}
-        entries = source.get("entries", [])
-        if not isinstance(entries, list):
-            continue
-
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            vm_name = entry.get("name", "")
-            if not vm_name:
+    # ── 5. 如果 sets 为空，回退到 jobs 数据 ──
+    if not all_sets:
+        logger.warning("备份集为空，回退到仅用作业数据")
+        for job in all_jobs:
+            hid = job.get("host_id", "")
+            host_info = host_map.get(hid, {})
+            source = job.get("source", {}) or {}
+            entries = source.get("entries", [])
+            if not isinstance(entries, list):
                 continue
 
-            _ensure_vm(vm_name, job, hid)
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                vm_name = entry.get("name", "")
+                if not vm_name:
+                    continue
+                if vm_name in vm_map:
+                    continue
 
-            agg = vm_aggregate[vm_name]
-            # 从作业级别补充时间信息
-            job_time = _parse_dt(job.get("last_run_time")) or _parse_dt(job.get("last_completed_time"))
-            job_end = _parse_dt(job.get("last_completed_time"))
-            if not agg["last_run_time"] or (job_time and job_time > agg["last_run_time"]):
-                agg["last_run_time"] = job_time
-                agg["last_completed_time"] = job_end
-                agg["state"] = job.get("state", agg["state"])
-                agg["last_run_result"] = job.get("last_run_result", agg["last_run_result"])
-                agg["backup_type"] = job.get("type", agg["backup_type"])
-                agg["backup_subtype"] = job.get("subtype", agg["backup_subtype"])
-                agg["agent"] = job.get("agent", agg["agent"])
+                st = _parse_dt(job.get("last_run_time"))
+                et = _parse_dt(job.get("last_completed_time"))
+                dur = None
+                if st and et:
+                    dur = int((et - st).total_seconds())
+                    if dur < 0:
+                        dur = None
 
-            # 补充 VM UUID 和大小
-            if entry.get("uuid") and not agg["vm_uuid"]:
-                agg["vm_uuid"] = entry.get("uuid", "")
-            esize = entry.get("size", 0)
-            if esize and not agg["vm_size_gb"]:
-                agg["vm_size_gb"] = round(esize / (1024**3), 1)
+                vm_map[vm_name] = {
+                    "job_id": job.get("id", ""),
+                    "job_name": job.get("name", ""),
+                    "host_id": hid,
+                    "host_name": host_info.get("name", ""),
+                    "host_ip": (host_info.get("ips") or [None])[0] or host_info.get("address", "") or "",
+                    "vm_name": vm_name,
+                    "vm_uuid": entry.get("uuid", ""),
+                    "backup_type": job.get("type", ""),
+                    "backup_subtype": job.get("subtype", ""),
+                    "agent": job.get("agent", ""),
+                    "state": job.get("state", ""),
+                    "last_run_result": job.get("last_run_result", ""),
+                    "last_run_time": st,
+                    "last_completed_time": et,
+                    "duration_seconds": dur,
+                    "vm_size_gb": round(entry.get("size", 0) / (1024 ** 3), 1) if entry.get("size") else None,
+                    "versions": [],
+                }
 
-    # 4c. 从 instances 更新 last_run_time / last_completed_time
-    for vm_name, agg in vm_aggregate.items():
-        versions = agg["versions"]
-        if versions:
-            # 按时间排序
-            versions.sort(key=lambda v: v.get("time") or "")
-            # 最新版本时间 → last_run_time / last_completed_time
-            latest = versions[-1]
-            if latest.get("time"):
-                t = _parse_dt(latest["time"])
-                if t:
-                    agg["last_run_time"] = t
-            if latest.get("end_time"):
-                t = _parse_dt(latest["end_time"])
-                if t:
-                    agg["last_completed_time"] = t
-
-    # ── 5. 组装返回结果 ──
+    # ── 6. 排序版本 & 组装结果 ──
     results = []
-    for vm_name, agg in vm_aggregate.items():
-        versions = agg.pop("versions", [])
+    for vm_name, entry in vm_map.items():
+        versions = entry.pop("versions", [])
+        if versions:
+            versions.sort(key=lambda v: v.get("time") or "")
         results.append({
-            "job_id": agg["job_id"],
-            "job_name": agg["job_name"],
-            "host_id": agg["host_id"],
-            "host_name": agg["host_name"],
-            "host_ip": agg["host_ip"],
-            "vm_name": agg["vm_name"],
-            "vm_uuid": agg["vm_uuid"],
-            "backup_type": agg["backup_type"],
-            "backup_subtype": agg["backup_subtype"],
-            "agent": agg["agent"],
-            "state": agg["state"],
-            "last_run_result": agg["last_run_result"],
-            "last_run_time": agg["last_run_time"],
-            "last_completed_time": agg["last_completed_time"],
-            "next_run_time": agg["next_run_time"],
+            "job_id": entry["job_id"],
+            "job_name": entry["job_name"],
+            "host_id": entry["host_id"],
+            "host_name": entry["host_name"],
+            "host_ip": entry["host_ip"],
+            "vm_name": entry["vm_name"],
+            "vm_uuid": entry["vm_uuid"],
+            "backup_type": entry["backup_type"],
+            "backup_subtype": entry["backup_subtype"],
+            "agent": entry["agent"],
+            "state": entry["state"],
+            "last_run_result": entry["last_run_result"],
+            "last_run_time": entry["last_run_time"],
+            "last_completed_time": entry["last_completed_time"],
+            "duration_seconds": entry["duration_seconds"],
             "backup_versions": len(versions),
             "backup_versions_detail": json.dumps(versions, ensure_ascii=False) if versions else None,
-            "vm_size_gb": agg["vm_size_gb"],
+            "vm_size_gb": entry["vm_size_gb"],
         })
 
     logger.info(f"扫描完成：{len(results)} 个 VM 备份记录")
-    if all_instances:
-        total_versions = sum(r["backup_versions"] for r in results)
-        logger.info(f"共 {total_versions} 个可恢复版本")
+    total_versions = sum(r["backup_versions"] for r in results)
+    logger.info(f"共 {total_versions} 个可恢复版本")
 
     return results
