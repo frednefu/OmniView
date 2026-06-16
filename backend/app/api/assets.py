@@ -60,7 +60,8 @@ def _collect_domains(db: Session, linked_ips: set = None) -> list[dict]:
 
 
 @router.get("/vm-filters")
-def get_vm_filters(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def get_vm_filters(department_id: int = Query(None, description="按部门筛选文件夹"),
+                   db: Session = Depends(get_db), _=Depends(get_current_user)):
     """获取 VM 筛选选项。"""
     power_states = db.execute(text(
         "SELECT DISTINCT power_state FROM vm_inventory WHERE power_state IS NOT NULL AND power_state != ''"
@@ -71,9 +72,28 @@ def get_vm_filters(db: Session = Depends(get_db), _=Depends(get_current_user)):
     networks = db.execute(text(
         "SELECT DISTINCT network_name FROM vm_inventory WHERE network_name IS NOT NULL AND network_name != ''"
     )).fetchall()
-    folders = db.execute(text(
-        "SELECT DISTINCT vm_folder FROM vm_inventory WHERE vm_folder IS NOT NULL AND vm_folder != ''"
-    )).fetchall()
+
+    # 文件夹：可选按部门（含子部门）过滤
+    # department_id=0 表示未关联资产（claim_status='unlinked'或未在asset_inventory中）
+    if department_id == 0:
+        folders = db.execute(text(
+            "SELECT DISTINCT v.vm_folder FROM vm_inventory v "
+            "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            "WHERE (a.id IS NULL OR a.claim_status = 'unlinked') "
+            "AND v.vm_folder IS NOT NULL AND v.vm_folder != ''"
+        )).fetchall()
+    elif department_id is not None and department_id > 0:
+        sub_ids = _get_sub_dept_ids(db, department_id)
+        placeholders = ",".join(str(s) for s in sub_ids)
+        folders = db.execute(text(
+            f"SELECT DISTINCT v.vm_folder FROM vm_inventory v "
+            f"JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            f"WHERE a.department_id IN ({placeholders}) AND v.vm_folder IS NOT NULL AND v.vm_folder != ''"
+        )).fetchall()
+    else:
+        folders = db.execute(text(
+            "SELECT DISTINCT vm_folder FROM vm_inventory WHERE vm_folder IS NOT NULL AND vm_folder != ''"
+        )).fetchall()
     return {
         "power_states": [r.power_state for r in power_states],
         "os_names": [r.os_name for r in os_names],
@@ -500,7 +520,11 @@ def get_dept_vms(
     if vm_folder:
         all_items = [it for it in all_items if vm_folder.lower() in (it["vm_folder"] or "").lower()]
 
-    all_items.sort(key=lambda x: (x.get("vm_name") or "").lower())
+    all_items.sort(key=lambda x: (
+        (x.get("resource_pool") or "").lower(),
+        (x.get("vm_name") or "").lower(),
+        0 if x.get("power_state") == "poweredOn" else 1,
+    ))
     total = len(all_items)
     start = (page - 1) * size
     return {"items": all_items[start:start + size], "total": total, "page": page, "size": size}

@@ -51,7 +51,7 @@ def _get_vm_folder_path(vm):
         if isinstance(parent, vim.Datacenter):
             break
     names.reverse()
-    return "-".join(names)
+    return "/".join(names)
 
 
 def _get_resource_pool_path(vm):
@@ -64,7 +64,7 @@ def _get_resource_pool_path(vm):
         names.append(rp.name)
         rp = parent
     names.reverse()
-    return "-".join(names)
+    return "/".join(names)
 
 
 def _get_vm_cluster(vm):

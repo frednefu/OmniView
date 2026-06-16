@@ -14,7 +14,7 @@
     </div>
 
     <div class="asset-content">
-      <!-- 左侧组织树 -->
+      <!-- 左侧部门树 -->
       <div class="tree-panel">
         <el-input v-model="treeFilter" placeholder="搜索部门..." clearable size="small" style="margin-bottom:10px" @input="filterTree" />
         <el-tree
@@ -49,7 +49,36 @@
             <h3>{{ selectedNode.full_name || selectedNode.label }}</h3>
           </div>
           <el-tabs v-model="activeTab">
+            <template #extra>
+              <el-switch v-if="activeTab==='vms'" v-model="hideEmptyFolder" size="small" active-text="隐藏空" @change="rebuildFolderTree" style="margin-right:8px" />
+            </template>
             <el-tab-pane label="虚拟机清单" name="vms">
+              <div class="vm-split">
+                <!-- VM 清单内左侧：文件夹树 -->
+                <div class="vm-folder-tree">
+                  <el-input v-model="folderTreeFilter" placeholder="搜索文件夹..." clearable size="small" style="margin-bottom:6px" @input="(v)=>folderTreeRef?.filter(v)" />
+                  <el-tree
+                    ref="folderTreeRef"
+                    :data="folderTree"
+                    :props="{ children: 'children', label: 'label' }"
+                    node-key="id"
+                    default-expand-all
+                    highlight-current
+                    :filter-node-method="(v,d)=>d.label.toLowerCase().includes(v.toLowerCase())"
+                    @node-click="handleFolderClick"
+                    size="small"
+                  >
+                    <template #default="{ data }">
+                      <span class="folder-node">
+                        <el-icon v-if="data.id==='root'"><FolderOpened /></el-icon>
+                        <el-icon v-else><Folder /></el-icon>
+                        <span>{{ data.label }}</span>
+                      </span>
+                    </template>
+                  </el-tree>
+                </div>
+                <!-- VM 清单内右侧：表格 -->
+                <div class="vm-table-wrap">
               <div class="filter-bar">
                 <el-input v-model="vmSearch" placeholder="搜索名称、IP、MAC、OS..." clearable size="small" style="width:260px" @keyup.enter="vmPage=1;loadVMs()" @clear="vmPage=1;loadVMs()" />
                 <el-select v-model="vmClaimFilter" placeholder="分组状态" clearable size="small" style="width:110px" @change="vmPage=1;loadVMs()">
@@ -76,15 +105,12 @@
                 <el-select v-model="vmNetFilter" placeholder="网络" clearable filterable size="small" style="width:140px" @change="vmPage=1;loadVMs()">
                   <el-option v-for="s in filterOptions.networks" :key="s" :label="s" :value="s" />
                 </el-select>
-                <el-select v-model="vmFolderFilter" placeholder="文件夹" clearable filterable size="small" style="width:140px" @change="vmPage=1;loadVMs()">
-                  <el-option v-for="s in filterOptions.folders" :key="s" :label="s" :value="s" />
-                </el-select>
                 <el-button type="primary" size="small" @click="vmPage=1;loadVMs()">查询</el-button>
                 <el-button type="success" size="small" :disabled="selectedVMs.length===0" @click="handleClaim">认领资产</el-button>
                 <el-button type="warning" size="small" :disabled="selectedVMs.length===0" @click="handleRevoke">撤销认领</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
-              <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort">
+              <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}">
                 <el-table-column type="selection" width="35" />
                 <el-table-column prop="vm_name" label="名称" width="150" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="power_state" label="电源" width="65" sortable="custom">
@@ -106,8 +132,7 @@
                 <el-table-column prop="ip_address" label="IP" width="130" show-overflow-tooltip />
                 <el-table-column prop="mac_address" label="MAC" width="130" show-overflow-tooltip />
                 <el-table-column prop="vcenter_name" label="vCenter" width="100" show-overflow-tooltip />
-                <el-table-column prop="resource_pool" label="资源池" width="100" show-overflow-tooltip />
-                <el-table-column prop="vm_folder" label="文件夹" width="120" show-overflow-tooltip />
+                <el-table-column prop="resource_pool" label="资源池" width="100" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
                 <el-table-column prop="f5_public_ips" label="公网IP" width="130" show-overflow-tooltip />
                 <el-table-column prop="f5_domains" label="关联域名" min-width="140" show-overflow-tooltip />
@@ -151,6 +176,8 @@
                 @current-change="loadVMs"
                 style="margin-top:10px;justify-content:center"
               />
+                </div><!-- .vm-table-wrap -->
+              </div><!-- .vm-split -->
             </el-tab-pane>
 
             <el-tab-pane label="域名清单" name="domains">
@@ -271,7 +298,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, WarningFilled, OfficeBuilding } from '@element-plus/icons-vue'
+import { Search, WarningFilled, OfficeBuilding, Folder, FolderOpened } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import { getDepartmentTree } from '@/api/departments'
 import { getAssetTree, getDeptVMs, getDeptDomains, getVMFilters, searchAssets, previewAutoMatch, executeAutoMatch, startMatchOwner, statusMatchOwner, syncAssets, claimAssets, assignAssets, revokeAssets, resetAllAssets } from '@/api/assets'
@@ -280,11 +307,120 @@ import { getUsers } from '@/api/users'
 const authStore = useAuthStore()
 const treeRef = ref(null)
 const treeFilter = ref('')
+const folderTreeFilter = ref('')
+const folderTreeRef = ref(null)
 const treeData = ref([])
 const deptTreeAll = ref([])
 const selectedNode = ref(null)
 const activeTab = ref('vms')
 const hideEmpty = ref(true)
+const hideEmptyFolder = ref(true)
+
+// 文件夹树
+const folderTree = ref([])
+const allFolders = ref([])  // 所有唯一文件夹路径
+
+function buildFolderTree(folders) {
+  // 解析文件夹路径: "303/数建处/8000/8900/iNEFU/零代码"
+  const SEP = '/'
+  const root = { id: 'root', label: '全部虚拟机', children: [] }
+  const nodeMap = {}  // path → node
+
+  // 统计每个路径节点下的 VM 数量
+  const vmCount = {}  // path → count
+  for (const f of folders) {
+    if (!f) continue
+    const parts = f.split(SEP)
+    if (parts.length < 1) continue
+    let acc = ''
+    for (let i = 0; i < parts.length; i++) {
+      const seg = parts[i].trim()
+      if (!seg) continue
+      acc = acc ? acc + SEP + seg : seg
+      vmCount[acc] = (vmCount[acc] || 0) + 1
+    }
+  }
+
+  // 构建树
+  for (const f of folders) {
+    if (!f) continue
+    const parts = f.split(SEP)
+    if (parts.length < 1) continue
+    let parentPath = 'root'
+    let currentPath = ''
+
+    for (let i = 0; i < parts.length; i++) {
+      const seg = parts[i].trim()
+      if (!seg) continue
+      currentPath = currentPath ? currentPath + SEP + seg : seg
+
+      if (!nodeMap[currentPath]) {
+        const node = { id: currentPath, label: seg, children: [], vmCount: vmCount[currentPath] || 0 }
+        nodeMap[currentPath] = node
+        if (parentPath === 'root') {
+          root.children.push(node)
+        } else if (nodeMap[parentPath]) {
+          nodeMap[parentPath].children.push(node)
+        }
+      }
+      parentPath = currentPath
+    }
+  }
+  return [root]
+}
+
+// 按部门（含子部门）从后端加载全量文件夹树
+async function reloadFolderTreeForDept(deptId) {
+  try {
+    const params = {}
+    // deptId=-1 → department_id=0（未关联资产）
+    // deptId>0 → 正常传部门ID（含子部门）
+    if (deptId && deptId !== -1) {
+      params.department_id = deptId
+    } else if (deptId === -1) {
+      params.department_id = 0
+    }
+    const opts = await getVMFilters(params)
+    const folders = opts.folders || []
+    const tree = buildFolderTree(folders)
+    sortTree(tree)
+    if (hideEmptyFolder.value) {
+      function filterEmpty(list) {
+        return list.filter(n => {
+          if (n.children) n.children = filterEmpty(n.children)
+          return n.vmCount > 0 || (n.children && n.children.length > 0)
+        })
+      }
+      folderTree.value = filterEmpty(tree)
+    } else {
+      folderTree.value = tree
+    }
+  } catch { /* */ }
+}
+
+// 过滤空节点并重建文件夹树（从全部文件夹列表）
+function rebuildFolderTree() {
+  const tree = buildFolderTree(allFolders.value)
+  sortTree(tree)
+  if (hideEmptyFolder.value) {
+    function filterEmpty(list) {
+      return list.filter(n => {
+        if (n.children) n.children = filterEmpty(n.children)
+        return n.vmCount > 0 || (n.children && n.children.length > 0)
+      })
+    }
+    folderTree.value = filterEmpty(tree)
+  } else {
+    folderTree.value = tree
+  }
+}
+
+// 递归排序子节点（按 label 字母序）
+function sortTree(nodes) {
+  nodes.sort((a, b) => a.label.localeCompare(b.label, 'zh'))
+  nodes.forEach(n => { if (n.children?.length) sortTree(n.children) })
+}
+
 
 const vmList = ref([])
 const vmLoading = ref(false)
@@ -450,7 +586,12 @@ async function loadTree() {
 }
 
 async function fetchFilterOptions() {
-  try { filterOptions.value = await getVMFilters() } catch { /* */ }
+  try {
+    const opts = await getVMFilters()
+    filterOptions.value = opts
+    allFolders.value = opts.folders || []
+    rebuildFolderTree()
+  } catch { /* */ }
 }
 
 async function handleNodeClick(data) {
@@ -466,6 +607,19 @@ async function handleNodeClick(data) {
   domainPage.value = 1
   await loadVMs()
   await loadDomains()
+  // 按部门（含子部门）重新加载全量文件夹树
+  await reloadFolderTreeForDept(data.id)
+}
+
+// 文件夹树节点点击 → 筛选该文件夹下的 VM
+async function handleFolderClick(data) {
+  vmPage.value = 1
+  if (data.id === 'root') {
+    vmFolderFilter.value = ''
+  } else {
+    vmFolderFilter.value = data.id
+  }
+  await loadVMs()
 }
 
 async function loadVMs() {
@@ -699,4 +853,9 @@ onMounted(async () => {
 .filter-bar { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
 .total-info { font-size: 12px; color: #909399; margin-bottom: 6px; }
 .match-summary { font-size: 14px; padding: 8px 0; }
+.vm-split { display: flex; gap: 12px; flex: 1; overflow: hidden; min-height: 0; }
+.vm-folder-tree { width: 220px; flex-shrink: 0; border: 1px solid #e4e7ed; border-radius: 6px; padding: 8px; overflow-y: auto; background: #fafafa; font-size: 13px; }
+.vm-folder-tree :deep(.el-tree-node__content) { height: 28px; }
+.folder-node { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.vm-table-wrap { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
 </style>

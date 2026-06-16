@@ -44,8 +44,8 @@ export function claimAssets(data) {
   return api.post('/assets/claim', data).then((r) => r.data)
 }
 
-export function getVMFilters() {
-  return api.get('/assets/vm-filters').then((r) => r.data)
+export function getVMFilters(params) {
+  return api.get('/assets/vm-filters', { params }).then((r) => r.data)
 }
 
 export function assignAssets(data) {
