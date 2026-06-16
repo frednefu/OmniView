@@ -16,7 +16,25 @@ api.interceptors.request.use((config) => {
 })
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    // 检测被 WAF/nginx 拦截的 HTML 响应（HTTP 200 但 body 是 HTML）
+    const data = res.data
+    if (typeof data === 'string' && /^\s*</.test(data)) {
+      // 尝试从 HTML 中提取错误信息
+      let msg = '请求被拦截'
+      const titleMatch = data.match(/<title>(.*?)<\/title>/i)
+      if (titleMatch) msg = titleMatch[1]
+      // 也尝试提取 body 文本
+      const bodyMatch = data.match(/<body[^>]*>(.*?)<\/body>/is)
+      if (bodyMatch) {
+        const text = bodyMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+        if (text && text.length < 200) msg += ': ' + text
+      }
+      ElMessage.error(msg)
+      return Promise.reject(new Error(msg))
+    }
+    return res
+  },
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('token')
@@ -25,18 +43,18 @@ api.interceptors.response.use(
       ElMessage.error('登录已过期，请重新登录')
       return Promise.reject(err)
     }
-    // 网络错误（无响应）才在这里弹窗，业务错误交给调用方处理
+    // 网络错误（无响应）
     if (!err.response) {
       ElMessage.error('网络连接失败，请检查网络')
       return Promise.reject(err)
     }
-    // 500 服务端错误统一提示（调用方可能没有专门的错误处理）
+    // 500 服务端错误统一提示
     if (err.response.status >= 500) {
       const detail = err.response?.data?.detail
       ElMessage.error(typeof detail === 'string' ? detail : '服务器内部错误，请稍后重试')
       return Promise.reject(err)
     }
-    // 4xx 错误交给业务 catch 处理（含 detail 的错误），不在此弹窗
+    // 4xx 错误交给业务 catch 处理
     return Promise.reject(err)
   },
 )
