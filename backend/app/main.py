@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from app.database import engine, Base
-from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory
+from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory, SharedLink
 from app.api.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 from app.version import get_version
@@ -114,6 +114,11 @@ async def lifespan(app: FastAPI):
         ("vm_size_gb", "FLOAT"),
         ("duration_seconds", "INTEGER"),
     ])
+    # 外链填报
+    try:
+        Base.metadata.create_all(bind=engine, tables=[SharedLink.__table__])
+    except Exception:
+        pass
     # 信息系统新增归属字段
     _migrate_columns("info_systems", [
         ("dept_id", "INTEGER"),

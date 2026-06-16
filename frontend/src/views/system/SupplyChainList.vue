@@ -35,6 +35,12 @@
 
     <!-- 编辑/添加对话框 -->
     <el-dialog v-model="dlg" :title="isEdit?'编辑供应链单位':'添加供应链单位'" width="960px" class="sc-dialog" destroy-on-close>
+      <template #header="{ title }">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span>{{ title }}</span>
+          <el-button v-if="isEdit" size="small" type="warning" plain @click="openSharedLink">外链填报</el-button>
+        </div>
+      </template>
       <el-scrollbar max-height="70vh">
         <el-form :model="form" label-position="top" size="default" class="sc-form">
 
@@ -83,7 +89,10 @@
               </el-col>
               <el-col :span="24">
                 <el-form-item label="注册地址">
-                  <el-input v-model="form.address" placeholder="省,市/区,详细地址" clearable />
+                  <el-cascader v-model="addressArr" :options="addressOptions" placeholder="请选择省份/城市" clearable filterable style="width:100%" />
+                  <div v-if="form.address && addressArr.length===0" style="margin-top:4px;font-size:12px;color:#909399">
+                    当前值：{{ form.address }}（请重新选择）
+                  </div>
                 </el-form-item>
               </el-col>
             </el-row>
@@ -201,6 +210,53 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 外链管理对话框 -->
+    <el-dialog v-model="linkDlg" title="外链填报" width="560px" append-to-body @opened="loadLinks">
+      <el-form label-width="80px" size="default">
+        <el-form-item label="外链标题">
+          <el-input v-model="linkForm.title" placeholder="如：供应链信息填报-XX公司" />
+        </el-form-item>
+        <el-form-item label="访问密码">
+          <el-input v-model="linkForm.password" placeholder="留空则不设密码" show-password />
+        </el-form-item>
+        <el-form-item label="失效时间">
+          <el-select v-model="linkForm.expire_hours" style="width:200px">
+            <el-option label="永不过期" :value="0" />
+            <el-option label="1小时" :value="1" />
+            <el-option label="6小时" :value="6" />
+            <el-option label="24小时" :value="24" />
+            <el-option label="48小时" :value="48" />
+            <el-option label="7天" :value="168" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="createLink" :loading="linkCreating">生成外链</el-button>
+        </el-form-item>
+      </el-form>
+      <!-- 已有外链列表 -->
+      <div v-if="links.length > 0" style="margin-top:16px">
+        <el-divider />
+        <div style="font-size:14px;font-weight:500;margin-bottom:8px">已有外链</div>
+        <div v-for="l in links" :key="l.token" class="link-item">
+          <div class="link-info">
+            <div><b>{{ l.title }}</b></div>
+            <div class="link-url">{{ origin }}{{ l.url }}</div>
+            <div class="link-meta">
+              {{ l.has_password ? '需密码' : '无密码' }}
+              · {{ l.access_count || 0 }}次访问
+              · {{ l.expire_at ? '过期: '+new Date(l.expire_at).toLocaleString('zh-CN') : '永不过期' }}
+              · <el-tag :type="l.is_active?'success':'danger'" size="small">{{ l.is_active ? '有效' : '已关闭' }}</el-tag>
+            </div>
+          </div>
+          <div class="link-actions">
+            <el-button size="small" @click="copyLink(l)">复制链接</el-button>
+            <el-button size="small" :type="l.is_active?'warning':'success'" @click="toggleLink(l)">{{ l.is_active ? '关闭' : '开启' }}</el-button>
+            <el-button size="small" type="danger" @click="deleteLink(l)">删除</el-button>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -210,10 +266,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, OfficeBuilding, User, Briefcase, Coin, EditPen, Edit, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import api from '@/api/index'
+import { addressOptions } from '@/data/addressOptions.js'
 
 const authStore=useAuthStore()
+const origin = window.location.origin
 const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
 const selectedIds=ref([]),dlg=ref(false),isEdit=ref(false),editId=ref(null),saving=ref(false)
+const addressArr=ref([])  // 级联地址选择器
 const fileInput=ref(null)
 
 const companyTypes=['中外合资','外商独资','民营','上市公司','国企','事业单位']
@@ -232,18 +291,33 @@ const form=reactive({
   industryArr:[],serviceTypeArr:[],dataLocationArr:[],dataStorageArr:[],dbTypeArr:[]
 })
 
-function resetForm(){Object.assign(form,{company_name:'',credit_code:'',address:'',security_dept:'',security_contact:'',security_phone:'',company_type:'',has_foreign_capital:'',industry:'',service_type:'',importance:'',url_ip_range:'',data_level:'',data_location:'',data_storage:'',db_type:'',remark:'',industryArr:[],serviceTypeArr:[],dataLocationArr:[],dataStorageArr:[],dbTypeArr:[]})}
+function resetForm(){Object.assign(form,{company_name:'',credit_code:'',address:'',security_dept:'',security_contact:'',security_phone:'',company_type:'',has_foreign_capital:'',industry:'',service_type:'',importance:'',url_ip_range:'',data_level:'',data_location:'',data_storage:'',db_type:'',remark:'',industryArr:[],serviceTypeArr:[],dataLocationArr:[],dataStorageArr:[],dbTypeArr:[]});addressArr.value=[]}
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
 
 async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems/supply-chain',{params:{page:page.value,size:size.value,search:search.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
-function openEdit(r){editId.value=r.id;isEdit.value=true;Object.keys(form).forEach(k=>{if(r[k]!==undefined)form[k]=r[k]||''});form.industryArr=(r.industry||'').split(',').filter(Boolean);form.serviceTypeArr=(r.service_type||'').split(',').filter(Boolean);form.dataLocationArr=(r.data_location||'').split(',').filter(Boolean);form.dataStorageArr=(r.data_storage||'').split(',').filter(Boolean);form.dbTypeArr=(r.db_type||'').split(',').filter(Boolean);dlg.value=true}
+function resolveAddress(raw) {
+  // 解析地址字符串为级联数组 [省份, 城市]
+  if (!raw) return []
+  const parts = raw.split(',').filter(Boolean)
+  if (parts.length >= 2) return parts.slice(0, 2)
+  // 单段：可能是城市名，尝试在全部省份中查找
+  const city = parts[0]
+  for (const p of addressOptions) {
+    if (p.label === city) return [p.value]
+    const c = p.children?.find(c => c.label === city)
+    if (c) return [p.value, c.value]
+  }
+  return [] // 无法匹配
+}
+function openEdit(r){editId.value=r.id;isEdit.value=true;Object.keys(form).forEach(k=>{if(r[k]!==undefined)form[k]=r[k]||''});form.industryArr=(r.industry||'').split(',').filter(Boolean);form.serviceTypeArr=(r.service_type||'').split(',').filter(Boolean);form.dataLocationArr=(r.data_location||'').split(',').filter(Boolean);form.dataStorageArr=(r.data_storage||'').split(',').filter(Boolean);form.dbTypeArr=(r.db_type||'').split(',').filter(Boolean);addressArr.value=resolveAddress(r.address);dlg.value=true}
 
 async function handleSave(){
   saving.value=true
   try{
     if(!form.company_name){ElMessage.warning('请输入单位名称');saving.value=false;return}
     const data={...form};delete data.industryArr;delete data.serviceTypeArr;delete data.dataLocationArr;delete data.dataStorageArr;delete data.dbTypeArr
+    data.address = addressArr.value.length > 0 ? addressArr.value.join(',') : (form.address || '')
     if(isEdit.value){await api.put('/info-systems/supply-chain/'+editId.value,data);ElMessage.success('已更新')}
     else{await api.post('/info-systems/supply-chain',data);ElMessage.success('已创建')}
     dlg.value=false;fetchList()
@@ -255,6 +329,69 @@ async function handleBatchDelete(){try{await ElMessageBox.confirm('确定删除�
 function triggerImport(){fileInput.value?.click()}
 async function onFileChange(e){const file=e.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);loading.value=true;try{const r=await api.post('/info-systems/supply-chain/import',fd);ElMessage.success(r.data.message);fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'导入失败')}finally{loading.value=false;e.target.value=''}}
 async function handleExport(){try{const r=await api.get('/info-systems/supply-chain/export',{responseType:'blob'});const url=URL.createObjectURL(r.data);const a=document.createElement('a');a.href=url;a.download='supply_chain_export.xlsx';a.click();URL.revokeObjectURL(url)}catch{}}
+// ── 外链填报 ──
+const linkDlg = ref(false)
+const linkCreating = ref(false)
+const links = ref([])
+const linkForm = reactive({ title: '', password: '', expire_hours: 24 })
+
+async function openSharedLink() {
+  linkForm.title = '供应链信息填报 - ' + (form.company_name || '')
+  linkForm.password = ''
+  linkForm.expire_hours = 24
+  linkDlg.value = true
+}
+
+async function loadLinks() {
+  try {
+    const r = await api.get('/shared-links/by-target', { params: { target_type: 'supply_chain', target_id: editId.value } })
+    links.value = r.data.items || []
+  } catch { links.value = [] }
+}
+
+async function createLink() {
+  if (!editId.value) return
+  linkCreating.value = true
+  try {
+    const r = await api.post('/shared-links', {
+      target_type: 'supply_chain', target_id: editId.value,
+      title: linkForm.title, password: linkForm.password,
+      expire_hours: linkForm.expire_hours,
+    })
+    // 自动复制到剪贴板
+    const url = window.location.origin + r.data.url
+    navigator.clipboard.writeText(url).then(() => {
+      ElMessage.success('外链已生成并复制到剪贴板')
+    }).catch(() => {
+      ElMessage.success('外链已生成')
+    })
+    await loadLinks()
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '生成失败') }
+  finally { linkCreating.value = false }
+}
+
+async function toggleLink(l) {
+  try {
+    const r = await api.put(`/shared-links/${l.token}/toggle`)
+    ElMessage.success(r.data.message)
+    await loadLinks()
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '操作失败') }
+}
+
+async function deleteLink(l) {
+  try {
+    await ElMessageBox.confirm('确定删除此外链？', '确认', { type: 'warning' })
+    await api.delete(`/shared-links/${l.token}`)
+    ElMessage.success('已删除')
+    await loadLinks()
+  } catch { /* 取消 */ }
+}
+
+function copyLink(l) {
+  const url = window.location.origin + l.url
+  navigator.clipboard.writeText(url).then(() => ElMessage.success('链接已复制')).catch(() => ElMessage.warning('复制失败，请手动复制'))
+}
+
 onMounted(fetchList)
 </script>
 
@@ -317,4 +454,12 @@ onMounted(fetchList)
 
 /* 对话框整体滚动 */
 .sc-dialog :deep(.el-dialog__body){padding:16px 24px}
+
+/* ═══════════════ 外链 ═══════════════ */
+.link-item { display: flex; align-items: center; justify-content: space-between; padding: 12px; margin-bottom: 8px; background: #f5f7fa; border-radius: 6px; gap: 12px; }
+.link-info { flex: 1; min-width: 0; }
+.link-info b { font-size: 14px; }
+.link-url { font-size: 12px; color: #409eff; word-break: break-all; margin: 4px 0; font-family: monospace; }
+.link-meta { font-size: 12px; color: #909399; }
+.link-actions { display: flex; gap: 4px; flex-shrink: 0; }
 </style>

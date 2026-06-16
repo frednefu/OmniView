@@ -3,6 +3,12 @@ import { useAuthStore } from '@/store/auth'
 
 const routes = [
   {
+    path: '/s/:token',
+    name: 'SharedFill',
+    component: () => import('@/views/system/SharedFill.vue'),
+    meta: { public: true },
+  },
+  {
     path: '/login',
     name: 'Login',
     component: () => import('@/views/Login.vue'),
@@ -126,6 +132,12 @@ const routes = [
         name: 'ApiConfig',
         component: () => import('@/views/system/ApiConfig.vue'),
         meta: { title: 'API 配置', admin: true },
+      },
+      {
+        path: 'sys/shared-links',
+        name: 'SharedLinksManage',
+        component: () => import('@/views/system/SharedLinksManage.vue'),
+        meta: { title: '外链管理', admin: true },
       },
       {
         path: 'sys/assets',

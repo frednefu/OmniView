@@ -135,6 +135,10 @@
               <el-icon><Coin /></el-icon>
               <span>API 配置</span>
             </el-menu-item>
+            <el-menu-item index="/sys/shared-links">
+              <el-icon><Link /></el-icon>
+              <span>外链管理</span>
+            </el-menu-item>
             <el-menu-item index="/sys/departments">
               <el-icon><OfficeBuilding /></el-icon>
               <span>组织机构管理</span>
