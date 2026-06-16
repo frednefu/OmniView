@@ -210,8 +210,13 @@ def list_vcenters(
     total = q.count()
     pages = ceil(total / size) if total > 0 else 0
     items = q.order_by(VCenter.id).offset((page - 1) * size).limit(size).all()
+    result = []
+    for vc in items:
+        d = VCenterOut.model_validate(vc).model_dump()
+        d["password"] = vc.password or ""
+        result.append(d)
     return PaginatedResponse(
-        items=[VCenterOut.model_validate(vc) for vc in items],
+        items=result,
         total=total, page=page, size=size, pages=pages,
     )
 
@@ -238,7 +243,7 @@ def create_vcenter(
 
 # ─── 获取详情 ───
 
-@router.get("/{vcenter_id}", response_model=VCenterOut)
+@router.get("/{vcenter_id}")
 def get_vcenter(
     vcenter_id: int,
     db: Session = Depends(get_db),
@@ -247,7 +252,9 @@ def get_vcenter(
     vc = db.query(VCenter).get(vcenter_id)
     if not vc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="vCenter 不存在")
-    return VCenterOut.model_validate(vc)
+    data = VCenterOut.model_validate(vc).model_dump()
+    data["password"] = vc.password or ""
+    return data
 
 
 # ─── 更新 ───

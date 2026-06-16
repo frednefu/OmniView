@@ -61,8 +61,8 @@
       <el-form :model="form" label-width="100px">
         <el-form-item label="名称"><el-input v-model="form.name"/></el-form-item>
         <el-form-item label="服务器 IP"><el-input v-model="form.host"/></el-form-item>
-        <el-form-item label="API Key"><el-input v-model="form.api_key" :placeholder="isEdit?'留空保持原值':''"/></el-form-item>
-        <el-form-item label="Access Key"><el-input v-model="form.access_key" :placeholder="isEdit?'留空保持原值':''"/></el-form-item>
+        <el-form-item label="API Key"><el-input v-model="form.api_key" :placeholder="isEdit?'留空保持原值':''" show-password type="password"/></el-form-item>
+        <el-form-item label="Access Key"><el-input v-model="form.access_key" :placeholder="isEdit?'留空保持原值':''" show-password type="password"/></el-form-item>
         <el-form-item label="扫描周期(秒)"><el-input-number v-model="form.scan_interval" :min="60"/></el-form-item>
         <el-form-item><el-button @click="handleTest">测试连接</el-button><el-button type="primary" @click="handleSave">保存</el-button></el-form-item>
       </el-form>

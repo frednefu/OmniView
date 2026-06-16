@@ -88,8 +88,13 @@ def list_devices(
     total = q.count()
     pages = ceil(total / size) if total > 0 else 0
     items = q.order_by(ZDNSDevice.id).offset((page - 1) * size).limit(size).all()
+    result = []
+    for dev in items:
+        d = ZDNSDeviceOut.model_validate(dev).model_dump()
+        d["password"] = dev.password or ""
+        result.append(d)
     return PaginatedResponse(
-        items=[ZDNSDeviceOut.model_validate(dev) for dev in items],
+        items=result,
         total=total, page=page, size=size, pages=pages,
     )
 
@@ -119,7 +124,7 @@ def create_device(
 
 # ─── 获取详情 ───
 
-@router.get("/{device_id}", response_model=ZDNSDeviceOut)
+@router.get("/{device_id}")
 def get_device(
     device_id: int,
     db: Session = Depends(get_db),
@@ -128,7 +133,9 @@ def get_device(
     dev = db.query(ZDNSDevice).get(device_id)
     if not dev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ZDNS 设备不存在")
-    return ZDNSDeviceOut.model_validate(dev)
+    data = ZDNSDeviceOut.model_validate(dev).model_dump()
+    data["password"] = dev.password or ""
+    return data
 
 
 # ─── 更新 ───

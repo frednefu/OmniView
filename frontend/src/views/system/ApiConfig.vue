@@ -21,7 +21,7 @@
           <el-input v-model="form.base_url" placeholder="https://dgp.nefu.edu.cn" />
         </el-form-item>
         <el-form-item label="APP KEY" prop="app_key">
-          <el-input v-model="form.app_key" placeholder="数据中台分配的 KEY" show-password />
+          <el-input v-model="form.app_key" placeholder="数据中台分配的 KEY" show-password type="password" />
         </el-form-item>
         <el-form-item label="APP SECRET" prop="app_secret">
           <el-input v-model="form.app_secret" placeholder="数据中台分配的 SECRET" show-password type="password" />
@@ -82,7 +82,7 @@ async function loadConfig() {
     form.name = cfg.name || ''
     form.base_url = cfg.base_url || ''
     form.app_key = cfg.app_key || ''
-    form.app_secret = ''
+    form.app_secret = cfg.app_secret || ''
   } catch (e) {
     if (e.response?.status !== 404) {
       ElMessage.error('加载配置失败')

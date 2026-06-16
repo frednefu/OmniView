@@ -12,10 +12,10 @@ router = APIRouter(prefix="/sys", tags=["API 配置"])
 
 
 def _mask_secret(config: ApiConfig) -> ApiConfigOut:
-    """返回脱敏后的配置输出。"""
+    """返回配置输出（保留原始值，前端通过 type=password 掩码显示）。"""
     out = ApiConfigOut.model_validate(config)
-    out.app_secret = ""
-    out.app_key = config.app_key[:8] + "****" if len(config.app_key) > 8 else "****"
+    out.app_secret = config.app_secret or ""
+    out.app_key = config.app_key or ""
     return out
 
 

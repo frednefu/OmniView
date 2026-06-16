@@ -89,7 +89,7 @@ function initForm() {
     form.name = props.editData.name
     form.host = props.editData.host
     form.uuid = props.editData.uuid
-    form.secret = ''
+    form.secret = props.editData.secret || ''
     form.scan_interval = props.editData.scan_interval ?? 86400
   } else {
     isEdit.value = false

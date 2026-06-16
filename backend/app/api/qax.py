@@ -86,8 +86,13 @@ def list_devices(
     total = q.count()
     pages = ceil(total / size) if total > 0 else 0
     items = q.order_by(QianXinDevice.id).offset((page - 1) * size).limit(size).all()
+    result = []
+    for dev in items:
+        d = QianXinDeviceOut.model_validate(dev).model_dump()
+        d["secret"] = dev.secret or ""
+        result.append(d)
     return PaginatedResponse(
-        items=[QianXinDeviceOut.model_validate(dev) for dev in items],
+        items=result,
         total=total, page=page, size=size, pages=pages,
     )
 
@@ -114,7 +119,7 @@ def create_device(
 
 # ─── 获取详情 ───
 
-@router.get("/{device_id}", response_model=QianXinDeviceOut)
+@router.get("/{device_id}")
 def get_device(
     device_id: int,
     db: Session = Depends(get_db),
@@ -123,7 +128,9 @@ def get_device(
     dev = db.query(QianXinDevice).get(device_id)
     if not dev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="椒图设备不存在")
-    return QianXinDeviceOut.model_validate(dev)
+    data = QianXinDeviceOut.model_validate(dev).model_dump()
+    data["secret"] = dev.secret or ""
+    return data
 
 
 # ─── 更新 ───

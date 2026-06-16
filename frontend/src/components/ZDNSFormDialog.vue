@@ -98,7 +98,7 @@ function initForm() {
     form.name = props.editData.name
     form.host = props.editData.host
     form.username = props.editData.username
-    form.password = ''
+    form.password = props.editData.password || ''
     form.port = props.editData.port || 20120
     form.scan_interval = props.editData.scan_interval ?? 86400
     form.ip_scan_interval = props.editData.ip_scan_interval ?? 86400

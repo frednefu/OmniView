@@ -14,7 +14,7 @@
         <el-input v-model="form.ip_address" placeholder="管理 IP" :disabled="!!editData" />
       </el-form-item>
       <el-form-item label="SNMP 团体字" prop="community">
-        <el-input v-model="form.community" placeholder="community" />
+        <el-input v-model="form.community" placeholder="community" show-password type="password" />
       </el-form-item>
       <el-form-item label="MIB 类型" prop="mib_type">
         <el-radio-group v-model="form.mib_type">
