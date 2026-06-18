@@ -170,15 +170,32 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
     db.commit()
     stale_count = stale_rows.rowcount
 
+    # 3. 关联域名认领：已认领VM的关联域名自动绑定相同负责人和部门
+    domain_claimed = db.execute(text(
+        "UPDATE vm_inventory v "
+        "JOIN asset_inventory a ON v.vm_name = a.vm_name "
+        "SET v.department_id = a.department_id, "
+        "    v.owner_user_id = a.owner_user_id, "
+        "    v.claim_status = COALESCE(a.claim_status, 'manual') "
+        "WHERE a.owner_user_id IS NOT NULL "
+        "  AND a.department_id IS NOT NULL "
+        "  AND (v.department_id IS NULL OR v.owner_user_id IS NULL "
+        "       OR v.department_id != a.department_id "
+        "       OR v.owner_user_id != a.owner_user_id)"
+    ))
+    db.commit()
+    domain_count = domain_claimed.rowcount
+
     ai_after = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
     unlinked = db.execute(text(
         "SELECT COUNT(*) FROM asset_inventory WHERE claim_status = 'unlinked'"
     )).scalar() or 0
 
     return {
-        "message": f"同步完成：新增 {new_count} 个 VM，清理 {stale_count} 条僵尸，共 {ai_after} 个（{unlinked} 个未关联）",
+        "message": f"同步完成：新增 {new_count} 个 VM，清理 {stale_count} 条僵尸，同步域名认领 {domain_count} 条，共 {ai_after} 个（{unlinked} 个未关联）",
         "new": new_count,
         "stale": stale_count,
+        "domain_claimed": domain_count,
         "total": ai_after,
         "unlinked": unlinked,
     }
@@ -566,8 +583,11 @@ def get_dept_domains(
         sub_ids = _get_sub_dept_ids(db, dept_id)
         placeholders = ",".join(str(s) for s in sub_ids)
         vm_rows = db.execute(text(
-            f"SELECT v.ip_address, v.vm_name, v.id, COALESCE(u.name, u.username) as owner_name FROM vm_inventory v "
-            f"LEFT JOIN users u ON v.owner_user_id = u.id WHERE v.department_id IN ({placeholders})"
+            f"SELECT v.ip_address, v.vm_name, v.id, COALESCE(u.name, u.username) as owner_name, "
+            f"d.dwmc as dept_name FROM vm_inventory v "
+            f"LEFT JOIN users u ON v.owner_user_id = u.id "
+            f"LEFT JOIN departments d ON v.department_id = d.id "
+            f"WHERE v.department_id IN ({placeholders})"
         )).fetchall()
         vm_ips = set()
         vm_by_ip = {}
@@ -576,7 +596,7 @@ def get_dept_domains(
                 ip = ip.strip()
                 if ip:
                     vm_ips.add(ip)
-                    vm_by_ip[ip] = (r.vm_name, r.id, r.owner_name)
+                    vm_by_ip[ip] = (r.vm_name, r.id, r.owner_name, r.dept_name)
         all_domains = _collect_domains(db)
         results = []
         for d in all_domains:
@@ -586,6 +606,7 @@ def get_dept_domains(
                 d["vm_name"] = vi[0]
                 d["vm_id"] = vi[1]
                 d["owner_name"] = vi[2]
+                d["dept_name"] = vi[3] or ""
                 results.append(d)
 
     if search:

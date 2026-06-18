@@ -272,21 +272,38 @@ def _dingjia_scan_job(device_id: int):
 def get_scheduler_status() -> dict:
     """返回调度器状态及所有任务详情。"""
     jobs = []
-    if scheduler.running:
-        for job in scheduler.get_jobs():
-            secs = _job_interval_secs(job)
-            jobs.append({
-                "id": job.id,
-                "name": _job_label(job.id),
-                "next_run": str(job.next_run_time) if job.next_run_time else None,
-                "interval_secs": secs,
-                "interval": _format_interval(secs),
-            })
-    return {"running": scheduler.running, "jobs": jobs, "total": len(jobs)}
+    for job in scheduler.get_jobs():
+        secs = _job_interval_secs(job)
+        jobs.append({
+            "id": job.id,
+            "name": _job_label(job.id),
+            "next_run": str(job.next_run_time) if job.next_run_time else None,
+            "interval_secs": secs,
+            "interval": _format_interval(secs),
+        })
+    # 检查 Celery Worker 连接状态
+    worker_count = 0
+    online_workers = 0
+    try:
+        from app.models.scan_worker import ScanWorker
+        db = SessionLocal()
+        workers = db.query(ScanWorker).all()
+        worker_count = len(workers)
+        online_workers = sum(1 for w in workers if w.status == "online")
+        db.close()
+    except Exception:
+        pass
+    return {
+        "running": scheduler.running,
+        "jobs": jobs,
+        "total": len(jobs),
+        "workers": worker_count,
+        "workers_online": online_workers,
+    }
 
 
 def update_job_interval(job_id: str, interval_secs: int) -> bool:
-    """修改任务的运行周期。"""
+    """修改任务的运行周期（同步更新数据库）。"""
     job = scheduler.get_job(job_id)
     if not job:
         return False
@@ -296,6 +313,44 @@ def update_job_interval(job_id: str, interval_secs: int) -> bool:
         trigger=IntervalTrigger(seconds=interval_secs),
         misfire_grace_time=job.misfire_grace_time,
     )
+    # 同步更新数据库中的 scan_interval
+    db = SessionLocal()
+    try:
+        if job_id.startswith("scan_"):
+            sw_id = int(job_id.split("_", 1)[1])
+            sw = db.query(Switch).get(sw_id)
+            if sw: sw.scan_interval = interval_secs
+        elif job_id.startswith("vcenter_"):
+            vc_id = int(job_id.split("_", 1)[1])
+            vc = db.query(VCenter).get(vc_id)
+            if vc: vc.scan_interval = interval_secs
+        elif job_id.startswith("f5_"):
+            f5_id = int(job_id.split("_", 1)[1])
+            dev = db.query(F5Device).get(f5_id)
+            if dev: dev.scan_interval = interval_secs
+        elif job_id.startswith("zdns_ip_"):
+            # zdns_ip_{dev_id}
+            zdns_id = int(job_id.split("_", 2)[2])
+            dev = db.query(ZDNSDevice).get(zdns_id)
+            if dev: dev.ip_scan_interval = interval_secs
+        elif job_id.startswith("zdns_"):
+            zdns_id = int(job_id.split("_", 1)[1])
+            dev = db.query(ZDNSDevice).get(zdns_id)
+            if dev: dev.scan_interval = interval_secs
+        elif job_id.startswith("qax_"):
+            qax_id = int(job_id.split("_", 1)[1])
+            dev = db.query(QianXinDevice).get(qax_id)
+            if dev: dev.scan_interval = interval_secs
+        elif job_id.startswith("dingjia_"):
+            from app.models.dingjia import DingJiaDevice
+            dj_id = int(job_id.split("_", 1)[1])
+            dev = db.query(DingJiaDevice).get(dj_id)
+            if dev: dev.scan_interval = interval_secs
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
     return True
 
 

@@ -18,11 +18,6 @@
         >
           <el-icon><Delete /></el-icon> 全部删除 ({{ items.length }})
         </el-button>
-        <el-switch
-          v-model="autoRefresh"
-          active-text="自动刷新"
-          size="small"
-        />
         <el-button text @click="fetchAll" :loading="loading">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
@@ -177,7 +172,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { getScanLogs, getScanSteps, getScanOutput, deleteScanLog, clearScanLogs } from '@/api/scanLogs'
 import api from '@/api/index'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -189,13 +184,11 @@ const stepsLoading = ref(false)
 const expandedId = ref(null)
 const cancellingId = ref(null)
 const deletingId = ref(null)
-const autoRefresh = ref(true)
 const clearingAll = ref(false)
 const detailTab = ref('steps')
 const terminalOutput = ref('')
 const terminalRef = ref(null)
 
-let refreshTimer = null
 let terminalTimer = null
 
 const filters = reactive({ source_type: '', status: 'running' })
@@ -372,31 +365,13 @@ async function clearAll() {
   finally { clearingAll.value = false }
 }
 
-// ── 自动刷新轮询 ──
-
-function startPolling() {
-  stopPolling()
-  refreshTimer = setInterval(() => { fetchAll() }, 5000)
-}
-
-function stopPolling() {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-}
-
-watch(autoRefresh, (val) => {
-  if (val) { startPolling() } else { stopPolling() }
-})
+// ── 初始化 ──
 
 onMounted(() => {
   fetchAll()
-  startPolling()
 })
 
 onUnmounted(() => {
-  stopPolling()
   stopTerminalPoll()
 })
 

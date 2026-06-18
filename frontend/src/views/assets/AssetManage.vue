@@ -204,6 +204,7 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="vm_name" label="关联 VM" min-width="120" show-overflow-tooltip />
+                <el-table-column prop="dept_name" label="单位信息" width="120" show-overflow-tooltip />
                 <el-table-column prop="owner_name" label="负责人" width="80" />
                 <el-table-column label="认领" width="65">
                   <template #default="{ row }">

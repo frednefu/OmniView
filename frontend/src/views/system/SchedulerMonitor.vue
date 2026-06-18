@@ -4,7 +4,10 @@
       <h2>定时任务监控</h2>
       <div class="header-right">
         <el-tag :type="status.running ? 'success' : 'danger'" size="large" effect="dark">
-          {{ status.running ? '守护程序运行中' : '守护程序已停止' }}
+          {{ status.running ? '调度器运行中' : '调度器已停止' }}
+        </el-tag>
+        <el-tag :type="(status.workers_online||0)>0 ? 'success' : 'warning'" size="large" effect="dark">
+          Worker: {{ status.workers_online||0 }}/{{ status.workers||0 }} 在线
         </el-tag>
         <el-button :icon="Refresh" circle @click="fetchStatus" :loading="loading" />
       </div>
@@ -12,10 +15,11 @@
 
     <el-table :data="status.jobs" v-loading="loading" stripe size="small">
       <el-table-column prop="name" label="任务名称" min-width="180" />
-      <el-table-column label="周期" width="160">
+      <el-table-column label="周期" width="260">
         <template #default="{ row }">
           <div v-if="editingId === row.id" class="edit-interval">
-            <el-input-number v-model="editSecs" :min="10" :step="60" size="small" controls-position="right" style="width:100px" />
+            <el-input-number v-model="editSecs" :min="10" :step="60" size="small" style="width:130px" />
+            <span style="font-size:12px;color:#909399;white-space:nowrap">{{ formatSecs(editSecs) }}</span>
             <el-button size="small" type="primary" @click="saveInterval(row)">保存</el-button>
             <el-button size="small" @click="editingId = null">取消</el-button>
           </div>
@@ -41,9 +45,8 @@
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Edit } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/store/auth'
+import api from '@/api/index'
 
-const authStore = useAuthStore()
 const loading = ref(false)
 const status = reactive({ running: false, jobs: [], total: 0 })
 const editingId = ref(null)
@@ -54,6 +57,12 @@ function formatTime(t) {
   if (!t) return '-'
   return new Date(t).toLocaleString('zh-CN', { hour12: false })
 }
+function formatSecs(s) {
+  if (s < 60) return s + '秒'
+  if (s < 3600) return Math.floor(s/60) + '分钟'
+  if (s < 86400) return Math.floor(s/3600) + '小时'
+  return Math.floor(s/86400) + '天'
+}
 
 function startEdit(row) {
   editingId.value = row.id
@@ -62,25 +71,20 @@ function startEdit(row) {
 
 async function saveInterval(row) {
   try {
-    const res = await fetch('/api/system/scheduler-interval', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authStore.token}` },
-      body: JSON.stringify({ job_id: row.id, interval_secs: editSecs.value }),
-    })
-    if (!res.ok) throw new Error()
-    ElMessage.success(`周期已修改`)
+    await api.put('/system/scheduler-interval', { job_id: row.id, interval_secs: editSecs.value })
+    // 立即更新行的显示
+    row.interval_secs = editSecs.value
+    row.interval = formatSecs(editSecs.value)
     editingId.value = null
-    await fetchStatus()
-  } catch { ElMessage.error('修改失败') }
+    ElMessage.success('周期已修改为 ' + row.interval)
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '修改失败') }
 }
 
 async function fetchStatus() {
   loading.value = true
   try {
-    const res = await fetch('/api/system/scheduler-status', {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    })
-    const data = await res.json()
+    const r = await api.get('/system/scheduler-status')
+    const data = r.data
     status.running = data.running
     status.jobs = data.jobs || []
     status.total = data.total || 0
