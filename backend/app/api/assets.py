@@ -675,8 +675,14 @@ def get_dept_domains(
                 results.append(d)
                 matched_domain_ips.add(ip)
 
-        # 补充：信息系统域名匹配（未通过 VM 匹配到的域名）
+        # 补充：信息系统域名匹配（预加载 ZDNS 全表避免 N+1 查询）
         from app.models.info_system import InfoSystem
+        # 预加载 ZDNS 域名→记录 映射（一次性查询替代逐条查询）
+        zdns_all = db.execute(text(
+            "SELECT LOWER(domain_name) as d, domain_name, ip_address, record_type FROM zdns_domain_map"
+        )).fetchall()
+        zdns_map = {r.d: r for r in zdns_all}
+        # 预加载 InfoSystem + 部门
         is_systems = db.query(InfoSystem).filter(
             InfoSystem.domain.isnot(None), InfoSystem.domain != "",
             InfoSystem.manager_name.isnot(None), InfoSystem.manager_name != "",
@@ -686,31 +692,24 @@ def get_dept_domains(
         if is_dept_ids:
             depts = db.query(Department).filter(Department.id.in_(is_dept_ids)).all()
             is_dept_map = {d.id: d.dwmc for d in depts}
+        # 预计算子部门列表
+        sub_ids_set = set(_get_sub_dept_ids(db, dept_id)) if dept_id > 0 else None
         seen_domains = {d["domain_name"].lower() for d in results}
         for s in is_systems:
+            if sub_ids_set and s.dept_id and s.dept_id not in sub_ids_set:
+                continue
             raw = [x.strip() for x in s.domain.split(",") if x.strip()]
-            clean = []
             for x in raw:
                 x = x.lower()
                 for p in ("https://", "http://"):
                     if x.startswith(p): x = x[len(p):]
                 x = x.split("/")[0].split(":")[0]
-                if x: clean.append(x)
-            for dom in clean:
-                if dom in seen_domains:
+                if not x or x in seen_domains:
                     continue
-                # 查找该域名在 ZDNS 中的记录
-                zdns = db.execute(text(
-                    "SELECT domain_name, ip_address, record_type FROM zdns_domain_map WHERE LOWER(domain_name)=:d LIMIT 1"
-                ), {"d": dom}).fetchone()
+                zdns = zdns_map.get(x)
                 if not zdns:
                     continue
                 dept_name = is_dept_map.get(s.dept_id, "")
-                # 按部门过滤
-                if dept_id > 0 and s.dept_id:
-                    sub_ids = _get_sub_dept_ids(db, dept_id)
-                    if s.dept_id not in sub_ids:
-                        continue
                 results.append({
                     "domain_name": zdns.domain_name,
                     "record_type": zdns.record_type,
@@ -722,7 +721,7 @@ def get_dept_domains(
                     "dept_name": dept_name,
                     "source_type": "is",
                 })
-                seen_domains.add(dom)
+                seen_domains.add(x)
 
     if search:
         kw = search.lower()
