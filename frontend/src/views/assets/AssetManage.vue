@@ -14,7 +14,7 @@
 
     <div class="asset-content">
       <!-- 左侧部门树 -->
-      <div class="tree-panel">
+      <div class="tree-panel" :style="{ width: treeWidth + 'px' }">
         <el-input v-model="treeFilter" placeholder="搜索部门..." clearable size="small" style="margin-bottom:10px" @input="filterTree" />
         <el-tree
           ref="treeRef"
@@ -40,6 +40,9 @@
           </template>
         </el-tree>
       </div>
+
+      <!-- 拖拽分隔条 -->
+      <div class="tree-resizer" @mousedown="startResize"></div>
 
       <!-- 右侧资产面板 -->
       <div class="detail-panel">
@@ -163,7 +166,7 @@
                     <el-tag v-else type="info" size="small">否</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="owner_name" label="负责人" width="80" />
+                <el-table-column prop="owner_name" label="管理员" width="80" />
               </el-table>
               <el-pagination
                 v-if="vmTotal>0"
@@ -203,9 +206,14 @@
                     <el-tag :type="row.source === 'ZDNS' ? '' : 'success'" size="small">{{ row.source }}</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="vm_name" label="关联 VM" min-width="120" show-overflow-tooltip />
+                <el-table-column label="数据关联" min-width="160" show-overflow-tooltip>
+                  <template #default="{row}">
+                    <span>{{ row.vm_name || row.domain_name || '-' }}</span>
+                    <el-tag size="small" :type="row.source_type==='is'?'warning':''" style="margin-left:4px">{{ row.source_type === 'is' ? '信息系统' : row.source_type === 'vm' ? 'VM' : '' }}</el-tag>
+                  </template>
+                </el-table-column>
                 <el-table-column prop="dept_name" label="单位信息" width="120" show-overflow-tooltip />
-                <el-table-column prop="owner_name" label="负责人" width="80" />
+                <el-table-column prop="owner_name" label="管理员" width="80" />
                 <el-table-column label="认领" width="65">
                   <template #default="{ row }">
                     <el-tag :type="row.owner_name ? '' : 'info'" size="small">{{ row.owner_name ? '已认领' : '未认领' }}</el-tag>
@@ -226,7 +234,33 @@
             </el-tab-pane>
 
             <el-tab-pane label="信息系统" name="systems">
-              <el-empty description="暂无数据，功能开发中" />
+              <div class="filter-bar">
+                <el-input v-model="sysSearch" placeholder="搜索名称/IP/域名" clearable size="small" style="width:260px" @keyup.enter="sysPage=1;loadSystems()" @clear="sysPage=1;loadSystems()" />
+                <el-button type="primary" size="small" @click="sysPage=1;loadSystems()">查询</el-button>
+              </div>
+              <div class="total-info">共 {{ sysTotal }} 条</div>
+              <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)">
+                <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip />
+                <el-table-column prop="system_type" label="资产类型" width="120" />
+                <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip />
+                <el-table-column prop="dept_name" label="所属部门" width="120" show-overflow-tooltip />
+                <el-table-column prop="ip_address" label="IP地址" width="130" show-overflow-tooltip />
+                <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip />
+                <el-table-column prop="manager_name" label="管理员" width="80" />
+                <el-table-column prop="owner_name" label="管理员" width="80" />
+                <el-table-column prop="fill_type" label="填报状态" width="90">
+                  <template #default="{row}"><el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':''" size="small">{{ row.fill_type||'手动' }}</el-tag></template>
+                </el-table-column>
+                <el-table-column prop="djdj_status" label="等保状态" width="90" />
+              </el-table>
+              <el-pagination
+                v-if="sysTotal>0"
+                v-model:current-page="sysPage" v-model:page-size="sysSize"
+                :page-sizes="[10,20,50,100]" :total="sysTotal"
+                layout="total,sizes,prev,pager,next"
+                @current-change="loadSystems" @size-change="loadSystems"
+                style="justify-content:center;margin-top:16px"
+              />
             </el-tab-pane>
           </el-tabs>
         </template>
@@ -298,15 +332,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, WarningFilled, OfficeBuilding, Folder, FolderOpened } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
 import { getDepartmentTree } from '@/api/departments'
 import { getAssetTree, getDeptVMs, getDeptDomains, getVMFilters, searchAssets, previewAutoMatch, executeAutoMatch, startMatchOwner, statusMatchOwner, syncAssets, claimAssets, assignAssets, revokeAssets, resetAllAssets } from '@/api/assets'
+import api from '@/api/index'
 import { getUsers } from '@/api/users'
 
 const authStore = useAuthStore()
+// 左侧树宽度 — 用户级持久化
+const treeWidth = ref(parseInt(localStorage.getItem('assetTreeWidth_' + (authStore.user?.id || 0))) || 300)
+function saveTreeWidth() { localStorage.setItem('assetTreeWidth_' + (authStore.user?.id || 0), treeWidth.value) }
+let resizing = false
+function startResize(e) { resizing = true; document.addEventListener('mousemove', onResize); document.addEventListener('mouseup', stopResize); e.preventDefault() }
+function onResize(e) { if (!resizing) return; const w = Math.max(200, Math.min(500, e.clientX - 60)); treeWidth.value = w }
+function stopResize() { resizing = false; saveTreeWidth(); document.removeEventListener('mousemove', onResize); document.removeEventListener('mouseup', stopResize) }
+
 const treeRef = ref(null)
 const treeFilter = ref('')
 const folderTreeFilter = ref('')
@@ -449,6 +492,8 @@ const domainSize = ref(50)
 const domainTotal = ref(0)
 const selectedDomains = ref([])
 function onDomainSelect(val) { selectedDomains.value = val }
+
+const sysList = ref([]), sysLoading = ref(false), sysPage = ref(1), sysSize = ref(20), sysTotal = ref(0), sysSearch = ref('')
 
 const claimVisible = ref(false)
 const claimKeyword = ref('')
@@ -607,9 +652,11 @@ async function handleNodeClick(data) {
   domainSearch.value = ''
   domainTypeFilter.value = ''
   domainPage.value = 1
+  sysSearch.value = ''
+  sysPage.value = 1
   await loadVMs()
   await loadDomains()
-  // 按部门（含子部门）重新加载全量文件夹树
+  if (activeTab.value === 'systems') await loadSystems()
   await reloadFolderTreeForDept(data.id)
 }
 
@@ -654,6 +701,19 @@ async function loadDomains() {
     domainList.value = res.items
     domainTotal.value = res.total
   } catch { domainList.value = []; domainTotal.value = 0 } finally { domainLoading.value = false }
+}
+
+async function loadSystems() {
+  if (!selectedNode.value) return
+  sysLoading.value = true
+  try {
+    const deptId = selectedNode.value.id === -1 ? 0 : selectedNode.value.id
+    const res = await api.get(`/assets/departments/${deptId}/systems`, {
+      params: { page: sysPage.value, size: sysSize.value, search: sysSearch.value },
+    })
+    sysList.value = res.data.items
+    sysTotal.value = res.data.total
+  } catch { sysList.value = []; sysTotal.value = 0 } finally { sysLoading.value = false }
 }
 
 async function showMatchPreview() {
@@ -831,6 +891,10 @@ async function revokeDomains() {
   } catch { /* 取消 */ }
 }
 
+watch(activeTab, (tab) => {
+  if (tab === 'systems' && selectedNode.value) loadSystems()
+})
+
 onMounted(async () => {
   await loadTree()
   await fetchFilterOptions()
@@ -843,7 +907,9 @@ onMounted(async () => {
 .page-header h2 { margin: 0; font-size: 20px; }
 .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .asset-content { display: flex; gap: 16px; flex: 1; overflow: hidden; }
-.tree-panel { width: 300px; flex-shrink: 0; border: 1px solid #e4e7ed; border-radius: 6px; padding: 10px; overflow-y: auto; background: #fff; }
+.tree-panel { flex-shrink: 0; border: 1px solid #e4e7ed; border-radius: 6px; padding: 10px; overflow-y: auto; background: #fff; }
+.tree-resizer { width: 6px; cursor: col-resize; flex-shrink: 0; background: transparent; transition: background .2s; }
+.tree-resizer:hover { background: #409eff; }
 .detail-panel { flex: 1; border: 1px solid #e4e7ed; border-radius: 6px; padding: 16px; overflow-y: auto; background: #fff; }
 .detail-header h3 { margin: 0 0 12px 0; font-size: 17px; }
 .tree-node { display: flex; align-items: center; gap: 6px; flex: 1; }

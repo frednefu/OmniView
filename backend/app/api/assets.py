@@ -55,7 +55,7 @@ def _collect_domains(db: Session, linked_ips: set = None) -> list[dict]:
         key = name.lower()
         if key not in seen:
             seen[key] = {"domain_name": name, "record_type": r.record_type,
-                         "ip_address": r.ip_address, "source": "ZDNS", "vm_name": None, "vm_id": None}
+                         "ip_address": r.ip_address, "source": "ZDNS", "vm_name": None, "vm_id": None, "source_type": ""}
     return list(seen.values())
 
 
@@ -170,15 +170,14 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
     db.commit()
     stale_count = stale_rows.rowcount
 
-    # 3. 关联域名认领：已认领VM的关联域名自动绑定相同负责人和部门
+    # 3. 域名同步：有部门归属的VM → 复制负责人/部门/认领状态到 vm_inventory（域名通过IP匹配显示）
     domain_claimed = db.execute(text(
         "UPDATE vm_inventory v "
         "JOIN asset_inventory a ON v.vm_name = a.vm_name "
         "SET v.department_id = a.department_id, "
         "    v.owner_user_id = a.owner_user_id, "
         "    v.claim_status = COALESCE(a.claim_status, 'manual') "
-        "WHERE a.owner_user_id IS NOT NULL "
-        "  AND a.department_id IS NOT NULL "
+        "WHERE a.department_id IS NOT NULL "
         "  AND (v.department_id IS NULL OR v.owner_user_id IS NULL "
         "       OR v.department_id != a.department_id "
         "       OR v.owner_user_id != a.owner_user_id)"
@@ -186,18 +185,68 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
     db.commit()
     domain_count = domain_claimed.rowcount
 
+    # 4. 信息系统域名同步：InfoSystem.domain → ZDNS 域名 → VM → 复制管理员/部门
+    is_synced = 0
+    try:
+        from app.models.info_system import InfoSystem, SupplyChain
+        systems = db.query(InfoSystem).filter(
+            InfoSystem.domain.isnot(None), InfoSystem.domain != "",
+            InfoSystem.manager_name.isnot(None), InfoSystem.manager_name != "",
+        ).all()
+        for s in systems:
+            # 清洗域名：去掉 http/https 前缀和路径
+            raw_domains = [d.strip() for d in s.domain.split(",") if d.strip()]
+            clean_domains = []
+            for d in raw_domains:
+                d = d.lower()
+                for p in ("https://", "http://"):
+                    if d.startswith(p):
+                        d = d[len(p):]
+                d = d.split("/")[0].split(":")[0]  # 去路径和端口
+                if d:
+                    clean_domains.append(d)
+            if not clean_domains:
+                continue
+            for dom in clean_domains:
+                # 匹配 ZDNS 域名
+                zdns = db.execute(text(
+                    "SELECT ip_address FROM zdns_domain_map WHERE LOWER(domain_name)=:d LIMIT 1"
+                ), {"d": dom}).fetchone()
+                if not zdns or not zdns.ip_address or not zdns.ip_address.strip():
+                    continue
+                ip = zdns.ip_address.strip()
+                # 更新匹配该 IP 的 VM 的管理员和部门
+                updated = db.execute(text(
+                    "UPDATE vm_inventory v SET "
+                    "  department_id = COALESCE(v.department_id, :dept), "
+                    "  owner_user_id = COALESCE(v.owner_user_id, "
+                    "    (SELECT id FROM users WHERE name=:mgr_name LIMIT 1)) "
+                    "WHERE (v.ip_address LIKE :ip1 OR v.ip_address LIKE :ip2 OR v.ip_address = :ip3) "
+                    "  AND (v.department_id IS NULL OR v.owner_user_id IS NULL)"
+                ), {"dept": s.dept_id, "mgr_name": s.manager_name,
+                    "ip1": f"{ip},%", "ip2": f"%,{ip}", "ip3": ip}).rowcount
+                is_synced += updated
+        if is_synced > 0:
+            db.commit()
+    except Exception:
+        db.rollback()
+
     ai_after = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
     unlinked = db.execute(text(
         "SELECT COUNT(*) FROM asset_inventory WHERE claim_status = 'unlinked'"
     )).scalar() or 0
 
+    msg_parts = [f"同步完成：新增 {new_count} 个 VM，清理 {stale_count} 条僵尸"]
+    if domain_count:
+        msg_parts.append(f"域名同步 {domain_count} 条")
+    if is_synced:
+        msg_parts.append(f"信息系统域名同步 {is_synced} 条")
+    msg_parts.append(f"共 {ai_after} 个（{unlinked} 个未关联）")
     return {
-        "message": f"同步完成：新增 {new_count} 个 VM，清理 {stale_count} 条僵尸，同步域名认领 {domain_count} 条，共 {ai_after} 个（{unlinked} 个未关联）",
-        "new": new_count,
-        "stale": stale_count,
-        "domain_claimed": domain_count,
-        "total": ai_after,
-        "unlinked": unlinked,
+        "message": "，".join(msg_parts),
+        "new": new_count, "stale": stale_count,
+        "domain_claimed": domain_count, "is_synced": is_synced,
+        "total": ai_after, "unlinked": unlinked,
     }
 
 
@@ -245,7 +294,8 @@ def get_asset_tree(
     depts = db.execute(text("SELECT id, dwmc, dwjc, dwbm, lsdwh, pxh FROM departments")).fetchall()
     dept_by_code = {d.dwbm: d for d in depts}
 
-    # 未关联统计（从 asset_inventory）
+    # 未关联统计
+    from app.models.info_system import InfoSystem
     unlinked_vms = db.execute(text(
         "SELECT COUNT(*) FROM vm_inventory v LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
         "WHERE a.id IS NULL OR a.claim_status = 'unlinked'"
@@ -254,6 +304,17 @@ def get_asset_tree(
     for ips in dept_ips.values():
         linked_ips.update(ips)
     unlinked_domains = len(_collect_domains(db, linked_ips))
+    unlinked_systems = db.query(InfoSystem).filter(
+        (InfoSystem.dept_id == None) | (InfoSystem.dept_id == 0)
+    ).count()
+
+    # InfoSystem 按部门统计
+    sys_counts = {}
+    sys_rows = db.execute(text(
+        "SELECT dept_id, COUNT(*) as c FROM info_systems WHERE dept_id IS NOT NULL AND dept_id > 0 GROUP BY dept_id"
+    )).fetchall()
+    for r in sys_rows:
+        sys_counts[r.dept_id] = r.c
 
     # 构建树
     children_by_parent = {}
@@ -266,18 +327,20 @@ def get_asset_tree(
     def make_node(d):
         vc = vm_counts.get(d.id, 0)
         dc = domain_counts.get(d.id, 0)
+        sc = sys_counts.get(d.id, 0)
         kids = [make_node(c) for c in children_by_parent.get(d.dwbm, [])]
         tv = vc + sum(k["vm_count"] for k in kids)
         td = dc + sum(k["domain_count"] for k in kids)
+        ts = sc + sum(k["system_count"] for k in kids)
         return {"id": d.id, "label": d.dwjc or d.dwmc or d.dwbm, "full_name": d.dwmc,
-                "vm_count": tv, "domain_count": td, "system_count": 0,
-                "count": tv + td, "children": kids}
+                "vm_count": tv, "domain_count": td, "system_count": ts,
+                "count": tv + td + ts, "children": kids}
 
     roots = [make_node(d) for d in children_by_parent.get("__root__", [])]
     roots.sort(key=lambda n: n["label"])
     roots.append({"id": -1, "label": "未关联资产",
-                  "vm_count": unlinked_vms, "domain_count": unlinked_domains, "system_count": 0,
-                  "count": unlinked_vms + unlinked_domains, "children": []})
+                  "vm_count": unlinked_vms, "domain_count": unlinked_domains, "system_count": unlinked_systems,
+                  "count": unlinked_vms + unlinked_domains + unlinked_systems, "children": []})
     # 非管理员只显示本处级单位子树（含祖先节点）
     visible = _get_visible_dept_ids(db, current_user)
     if visible is not None:
@@ -599,6 +662,7 @@ def get_dept_domains(
                     vm_by_ip[ip] = (r.vm_name, r.id, r.owner_name, r.dept_name)
         all_domains = _collect_domains(db)
         results = []
+        matched_domain_ips = set()
         for d in all_domains:
             if d["ip_address"] and d["ip_address"].strip() in vm_ips:
                 ip = d["ip_address"].strip()
@@ -607,7 +671,58 @@ def get_dept_domains(
                 d["vm_id"] = vi[1]
                 d["owner_name"] = vi[2]
                 d["dept_name"] = vi[3] or ""
+                d["source_type"] = "vm"
                 results.append(d)
+                matched_domain_ips.add(ip)
+
+        # 补充：信息系统域名匹配（未通过 VM 匹配到的域名）
+        from app.models.info_system import InfoSystem
+        is_systems = db.query(InfoSystem).filter(
+            InfoSystem.domain.isnot(None), InfoSystem.domain != "",
+            InfoSystem.manager_name.isnot(None), InfoSystem.manager_name != "",
+        ).all()
+        is_dept_map = {}
+        is_dept_ids = {s.dept_id for s in is_systems if s.dept_id}
+        if is_dept_ids:
+            depts = db.query(Department).filter(Department.id.in_(is_dept_ids)).all()
+            is_dept_map = {d.id: d.dwmc for d in depts}
+        seen_domains = {d["domain_name"].lower() for d in results}
+        for s in is_systems:
+            raw = [x.strip() for x in s.domain.split(",") if x.strip()]
+            clean = []
+            for x in raw:
+                x = x.lower()
+                for p in ("https://", "http://"):
+                    if x.startswith(p): x = x[len(p):]
+                x = x.split("/")[0].split(":")[0]
+                if x: clean.append(x)
+            for dom in clean:
+                if dom in seen_domains:
+                    continue
+                # 查找该域名在 ZDNS 中的记录
+                zdns = db.execute(text(
+                    "SELECT domain_name, ip_address, record_type FROM zdns_domain_map WHERE LOWER(domain_name)=:d LIMIT 1"
+                ), {"d": dom}).fetchone()
+                if not zdns:
+                    continue
+                dept_name = is_dept_map.get(s.dept_id, "")
+                # 按部门过滤
+                if dept_id > 0 and s.dept_id:
+                    sub_ids = _get_sub_dept_ids(db, dept_id)
+                    if s.dept_id not in sub_ids:
+                        continue
+                results.append({
+                    "domain_name": zdns.domain_name,
+                    "record_type": zdns.record_type,
+                    "ip_address": zdns.ip_address,
+                    "source": "ZDNS",
+                    "vm_name": s.system_name or "",
+                    "vm_id": None,
+                    "owner_name": s.manager_name or "",
+                    "dept_name": dept_name,
+                    "source_type": "is",
+                })
+                seen_domains.add(dom)
 
     if search:
         kw = search.lower()
@@ -623,6 +738,46 @@ def get_dept_domains(
     total = len(results)
     start = (page - 1) * size
     return {"items": results[start:start + size], "total": total, "page": page, "size": size}
+
+
+@router.get("/departments/{dept_id}/systems")
+def get_dept_systems(
+    dept_id: int, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
+    search: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user),
+):
+    """按部门获取信息系统列表。dept_id=0 返回未关联部门的系统。"""
+    from app.models.info_system import InfoSystem
+    q = db.query(InfoSystem)
+    if dept_id == 0:
+        q = q.filter((InfoSystem.dept_id == None) | (InfoSystem.dept_id == 0))
+    elif dept_id > 0:
+        sub_ids = _get_sub_dept_ids(db, dept_id)
+        q = q.filter(InfoSystem.dept_id.in_(sub_ids))
+    if search:
+        q = q.filter(
+            InfoSystem.system_name.contains(search) |
+            InfoSystem.ip_address.contains(search) |
+            InfoSystem.domain.contains(search)
+        )
+    total = q.count()
+    items = q.order_by(InfoSystem.system_name).offset((page - 1) * size).limit(size).all()
+    # 批量查询部门名称
+    dept_ids = {r.dept_id for r in items if r.dept_id}
+    dept_map = {}
+    if dept_ids:
+        depts = db.query(Department).filter(Department.id.in_(dept_ids)).all()
+        dept_map = {d.id: d.dwmc for d in depts}
+    return {"items": [{
+        "id": r.id, "asset_id": r.asset_id, "system_name": r.system_name,
+        "system_type": r.system_type, "sub_type": r.sub_type,
+        "ip_address": r.ip_address, "domain": r.domain,
+        "entry_url": r.entry_url, "org_name": r.org_name,
+        "manager_name": r.manager_name, "owner_name": r.owner_name,
+        "fill_type": r.fill_type, "url_status": r.url_status,
+        "dept_id": r.dept_id, "dept_name": dept_map.get(r.dept_id, ""),
+        "djdj_status": r.djdj_status, "djdj_level": r.djdj_level,
+        "remark": r.remark,
+    } for r in items], "total": total}
 
 
 @router.get("/search")

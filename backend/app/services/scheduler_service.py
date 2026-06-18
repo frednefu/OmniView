@@ -177,6 +177,15 @@ def start_scheduler():
             replace_existing=True,
             misfire_grace_time=300,
         )
+    # 过期外链清理（每 10 分钟）
+    if not scheduler.get_job("cleanup_expired_links"):
+        scheduler.add_job(
+            _cleanup_expired_links,
+            trigger=IntervalTrigger(minutes=10),
+            id="cleanup_expired_links",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
 
     if not scheduler.running:
         scheduler.start()
@@ -184,7 +193,7 @@ def start_scheduler():
 
 
 def _asset_sync_job():
-    """定时同步 vm_inventory → asset_inventory（新增 VM 标记为 unlinked）。"""
+    """定时同步 vm_inventory → asset_inventory（含域名认领 + 信息系统域名同步）。"""
     from sqlalchemy import text
     db = SessionLocal()
     try:
@@ -196,20 +205,85 @@ def _asset_sync_job():
             "DELETE FROM asset_inventory "
             "WHERE vm_name NOT IN (SELECT vm_name FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != '')"
         ))
+        # 域名同步
+        dc = db.execute(text(
+            "UPDATE vm_inventory v JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            "SET v.department_id = a.department_id, v.owner_user_id = a.owner_user_id, "
+            "    v.claim_status = COALESCE(a.claim_status, 'manual') "
+            "WHERE a.department_id IS NOT NULL "
+            "  AND (v.department_id IS NULL OR v.owner_user_id IS NULL "
+            "       OR v.department_id != a.department_id OR v.owner_user_id != a.owner_user_id)"
+        ))
+        # 信息系统域名同步
+        try:
+            from app.models.info_system import InfoSystem
+            systems = db.query(InfoSystem).filter(
+                InfoSystem.domain.isnot(None), InfoSystem.domain != "",
+                InfoSystem.manager_name.isnot(None), InfoSystem.manager_name != "",
+            ).all()
+            for s in systems:
+                raw = [d.strip() for d in s.domain.split(",") if d.strip()]
+                clean = []
+                for d in raw:
+                    d = d.lower()
+                    for p in ("https://", "http://"):
+                        if d.startswith(p): d = d[len(p):]
+                    d = d.split("/")[0].split(":")[0]
+                    if d: clean.append(d)
+                for dom in clean:
+                    zdns = db.execute(text(
+                        "SELECT ip_address FROM zdns_domain_map WHERE LOWER(domain_name)=:d LIMIT 1"
+                    ), {"d": dom}).fetchone()
+                    if not zdns or not zdns.ip_address or not zdns.ip_address.strip():
+                        continue
+                    ip = zdns.ip_address.strip()
+                    db.execute(text(
+                        "UPDATE vm_inventory v SET department_id = COALESCE(v.department_id, :dept), "
+                        "  owner_user_id = COALESCE(v.owner_user_id, "
+                        "    (SELECT id FROM users WHERE name=:mgr_name LIMIT 1)) "
+                        "WHERE (v.ip_address LIKE :ip1 OR v.ip_address LIKE :ip2 OR v.ip_address = :ip3) "
+                        "  AND (v.department_id IS NULL OR v.owner_user_id IS NULL)"
+                    ), {"dept": s.dept_id, "mgr_name": s.manager_name,
+                        "ip1": f"{ip},%", "ip2": f"%,{ip}", "ip3": ip})
+        except Exception:
+            pass
         db.commit()
         if r.rowcount > 0:
             logger.info(f"资产同步：新增 {r.rowcount} 个 VM")
         if d.rowcount > 0:
             logger.info(f"资产同步：清理 {d.rowcount} 条僵尸记录")
+        if dc.rowcount > 0:
+            logger.info(f"资产同步：域名认领 {dc.rowcount} 条")
     except Exception as e:
         logger.error(f"资产同步失败：{e}")
         db.rollback()
     finally:
         db.close()
 
+def _cleanup_expired_links():
+    """定期清理已过期的外链。"""
+    from app.models.shared_link import SharedLink
+    db = SessionLocal()
+    try:
+        from datetime import datetime, timezone, timedelta
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz).replace(tzinfo=None)
+        deleted = db.query(SharedLink).filter(
+            SharedLink.expire_at.isnot(None),
+            SharedLink.expire_at < now,
+        ).delete()
+        if deleted > 0:
+            db.commit()
+            logger.info(f"清理过期外链：{deleted} 条")
+    except Exception as e:
+        logger.error(f"清理过期外链失败：{e}")
+    finally:
+        db.close()
+
 _JOB_NAMES = {
     "cleanup_stale_workers": "清理过期Worker",
     "asset_sync": "资产同步",
+    "cleanup_expired_links": "清理过期外链",
 }
 
 

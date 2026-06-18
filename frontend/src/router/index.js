@@ -140,6 +140,12 @@ const routes = [
         meta: { title: '外链管理', admin: true },
       },
       {
+        path: 'sys/operation-logs',
+        name: 'OperationLogs',
+        component: () => import('@/views/system/OperationLogs.vue'),
+        meta: { title: '操作日志', admin: true },
+      },
+      {
         path: 'sys/assets',
         name: 'AssetManage',
         component: () => import('@/views/assets/AssetManage.vue'),

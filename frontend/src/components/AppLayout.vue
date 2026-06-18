@@ -139,6 +139,10 @@
               <el-icon><Link /></el-icon>
               <span>外链管理</span>
             </el-menu-item>
+            <el-menu-item index="/sys/operation-logs">
+              <el-icon><Tickets /></el-icon>
+              <span>操作日志</span>
+            </el-menu-item>
             <el-menu-item index="/sys/departments">
               <el-icon><OfficeBuilding /></el-icon>
               <span>组织机构管理</span>

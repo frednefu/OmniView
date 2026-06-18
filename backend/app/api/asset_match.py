@@ -285,7 +285,8 @@ def execute_match(db: Session = Depends(get_db), _=Depends(require_admin)):
                 details.append({"vm_name": v.vm_name, "folder": source, "dept": dept_name, "status": f"error:{e}"})
                 db.rollback()
     logger.info(f"自动分组完成：共{len(vms)}VM，匹配{matched}，失败{failed}")
-    return AutoMatchResult(total_vms=len(vms), matched=matched, failed=failed, details=details)
+    return AutoMatchResult(total_vms=len(vms), matched=matched, failed=failed, details=details,
+                          message=f"自动关联完成：{len(vms)} 个 VM，匹配 {matched}，失败 {failed}")
 
 
 @router.post("/start-owner")

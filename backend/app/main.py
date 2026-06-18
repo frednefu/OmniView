@@ -1,12 +1,14 @@
 import os
+import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 from sqlalchemy import inspect, text
 
 from app.database import engine, Base
-from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory, SharedLink
+from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory, SharedLink, OperationLog
 from app.api.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 from app.version import get_version
@@ -119,6 +121,11 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine, tables=[SharedLink.__table__])
     except Exception:
         pass
+    # 操作日志
+    try:
+        Base.metadata.create_all(bind=engine, tables=[OperationLog.__table__])
+    except Exception:
+        pass
     # 信息系统新增归属字段
     _migrate_columns("info_systems", [
         ("dept_id", "INTEGER"),
@@ -153,6 +160,202 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 操作日志中间件 — 记录所有 API 调用
+@app.middleware("http")
+async def operation_log_middleware(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = int((time.time() - start) * 1000)
+
+    # 捕获响应体 — JSONResponse 在构造时即将 body 存入 self.body
+    response_body = b""
+    try:
+        if hasattr(response, "body") and response.body:
+            response_body = response.body if isinstance(response.body, bytes) else response.body.encode()
+        elif hasattr(response, "body_iterator"):
+            # 回退：消费 body_iterator
+            chunks = []
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+            response_body = b"".join(chunks)
+            response = Response(content=response_body, status_code=response.status_code,
+                              headers=dict(response.headers), media_type=getattr(response, "media_type", None))
+    except Exception:
+        pass
+
+    try:
+        _log_operation(request, response, duration, response_body)
+    except Exception as e:
+        import logging
+        logging.getLogger("operation_log").warning(f"操作日志写入失败: {e}")
+    return response
+
+
+def _log_operation(request: Request, response: Response, duration_ms: int, response_body: bytes = b""):
+    """记录 API 操作日志到数据库。"""
+    path = request.url.path
+    # 跳过静态文件、健康检查、心跳等无意义路径
+    if path in ("/health", "/uploads") or path.startswith("/uploads/"):
+        return
+    if "/workers/" in path and ("/heartbeat" in path or "/register" in path or "/unregister" in path):
+        return
+    if path in ("/api/version", "/api/system/scheduler-status", "/api/system/scheduler-interval"):
+        return
+
+    try:
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            # 从 JWT token 提取用户信息
+            user_id = None
+            username = ""
+            auth = request.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                try:
+                    from app.utils.security import decode_access_token
+                    payload = decode_access_token(auth[7:])
+                    if payload:
+                        uid = payload.get("sub", "")
+                        user_id = int(uid) if uid.isdigit() else None
+                        if user_id:
+                            u = db.query(User).get(user_id)
+                            username = u.name or u.username if u else uid
+                        else:
+                            username = uid
+                except Exception:
+                    pass
+
+            status = response.status_code
+            action_label = _path_label(request.method, path)
+            detail = ""
+
+            # 从捕获的响应体读取 message
+            if response_body:
+                try:
+                    import json
+                    data = json.loads(response_body)
+                    if isinstance(data, dict):
+                        detail = str(data.get("message", data.get("detail", "")))
+                except Exception:
+                    pass
+            if not detail:
+                if status >= 500:
+                    detail = "服务器错误"
+                elif status >= 400:
+                    detail = "请求失败"
+                else:
+                    detail = "完成"
+            if len(detail) > 500:
+                detail = detail[:500]
+
+            log = OperationLog(
+                user_id=user_id,
+                username=username or "",
+                ip_address=request.client.host if request.client else "",
+                method=request.method,
+                api_path=action_label[:256],
+                status_code=status,
+                duration_ms=duration_ms,
+                detail=detail,
+                user_agent=(request.headers.get("User-Agent", "") or "")[:512],
+            )
+            db.add(log)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        import logging
+        logging.getLogger("operation_log").warning(f"操作日志DB写入失败: {e}")
+
+
+# API路径 → 功能模块映射
+_PATH_MAP = {
+    # 信息资产管理
+    "/api/assets/sync": "资产同步",
+    "/api/assets/tree": "部门树查询",
+    "/api/assets/vm-filters": "筛选选项查询",
+    "/api/assets/auto-match/preview": "自动分组预览",
+    "/api/assets/auto-match/execute": "自动分组执行",
+    "/api/assets/match-owner/start": "匹配负责人-启动",
+    "/api/assets/match-owner/status": "匹配负责人-状态",
+    "/api/assets/claim": "资产认领",
+    "/api/assets/assign": "管理员指派",
+    "/api/assets/revoke": "撤销认领",
+    "/api/assets/reset": "重置关联",
+    "/api/assets/search": "资产搜索",
+    "/api/assets/departments": "部门资产查询",
+    "/api/assets/domains/claim": "域名认领",
+    "/api/assets/domains/revoke": "域名撤销",
+    # 信息系统管理
+    "/api/info-systems": "信息系统维护",
+    "/api/info-systems/import": "信息系统导入",
+    "/api/info-systems/export": "信息系统导出",
+    "/api/info-systems/sync-from-platform": "信息系统同步",
+    "/api/info-systems/staff-search": "人员搜索",
+    "/api/info-systems/staff-lookup": "人员查询",
+    "/api/info-systems/staff-register": "人员注册",
+    "/api/info-systems/djdj": "等保记录",
+    "/api/info-systems/icp": "ICP记录",
+    "/api/info-systems/supply-chain": "供应链管理",
+    # 外链
+    "/api/shared-links": "外链管理",
+    "/api/shared-links/shared": "外链访问",
+    # 设备管理
+    "/api/switches": "交换机管理",
+    "/api/vcenters": "vCenter管理",
+    "/api/f5": "F5管理",
+    "/api/zdns": "ZDNS管理",
+    "/api/qax": "椒图管理",
+    "/api/dingjia": "鼎甲备份管理",
+    # 日志/监控
+    "/api/scan-logs": "扫描日志",
+    "/api/scan-monitor": "扫描监控",
+    "/api/operation-logs": "操作日志",
+    # 用户/系统
+    "/api/users": "用户管理",
+    "/api/auth": "用户认证",
+    "/api/system": "系统管理",
+    "/api/departments": "组织机构",
+    "/api/workers": "Worker管理",
+    "/api/history": "变更历史",
+    "/api/dashboard": "仪表盘",
+}
+
+_ACTION_MAP = {"POST": "创建", "PUT": "更新", "DELETE": "删除", "GET": "查询", "PATCH": "修改"}
+
+
+def _path_label(method: str, path: str) -> str:
+    """根据 API 路径和请求方法生成可读的操作描述。"""
+    # 先精确匹配
+    api_path = path
+    if not api_path.startswith("/api/"):
+        api_path = "/api" + api_path
+    # 去掉尾部数字ID
+    import re
+    clean = re.sub(r'/\d+$', '', api_path)
+    clean = re.sub(r'/\d+/', '/id/', clean)
+
+    # 查找最匹配的路径
+    best = ""
+    for k, v in _PATH_MAP.items():
+        if clean.startswith(k) and len(k) > len(best):
+            best = k
+    if best:
+        label = _PATH_MAP[best]
+        action = _ACTION_MAP.get(method, method)
+        return f"{label}-{action}"
+    # 回退：从路径提取资源名
+    parts = [p for p in clean.strip("/").split("/") if p and p != "api"]
+    resource = ""
+    for p in reversed(parts):
+        if p.isdigit() or p == "id" or len(p) == 36:
+            continue
+        resource = p
+        break
+    action = _ACTION_MAP.get(method, method)
+    return f"{resource}-{action}" if resource else f"{method} {clean}"
+
 
 app.include_router(api_router)
 

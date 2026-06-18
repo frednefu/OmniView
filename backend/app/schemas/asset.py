@@ -80,3 +80,4 @@ class AutoMatchResult(BaseModel):
     failed: int
     details: List[dict] = []
     errors: List[str] = []
+    message: str = ""
