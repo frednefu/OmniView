@@ -247,7 +247,18 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
         q = q.filter(InfoSystem.url_status == url_status)
     total = q.count()
     items = q.order_by(InfoSystem.id).offset((page - 1) * size).limit(size).all()
-    return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
+    # 批量查询部门名称
+    dept_ids = {r.dept_id for r in items if r.dept_id}
+    dept_map = {}
+    if dept_ids:
+        depts = db.query(Department).filter(Department.id.in_(dept_ids)).all()
+        dept_map = {d.id: d.dwmc for d in depts}
+    result = []
+    for r in items:
+        d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
+        d["belong_dept_name"] = dept_map.get(r.dept_id, "")
+        result.append(d)
+    return {"items": result, "total": total}
 
 
 @router.post("/batch-delete")
@@ -261,6 +272,19 @@ def batch_delete_systems(body: dict, db: Session = Depends(get_db), _=Depends(re
 
 
 # 不可由前端直接修改的只读列
+def _ensure_supply_chain(db, vendor_name: str):
+    """如果开发厂商名称不在 supply_chains 表中，则自动创建。"""
+    if not vendor_name or not vendor_name.strip():
+        return
+    name = vendor_name.strip()
+    exist = db.query(SupplyChain).filter(SupplyChain.company_name == name).first()
+    if not exist:
+        try:
+            db.add(SupplyChain(company_name=name))
+            db.commit()
+        except Exception:
+            db.rollback()
+
 _READONLY_COLS = {"id", "created_at", "updated_at"}
 
 def _sanitize_body(data: dict, model_class=None) -> dict:
@@ -306,6 +330,8 @@ def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_a
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"创建失败：{e}")
+    # 自动创建供应链记录
+    _ensure_supply_chain(db, clean.get("vendor_name", ""))
     return {"id": sys.id, "message": "已创建"}
 
 
@@ -323,6 +349,8 @@ def update_system(sys_id: int, body: dict, db: Session = Depends(get_db), _=Depe
     except Exception as e:
         db.rollback()
         raise HTTPException(500, f"保存失败：{e}")
+    # 自动创建供应链记录
+    _ensure_supply_chain(db, clean.get("vendor_name", ""))
     return {"message": "已更新"}
 
 

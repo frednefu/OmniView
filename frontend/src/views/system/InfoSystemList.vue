@@ -39,8 +39,10 @@
       <el-table-column prop="ip_address" label="IP" width="130" show-overflow-tooltip sortable/>
       <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip sortable/>
       <el-table-column prop="entry_url" label="入口地址" min-width="160" show-overflow-tooltip sortable/>
+      <el-table-column prop="belong_dept_name" label="所属部门" width="120" show-overflow-tooltip sortable/>
       <el-table-column prop="manager_name" label="管理员" width="80" sortable/>
       <el-table-column prop="owner_name" label="负责人" width="80" sortable/>
+      <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip sortable/>
       <el-table-column prop="fill_type" label="填报状态" width="90" sortable>
         <template #default="{row}">
           <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'info':''" size="small">{{row.fill_type||'手动'}}</el-tag>
@@ -62,6 +64,12 @@
 
     <!-- 编辑/添加对话框 -->
     <el-dialog v-model="dlg" :title="isEdit?'编辑信息系统':'添加信息系统'" width="900px" class="is-dialog" destroy-on-close>
+      <template #header="{ title }">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span>{{ title }}</span>
+          <el-button v-if="isEdit" size="small" type="warning" plain @click="openSharedLink">外链填报</el-button>
+        </div>
+      </template>
       <el-scrollbar max-height="68vh">
         <el-form :model="form" label-position="top" size="default" class="is-form">
 
@@ -150,7 +158,7 @@
           <div class="sc-section">
             <div class="sc-section-title"><span class="sc-section-icon"><el-icon><Briefcase /></el-icon></span> 供应链情况</div>
             <el-row :gutter="16">
-              <el-col :span="12"><el-form-item label="开发厂商"><el-select v-model="form.vendor_name" filterable clearable style="width:100%"><el-option v-for="n in vendorNames" :key="n" :label="n" :value="n"/></el-select></el-form-item></el-col>
+              <el-col :span="12"><el-form-item label="开发厂商"><el-select v-model="form.vendor_name" filterable clearable allow-create style="width:100%"><el-option v-for="n in vendorNames" :key="n" :label="n" :value="n"/></el-select></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="产品名称"><el-input v-model="form.product_name"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="版本号"><el-input v-model="form.product_version"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="厂商联系人"><el-input v-model="form.vendor_contact"/></el-form-item></el-col>
@@ -248,6 +256,51 @@
         <el-button @click="importDlg=false">关闭</el-button>
         <el-button type="primary" @click="doImport" :loading="importing" :disabled="!importFile">开始导入</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 外链管理对话框 -->
+    <el-dialog v-model="linkDlg" title="外链填报" width="560px" append-to-body @opened="loadLinks">
+      <el-form label-width="80px" size="default">
+        <el-form-item label="外链标题">
+          <el-input v-model="linkForm.title" placeholder="如：信息系统信息填报" />
+        </el-form-item>
+        <el-form-item label="访问密码">
+          <el-input v-model="linkForm.password" placeholder="留空则不设密码" show-password />
+        </el-form-item>
+        <el-form-item label="失效时间">
+          <el-select v-model="linkForm.expire_hours" style="width:200px">
+            <el-option label="永不过期" :value="0" />
+            <el-option label="1小时" :value="1" />
+            <el-option label="6小时" :value="6" />
+            <el-option label="24小时" :value="24" />
+            <el-option label="48小时" :value="48" />
+            <el-option label="7天" :value="168" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="createLink" :loading="linkCreating">生成外链</el-button>
+        </el-form-item>
+      </el-form>
+      <div v-if="links.length > 0" style="margin-top:16px">
+        <el-divider />
+        <div style="font-size:14px;font-weight:500;margin-bottom:8px">已有外链</div>
+        <div v-for="l in links" :key="l.token" class="link-item">
+          <div class="link-info">
+            <div><b>{{ l.title }}</b></div>
+            <div class="link-url">{{ origin }}{{ l.url }}</div>
+            <div class="link-meta">
+              {{ l.has_password ? '需密码' : '无密码' }} · {{ l.access_count || 0 }}次访问
+              · {{ l.expire_at ? '过期:'+new Date(l.expire_at).toLocaleString('zh-CN') : '永不过期' }}
+              · <el-tag :type="l.is_active?'success':'danger'" size="small">{{ l.is_active?'有效':'已关闭' }}</el-tag>
+            </div>
+          </div>
+          <div class="link-actions">
+            <el-button size="small" @click="copyLink(l)">复制链接</el-button>
+            <el-button size="small" :type="l.is_active?'warning':'success'" @click="toggleLink(l)">{{ l.is_active?'关闭':'开启' }}</el-button>
+            <el-button size="small" type="danger" @click="deleteLink(l)">删除</el-button>
+          </div>
+        </div>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -531,6 +584,31 @@ async function handleExport(){try{const r=await api.get('/info-systems/export',{
 
 async function loadDepts(){try{const r=await api.get('/sys/departments/tree?all=true');deptOptions.value=r.data}catch{}}
 
+// ── 外链填报 ──
+const linkDlg=ref(false),linkCreating=ref(false),links=ref([])
+const linkForm=reactive({title:'',password:'',expire_hours:24})
+const origin=window.location.origin
+
+function openSharedLink(){
+  linkForm.title='信息系统填报 - '+(form.system_name||'')
+  linkForm.password='';linkForm.expire_hours=24;linkDlg.value=true
+}
+async function loadLinks(){
+  try{const r=await api.get('/shared-links/by-target',{params:{target_type:'info_system',target_id:editId.value}});links.value=r.data.items||[]}catch{links.value=[]}
+}
+async function createLink(){
+  if(!editId.value)return;linkCreating.value=true
+  try{
+    const r=await api.post('/shared-links',{target_type:'info_system',target_id:editId.value,title:linkForm.title,password:linkForm.password,expire_hours:linkForm.expire_hours})
+    const url=origin+r.data.url
+    navigator.clipboard.writeText(url).then(()=>ElMessage.success('外链已生成并复制')).catch(()=>ElMessage.success('外链已生成'))
+    await loadLinks()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'生成失败')}finally{linkCreating.value=false}
+}
+async function toggleLink(l){try{const r=await api.put('/shared-links/'+l.token+'/toggle');ElMessage.success(r.data.message);await loadLinks()}catch(e){ElMessage.error(e.response?.data?.detail||'操作失败')}}
+async function deleteLink(l){try{await ElMessageBox.confirm('确定删除此外链？','确认',{type:'warning'});await api.delete('/shared-links/'+l.token);ElMessage.success('已删除');await loadLinks()}catch{}}
+function copyLink(l){const url=origin+l.url;navigator.clipboard.writeText(url).then(()=>ElMessage.success('已复制')).catch(()=>ElMessage.warning('复制失败'))}
+
 onMounted(async()=>{fetchList();try{const r=await api.get('/info-systems/supply-chain/names');vendorNames.value=r.data.items}catch{};loadDepts()})
 </script>
 <style scoped>
@@ -571,4 +649,10 @@ onMounted(async()=>{fetchList();try{const r=await api.get('/info-systems/supply-
 .import-result{margin-top:16px}
 .import-stats{display:flex;gap:16px;margin-top:8px;padding:10px 14px;background:#f5f7fa;border-radius:6px;font-size:13px}
 .import-stats b{font-size:16px;margin-left:2px}
+.link-item{display:flex;align-items:center;justify-content:space-between;padding:12px;margin-bottom:8px;background:#f5f7fa;border-radius:6px;gap:12px}
+.link-info{flex:1;min-width:0}
+.link-info b{font-size:14px}
+.link-url{font-size:12px;color:#409eff;word-break:break-all;margin:4px 0;font-family:monospace}
+.link-meta{font-size:12px;color:#909399}
+.link-actions{display:flex;gap:4px;flex-shrink:0}
 </style>

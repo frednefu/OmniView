@@ -8,7 +8,6 @@
         <el-button @click="showMatchPreview" :loading="previewLoading">分组预览</el-button>
         <el-button type="primary" @click="handleAutoMatch" :loading="autoMatchLoading">自动分组</el-button>
         <el-button type="success" plain @click="handleMatchOwner" :loading="ownerMatchLoading">匹配负责人</el-button>
-        <el-button type="danger" plain @click="handleResetAll">重置关联</el-button>
         <el-button v-if="authStore.isAdmin && selectedVMs.length > 0" type="warning" @click="showAssignDialog(selectedVMs)">指派选中 ({{ selectedVMs.length }})</el-button>
       </div>
     </div>
@@ -167,14 +166,15 @@
                 <el-table-column prop="owner_name" label="负责人" width="80" />
               </el-table>
               <el-pagination
-                v-if="vmTotal > vmSize"
+                v-if="vmTotal>0"
                 v-model:current-page="vmPage"
-                :page-size="vmSize"
+                v-model:page-size="vmSize"
+                :page-sizes="[10,20,50,100]"
                 :total="vmTotal"
-                layout="prev, pager, next"
-                small
+                layout="total,sizes,prev,pager,next"
                 @current-change="loadVMs"
-                style="margin-top:10px;justify-content:center"
+                @size-change="loadVMs"
+                style="justify-content:center;margin-top:16px"
               />
                 </div><!-- .vm-table-wrap -->
               </div><!-- .vm-split -->
@@ -212,14 +212,15 @@
                 </el-table-column>
               </el-table>
               <el-pagination
-                v-if="domainTotal > domainSize"
+                v-if="domainTotal>0"
                 v-model:current-page="domainPage"
-                :page-size="domainSize"
+                v-model:page-size="domainSize"
+                :page-sizes="[10,20,50,100]"
                 :total="domainTotal"
-                layout="prev, pager, next"
-                small
+                layout="total,sizes,prev,pager,next"
                 @current-change="loadDomains"
-                style="margin-top:10px;justify-content:center"
+                @size-change="loadDomains"
+                style="justify-content:center;margin-top:16px"
               />
             </el-tab-pane>
 

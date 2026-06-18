@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models.shared_link import SharedLink, _gen_token
-from app.models.info_system import SupplyChain
+from app.models.info_system import SupplyChain, InfoSystem
 from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/shared-links", tags=["外链填报"])
@@ -74,6 +74,10 @@ def create_link(body: CreateLinkBody, db: Session = Depends(get_db), user=Depend
         target = db.query(SupplyChain).get(body.target_id)
         if not target:
             raise HTTPException(404, "供应链记录不存在")
+    elif body.target_type == "info_system":
+        target = db.query(InfoSystem).get(body.target_id)
+        if not target:
+            raise HTTPException(404, "信息系统记录不存在")
     else:
         raise HTTPException(400, "不支持的目标类型")
 
@@ -176,7 +180,19 @@ def access_shared(token: str, password: str = Query(""), db: Session = Depends(g
                 data[k] = v.isoformat()
             elif v is None:
                 data[k] = ""
-        return {"title": link.title, "has_password": bool(link.password), "data": data}
+        return {"title": link.title, "has_password": bool(link.password), "target_type": link.target_type, "data": data}
+    elif link.target_type == "info_system":
+        target = db.query(InfoSystem).get(link.target_id)
+        if not target:
+            raise HTTPException(404, "记录不存在")
+        data = {c.name: getattr(target, c.name) for c in target.__table__.columns
+                if c.name not in ("id", "created_at", "updated_at")}
+        for k, v in data.items():
+            if hasattr(v, 'isoformat'):
+                data[k] = v.isoformat()
+            elif v is None:
+                data[k] = ""
+        return {"title": link.title, "has_password": bool(link.password), "target_type": link.target_type, "data": data}
     raise HTTPException(400, "不支持的目标类型")
 
 
@@ -210,5 +226,26 @@ def save_shared(token: str, body: dict, password: str = Query(""), db: Session =
                     setattr(target, k, new)
                     changed.append(k)
         db.commit()
+        # 自动创建供应链记录
+        from app.api.info_systems import _ensure_supply_chain
+        _ensure_supply_chain(db, body.get("vendor_name", ""))
+        return {"message": f"保存成功，更新 {len(changed)} 个字段", "changed": changed}
+    elif link.target_type == "info_system":
+        target = db.query(InfoSystem).get(link.target_id)
+        if not target:
+            raise HTTPException(404, "记录不存在")
+        valid_cols = {c.name for c in target.__table__.columns
+                      if c.name not in ("id", "created_at", "updated_at", "asset_id")}
+        changed = []
+        for k, v in body.items():
+            if k in valid_cols:
+                old = getattr(target, k)
+                new = v if v != "" else None
+                if old != new:
+                    setattr(target, k, new)
+                    changed.append(k)
+        db.commit()
+        from app.api.info_systems import _ensure_supply_chain
+        _ensure_supply_chain(db, body.get("vendor_name", ""))
         return {"message": f"保存成功，更新 {len(changed)} 个字段", "changed": changed}
     raise HTTPException(400, "不支持的目标类型")
