@@ -126,12 +126,12 @@ function formatTime(t) {
 }
 
 function sourceColor(type) {
-  const map = { switch: '#06b6d4', vcenter: '#f59e0b', f5: '#10b981', zdns: '#6366f1', zdns_ip: '#8b5cf6', qax: '#ef4444', dingjia: '#ec4899' }
+  const map = { switch: '#06b6d4', vcenter: '#f59e0b', f5: '#10b981', zdns: '#6366f1', zdns_ip: '#8b5cf6', qax: '#ef4444', dingjia: '#ec4899', asset_sync: '#14b8a6' }
   return map[type] || '#94a3b8'
 }
 
 function sourceLabel(type) {
-  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图', dingjia: '鼎甲备份' }
+  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图', dingjia: '鼎甲备份', asset_sync: '资产同步' }
   return map[type] || type
 }
 

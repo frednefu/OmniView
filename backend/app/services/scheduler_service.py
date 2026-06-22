@@ -195,11 +195,32 @@ def start_scheduler():
 def _asset_sync_job():
     """定时同步 vm_inventory → asset_inventory（含域名认领 + 信息系统域名同步）。"""
     from sqlalchemy import text
+    from app.models.scan_log import ScanLog, ScanStatus, TriggerType
+    from datetime import timezone as dt_tz, timedelta as dt_td
+
     db = SessionLocal()
+    # 创建扫描日志
+    tz8 = dt_tz(dt_td(hours=8))
+    now8 = datetime.now(tz8).replace(tzinfo=None)
+    scan_log = ScanLog(
+        source_type="asset_sync",
+        source_name="资产同步",
+        triggered_by=TriggerType.scheduled,
+        status=ScanStatus.running,
+        started_at=now8,
+    )
+    db.add(scan_log)
+    db.commit()
+    db.refresh(scan_log)
+
     try:
         r = db.execute(text(
             "INSERT IGNORE INTO asset_inventory (vm_name, claim_status) "
             "SELECT vm_name, 'unlinked' FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != ''"
+        ))
+        # 清理超过30天未更新的僵尸VM
+        vs = db.execute(text(
+            "DELETE FROM vm_inventory WHERE updated_at < DATE_SUB(NOW(), INTERVAL 30 DAY)"
         ))
         d = db.execute(text(
             "DELETE FROM asset_inventory "
@@ -248,8 +269,17 @@ def _asset_sync_job():
         except Exception:
             pass
         db.commit()
+        # 更新扫描日志为成功
+        now_end = datetime.now(tz8).replace(tzinfo=None)
+        scan_log.status = ScanStatus.success
+        scan_log.hosts_found = r.rowcount + vs.rowcount + d.rowcount + dc.rowcount
+        scan_log.completed_at = now_end
+        scan_log.duration_seconds = round((now_end - now8).total_seconds(), 1) if now8 else None
+        db.commit()
         if r.rowcount > 0:
             logger.info(f"资产同步：新增 {r.rowcount} 个 VM")
+        if vs.rowcount > 0:
+            logger.info(f"资产同步：清理 {vs.rowcount} 条过期VM")
         if d.rowcount > 0:
             logger.info(f"资产同步：清理 {d.rowcount} 条僵尸记录")
         if dc.rowcount > 0:
@@ -257,6 +287,12 @@ def _asset_sync_job():
     except Exception as e:
         logger.error(f"资产同步失败：{e}")
         db.rollback()
+        try:
+            scan_log.status = ScanStatus.failed
+            scan_log.error_message = str(e)
+            db.commit()
+        except Exception:
+            pass
     finally:
         db.close()
 

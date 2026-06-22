@@ -605,9 +605,20 @@ async def _run_vcenter_scan_async(vcenter_id: int, scan_log_id: int | None = Non
             old_rows = write_db.query(VMInventory).filter(
                 VMInventory.vcenter_id == vcenter_id
             ).all()
+            # 去重：同一 vm_name 保留最新的一条（解决历史扫描产生的重复数据）
             old_by_key = {}
             for r in old_rows:
-                old_by_key[(r.vm_name, r.vcenter_id)] = r
+                key = (r.vm_name, r.vcenter_id)
+                if key not in old_by_key or (r.updated_at and old_by_key[key].updated_at and r.updated_at > old_by_key[key].updated_at):
+                    old_by_key[key] = r
+            dedup_deleted = 0
+            seen_ids = {r.id for r in old_by_key.values()}
+            for r in old_rows:
+                if r.id not in seen_ids:
+                    write_db.delete(r)
+                    dedup_deleted += 1
+            if dedup_deleted > 0:
+                write_db.flush()
 
             # Upsert VMs (保留关联数据)
             if scan_log_id:
@@ -622,12 +633,10 @@ async def _run_vcenter_scan_async(vcenter_id: int, scan_log_id: int | None = Non
                     VMInventory.vm_name == vm_name
                 ).first()
                 if existing:
-                    # 只更新来自 vCenter 的字段
                     for k, v in r.items():
                         if hasattr(existing, k) and k not in ("id", "department_id", "owner_user_id", "claim_status", "claimed_by", "claimed_at"):
                             setattr(existing, k, v)
                 elif old:
-                    # 恢复快照中的关联字段
                     r["department_id"] = old.department_id
                     r["owner_user_id"] = old.owner_user_id
                     r["claim_status"] = old.claim_status or "unlinked"
@@ -636,11 +645,28 @@ async def _run_vcenter_scan_async(vcenter_id: int, scan_log_id: int | None = Non
                     write_db.add(VMInventory(vcenter_id=vcenter_id, **r))
                 else:
                     write_db.add(VMInventory(vcenter_id=vcenter_id, **r))
-            # 删除已不在 vCenter 中的旧 VM（新扫描没有的）
+            # 删除已不在 vCenter 中的旧 VM（记录变更历史）
             new_names = {r.get("vm_name") for r in rows}
+            deleted_vms = []
             for old_r in old_rows:
                 if old_r.vm_name not in new_names:
+                    deleted_vms.append({"vm_name": old_r.vm_name, "ip": old_r.ip_address, "folder": old_r.vm_folder})
                     write_db.delete(old_r)
+            if deleted_vms:
+                # 记录到变更历史
+                try:
+                    from app.models.history import History
+                    for dv in deleted_vms:
+                        h = History(
+                            source_type="vcenter", source_id=vcenter_id, source_name=vc.name,
+                            change_type="delete", item_key=dv["vm_name"],
+                            old_value=f"IP:{dv['ip']} Folder:{dv['folder']}",
+                            new_value="已从vCenter移除"
+                        )
+                        write_db.add(h)
+                except Exception:
+                    pass  # 历史记录失败不影响主流程
+                append_log(scan_log_id, f"删除 {len(deleted_vms)} 个已不存在的 VM: {', '.join(d['vm_name'] for d in deleted_vms[:10])}")
             if scan_log_id:
                 finish_step(step2_id, "success", len(rows), len(rows))
                 update_progress(scan_log_id, 50, "VM 清单写入完成")

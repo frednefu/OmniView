@@ -162,7 +162,15 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
     ))
     db.commit()
 
-    # 2. 清理 asset_inventory 中在 vm_inventory 已不存在的僵尸记录
+    # 2. 清理 vm_inventory 中超过 30 天未更新的僵尸记录（可能来自已删除的 vCenter）
+    vm_stale = db.execute(text(
+        "DELETE FROM vm_inventory "
+        "WHERE updated_at < DATE_SUB(NOW(), INTERVAL 30 DAY)"
+    ))
+    db.commit()
+    vm_stale_count = vm_stale.rowcount
+
+    # 2b. 清理 asset_inventory 中在 vm_inventory 已不存在的记录
     stale_rows = db.execute(text(
         "DELETE FROM asset_inventory "
         "WHERE vm_name NOT IN (SELECT vm_name FROM vm_inventory WHERE vm_name IS NOT NULL AND vm_name != '')"
@@ -236,7 +244,9 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
         "SELECT COUNT(*) FROM asset_inventory WHERE claim_status = 'unlinked'"
     )).scalar() or 0
 
-    msg_parts = [f"同步完成：新增 {new_count} 个 VM，清理 {stale_count} 条僵尸"]
+    msg_parts = [f"同步完成：新增 {new_count} 个 VM，清理资产 {stale_count} 条"]
+    if vm_stale_count:
+        msg_parts.insert(1, f"清理过期VM {vm_stale_count} 条")
     if domain_count:
         msg_parts.append(f"域名同步 {domain_count} 条")
     if is_synced:
