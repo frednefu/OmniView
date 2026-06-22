@@ -115,9 +115,13 @@
             <el-icon><Tickets /></el-icon>
             <span>日志信息</span>
           </template>
+          <el-menu-item index="/sys/operation-logs">
+            <el-icon><Tickets /></el-icon>
+            <span>操作日志</span>
+          </el-menu-item>
           <el-menu-item index="/scan-logs">
             <el-icon><Tickets /></el-icon>
-            <span>扫描日志</span>
+            <span>任务日志</span>
           </el-menu-item>
           <el-menu-item index="/history">
             <el-icon><Clock /></el-icon>
@@ -138,10 +142,6 @@
             <el-menu-item index="/sys/shared-links">
               <el-icon><Link /></el-icon>
               <span>外链管理</span>
-            </el-menu-item>
-            <el-menu-item index="/sys/operation-logs">
-              <el-icon><Tickets /></el-icon>
-              <span>操作日志</span>
             </el-menu-item>
             <el-menu-item index="/sys/departments">
               <el-icon><OfficeBuilding /></el-icon>

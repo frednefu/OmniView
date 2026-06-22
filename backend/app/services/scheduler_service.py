@@ -355,24 +355,10 @@ def get_scheduler_status() -> dict:
             "interval_secs": secs,
             "interval": _format_interval(secs),
         })
-    # 检查 Celery Worker 连接状态
-    worker_count = 0
-    online_workers = 0
-    try:
-        from app.models.scan_worker import ScanWorker
-        db = SessionLocal()
-        workers = db.query(ScanWorker).all()
-        worker_count = len(workers)
-        online_workers = sum(1 for w in workers if w.status == "online")
-        db.close()
-    except Exception:
-        pass
     return {
         "running": scheduler.running,
         "jobs": jobs,
         "total": len(jobs),
-        "workers": worker_count,
-        "workers_online": online_workers,
     }
 
 

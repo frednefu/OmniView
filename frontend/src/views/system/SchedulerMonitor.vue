@@ -6,9 +6,6 @@
         <el-tag :type="status.running ? 'success' : 'danger'" size="large" effect="dark">
           {{ status.running ? '调度器运行中' : '调度器已停止' }}
         </el-tag>
-        <el-tag :type="(status.workers_online||0)>0 ? 'success' : 'warning'" size="large" effect="dark">
-          Worker: {{ status.workers_online||0 }}/{{ status.workers||0 }} 在线
-        </el-tag>
         <el-button :icon="Refresh" circle @click="fetchStatus" :loading="loading" />
       </div>
     </div>
