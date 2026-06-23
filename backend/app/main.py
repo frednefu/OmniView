@@ -138,7 +138,13 @@ async def lifespan(app: FastAPI):
     _migrate_columns("info_systems", [
         ("entry_url", "VARCHAR(512)"),
         ("url_status", "VARCHAR(16)"),
+        ("created_by", "INTEGER"),
+        ("claimed_by", "INTEGER"),
+        ("claimed_at", "DATETIME"),
     ])
+    _migrate_columns("supply_chains", [("created_by", "INTEGER"), ("claimed_by", "INTEGER"), ("claimed_at", "DATETIME")])
+    _migrate_columns("djdj_records", [("created_by", "INTEGER"), ("claimed_by", "INTEGER"), ("claimed_at", "DATETIME")])
+    _migrate_columns("icp_records", [("created_by", "INTEGER"), ("claimed_by", "INTEGER"), ("claimed_at", "DATETIME")])
     # 更新 scan_logs 表 status 列支持 queued
     try:
         with engine.connect() as conn:
@@ -277,8 +283,9 @@ _PATH_MAP = {
     "/api/assets/vm-filters": "筛选选项查询",
     "/api/assets/auto-match/preview": "自动分组预览",
     "/api/assets/auto-match/execute": "自动分组执行",
-    "/api/assets/match-owner/start": "匹配负责人-启动",
-    "/api/assets/match-owner/status": "匹配负责人-状态",
+    "/api/assets/match-owner/start": "匹配负责人",
+    "/api/assets/match-owner/status": "匹配负责人-进度查询",
+    "/api/assets/auto-match": "自动分组",
     "/api/assets/claim": "资产认领",
     "/api/assets/assign": "管理员指派",
     "/api/assets/revoke": "撤销认领",

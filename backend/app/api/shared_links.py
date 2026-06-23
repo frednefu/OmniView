@@ -12,6 +12,13 @@ from app.api.deps import get_current_user, require_admin
 
 router = APIRouter(prefix="/shared-links", tags=["外链填报"])
 
+
+def _is_admin(u):
+    if hasattr(u, "role"):
+        r = u.role
+        return (r.value if hasattr(r, "value") else r) == "admin"
+    return False
+
 TZ = timezone(timedelta(hours=8))
 
 
@@ -41,10 +48,13 @@ def _check_pwd(pwd: str, hashed: str | None) -> bool:
 
 @router.get("")
 def list_all_links(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-                  search: str = Query(""), db: Session = Depends(get_db), _=Depends(require_admin)):
-    """管理员查看所有外链。"""
+                  search: str = Query(""), db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """查看外链（管理员全部，普通用户只看自己的）。"""
     from app.models.user import User
     q = db.query(SharedLink)
+    # 非管理员只看自己创建的
+    if not _is_admin(user):
+        q = q.filter(SharedLink.created_by == user.id)
     if search:
         q = q.filter(
             SharedLink.title.contains(search) |
@@ -68,7 +78,7 @@ def list_all_links(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=10
 
 
 @router.post("")
-def create_link(body: CreateLinkBody, db: Session = Depends(get_db), user=Depends(require_admin)):
+def create_link(body: CreateLinkBody, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """创建外链。"""
     if body.target_type == "supply_chain":
         target = db.query(SupplyChain).get(body.target_id)
@@ -109,7 +119,7 @@ def create_link(body: CreateLinkBody, db: Session = Depends(get_db), user=Depend
 
 @router.get("/by-target")
 def list_links(target_type: str = "supply_chain", target_id: int = Query(...),
-               db: Session = Depends(get_db), _=Depends(require_admin)):
+               db: Session = Depends(get_db), user=Depends(get_current_user)):
     """查询某个记录的所有外链。"""
     links = db.query(SharedLink).filter(
         SharedLink.target_type == target_type,
@@ -126,22 +136,26 @@ def list_links(target_type: str = "supply_chain", target_id: int = Query(...),
 
 
 @router.put("/{token}/toggle")
-def toggle_link(token: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+def toggle_link(token: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """手动启用/关闭外链。"""
     link = db.query(SharedLink).filter(SharedLink.token == token).first()
     if not link:
         raise HTTPException(404, "外链不存在")
+    if not _is_admin(user) and link.created_by != user.id:
+        raise HTTPException(403, "只能操作自己创建的外链")
     link.is_active = not link.is_active
     db.commit()
     return {"message": "已启用" if link.is_active else "已关闭", "is_active": link.is_active}
 
 
 @router.delete("/{token}")
-def delete_link(token: str, db: Session = Depends(get_db), _=Depends(require_admin)):
+def delete_link(token: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """删除外链。"""
     link = db.query(SharedLink).filter(SharedLink.token == token).first()
     if not link:
         raise HTTPException(404, "外链不存在")
+    if not _is_admin(user) and link.created_by != user.id:
+        raise HTTPException(403, "只能删除自己创建的外链")
     db.delete(link)
     db.commit()
     return {"message": "已删除"}

@@ -20,7 +20,7 @@
         <span v-if="pseudoDomains.length" class="stat-sep">·</span>
         <span v-if="pseudoDomains.length" class="stat-chip pseudo">未关联 <strong>{{ pseudoDomains.length }}</strong></span>
       </div>
-      <el-button @click="exportExcel" :loading="exporting" size="small" class="export-btn">
+      <el-button v-if="authStore?.isAdmin" @click="exportExcel" :loading="exporting" size="small" class="export-btn">
         <el-icon><Download /></el-icon>导出
       </el-button>
     </div>

@@ -2,10 +2,12 @@
   <div class="page">
     <div class="page-header">
       <h2>供应链信息维护</h2>
-      <div class="header-actions" v-if="authStore.isAdmin">
-        <el-button @click="triggerImport">导入Excel</el-button>
-        <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
-        <el-button type="primary" @click="handleExport">导出Excel</el-button>
+      <div class="header-actions">
+        <template v-if="authStore.isAdmin">
+          <el-button @click="triggerImport">导入Excel</el-button>
+          <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
+          <el-button type="primary" @click="handleExport">导出Excel</el-button>
+        </template>
         <el-button type="success" @click="openCreate">添加单位</el-button>
       </div>
     </div>
@@ -17,17 +19,20 @@
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
     </div>
     <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect">
-      <el-table-column type="selection" width="40" v-if="authStore.isAdmin"/>
+      <el-table-column type="selection" width="40" />
       <el-table-column prop="company_name" label="单位名称" min-width="200" show-overflow-tooltip/>
       <el-table-column prop="credit_code" label="信用代码" width="180"/>
       <el-table-column prop="company_type" label="类型" width="100"/>
       <el-table-column prop="importance" label="重要程度" width="80"/>
       <el-table-column prop="security_contact" label="联系人" width="80"/>
       <el-table-column prop="security_phone" label="电话" width="120"/>
-      <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
+      <el-table-column label="操作" width="100" fixed="right">
         <template #default="{row}">
-          <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
-          <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id">
+            <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
+            <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          </template>
+          <span v-else style="color:#c0c4cc;font-size:12px">-</span>
         </template>
       </el-table-column>
     </el-table>

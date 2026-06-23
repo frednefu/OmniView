@@ -17,6 +17,26 @@ from app.api.deps import get_current_user, require_admin
 router = APIRouter(prefix="/info-systems", tags=["信息系统"])
 
 
+def _is_admin(user) -> bool:
+    """判断当前用户是否为管理员。"""
+    if hasattr(user, "role"):
+        role = user.role
+        if hasattr(role, "value"):
+            role = role.value
+        return role == "admin"
+    return False
+
+
+def _check_owner(db, model, rec_id: int, user, admin_only=True):
+    """检查记录所有权：管理员可操作全部，普通用户只能操作自己创建的。"""
+    rec = db.query(model).get(rec_id)
+    if not rec:
+        return None, "记录不存在"
+    if admin_only and not _is_admin(user):
+        return None, "仅管理员可操作"
+    return rec, None
+
+
 _asset_id_counter = 0
 
 def _gen_asset_id(db: Session = None) -> str:
@@ -228,8 +248,15 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
                  system_type: str = Query(""), sub_type: str = Query(""),
                  manager_name: str = Query(""), owner_name: str = Query(""),
                  url_status: str = Query(""),
-                 db: Session = Depends(get_db), _=Depends(get_current_user)):
+                 db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(InfoSystem)
+    # 非管理员：本单位 + (自己是管理员 或 未分配管理员)
+    if not _is_admin(user):
+        uid = str(user.gh or user.id)
+        dept_id = getattr(user, 'department_id', None)
+        if dept_id:
+            q = q.filter((InfoSystem.dept_id == dept_id) | (InfoSystem.dept_id == None))
+        q = q.filter((InfoSystem.manager_gh == uid) | (InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
     if search:
         kw = f"%{search}%"
         q = q.filter(InfoSystem.system_name.like(kw) | InfoSystem.ip_address.like(kw) | InfoSystem.domain.like(kw) | InfoSystem.manager_name.like(kw) | InfoSystem.owner_name.like(kw))
@@ -261,6 +288,102 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
     return {"items": result, "total": total}
 
 
+# 批量认领/撤销
+@router.post("/batch-claim")
+def batch_claim(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    models = {"info_system": InfoSystem, "djdj": DjDjRecord, "icp": IcpRecord, "supply_chain": SupplyChain}
+    m = models.get(body.get("model", ""))
+    if not m: raise HTTPException(400, "不支持的类型")
+    from datetime import datetime, timezone, timedelta
+    tz = timezone(timedelta(hours=8))
+    now = datetime.now(tz).replace(tzinfo=None)
+    count = 0
+    for rid in body.get("ids", []):
+        rec = db.query(m).get(rid)
+        if not rec: continue
+        if body.get("model") == "info_system":
+            # 信息系统：认领 = 设置为管理员
+            if rec.manager_gh and rec.manager_gh.strip():
+                continue  # 已有管理员
+            rec.manager_gh = str(user.gh or user.id)
+            rec.manager_name = user.name or user.username
+            if not rec.created_by:
+                rec.created_by = user.id
+            count += 1
+        elif rec.claimed_by is None:
+            rec.claimed_by = user.id
+            rec.claimed_at = now
+            if not rec.created_by:
+                rec.created_by = user.id
+            count += 1
+    db.commit()
+    return {"message": f"成功认领 {count} 条", "count": count}
+
+
+@router.post("/batch-revoke")
+def batch_revoke(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    models = {"info_system": InfoSystem, "djdj": DjDjRecord, "icp": IcpRecord, "supply_chain": SupplyChain}
+    m = models.get(body.get("model", ""))
+    if not m: raise HTTPException(400, "不支持的类型")
+    count = 0
+    for rid in body.get("ids", []):
+        rec = db.query(m).get(rid)
+        if not rec: continue
+        if body.get("model") == "info_system":
+            # 信息系统：撤销 = 清空管理员
+            if rec.manager_gh and str(rec.manager_gh) == str(user.gh or user.id):
+                rec.manager_gh = ""
+                rec.manager_name = ""
+                count += 1
+        elif rec and (rec.claimed_by == user.id or _is_admin(user)):
+            rec.claimed_by = None
+            rec.claimed_at = None
+            count += 1
+    db.commit()
+    return {"message": f"成功撤销 {count} 条", "count": count}
+
+
+# 认领/撤销认领（通用）
+@router.post("/claim/{model}/{rec_id}")
+def claim_record(model: str, rec_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """认领一条记录（信息系统/等保/ICP/供应链）。"""
+    models = {"info_system": InfoSystem, "djdj": DjDjRecord, "icp": IcpRecord, "supply_chain": SupplyChain}
+    m = models.get(model)
+    if not m:
+        raise HTTPException(400, "不支持的类型")
+    rec = db.query(m).get(rec_id)
+    if not rec:
+        raise HTTPException(404, "记录不存在")
+    if rec.claimed_by is not None:
+        raise HTTPException(400, "该记录已被认领")
+    from datetime import datetime, timezone, timedelta
+    tz = timezone(timedelta(hours=8))
+    rec.claimed_by = user.id
+    rec.claimed_at = datetime.now(tz).replace(tzinfo=None)
+    if not rec.created_by:
+        rec.created_by = user.id
+    db.commit()
+    return {"message": "认领成功"}
+
+
+@router.post("/revoke/{model}/{rec_id}")
+def revoke_record(model: str, rec_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """撤销认领。"""
+    models = {"info_system": InfoSystem, "djdj": DjDjRecord, "icp": IcpRecord, "supply_chain": SupplyChain}
+    m = models.get(model)
+    if not m:
+        raise HTTPException(400, "不支持的类型")
+    rec = db.query(m).get(rec_id)
+    if not rec:
+        raise HTTPException(404, "记录不存在")
+    if rec.claimed_by != user.id and not _is_admin(user):
+        raise HTTPException(403, "只能撤销自己的认领")
+    rec.claimed_by = None
+    rec.claimed_at = None
+    db.commit()
+    return {"message": "已撤销认领"}
+
+
 @router.post("/batch-delete")
 def batch_delete_systems(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
     ids = body.get("ids", [])
@@ -272,7 +395,7 @@ def batch_delete_systems(body: dict, db: Session = Depends(get_db), _=Depends(re
 
 
 # 不可由前端直接修改的只读列
-def _ensure_supply_chain(db, vendor_name: str):
+def _ensure_supply_chain(db, vendor_name: str, created_by: int = None):
     """如果开发厂商名称不在 supply_chains 表中，则自动创建。"""
     if not vendor_name or not vendor_name.strip():
         return
@@ -280,7 +403,7 @@ def _ensure_supply_chain(db, vendor_name: str):
     exist = db.query(SupplyChain).filter(SupplyChain.company_name == name).first()
     if not exist:
         try:
-            db.add(SupplyChain(company_name=name))
+            db.add(SupplyChain(company_name=name, created_by=created_by))
             db.commit()
         except Exception:
             db.rollback()
@@ -316,7 +439,7 @@ def _sanitize_body(data: dict, model_class=None) -> dict:
 
 
 @router.post("")
-def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_system(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     if not body.get("asset_id"):
         body["asset_id"] = _gen_asset_id(db)
     if db.query(InfoSystem).filter(InfoSystem.asset_id == body["asset_id"]).first():
@@ -324,6 +447,7 @@ def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_a
     clean = _sanitize_body(body, InfoSystem)
     if not clean.get("system_name"):
         raise HTTPException(400, "系统名称不能为空")
+    clean["created_by"] = user.id
     sys = InfoSystem(**clean)
     try:
         db.add(sys); db.commit(); db.refresh(sys)
@@ -331,15 +455,22 @@ def create_system(body: dict, db: Session = Depends(get_db), _=Depends(require_a
         db.rollback()
         raise HTTPException(500, f"创建失败：{e}")
     # 自动创建供应链记录
-    _ensure_supply_chain(db, clean.get("vendor_name", ""))
+    _ensure_supply_chain(db, clean.get("vendor_name", ""), user.id)
     return {"id": sys.id, "message": "已创建"}
 
 
 @router.put("/{sys_id}")
-def update_system(sys_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_system(sys_id: int, body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     sys = db.query(InfoSystem).get(sys_id)
     if not sys:
         raise HTTPException(404, "记录不存在")
+    # 非管理员只能编辑自己创建的数据
+    # 管理员/创建人可编辑，负责人仅浏览
+    user_gh = str(user.gh or user.id)
+    if not _is_admin(user) and sys.created_by != user.id and user_gh != str(sys.manager_gh or ""):
+        if sys.owner_gh and user_gh == str(sys.owner_gh):
+            raise HTTPException(403, "负责人只能浏览，不能编辑数据")
+        raise HTTPException(403, "只能编辑自己创建或管理的数据")
     clean = _sanitize_body(body, InfoSystem)
     try:
         for k, v in clean.items():
@@ -350,13 +481,18 @@ def update_system(sys_id: int, body: dict, db: Session = Depends(get_db), _=Depe
         db.rollback()
         raise HTTPException(500, f"保存失败：{e}")
     # 自动创建供应链记录
-    _ensure_supply_chain(db, clean.get("vendor_name", ""))
+    _ensure_supply_chain(db, clean.get("vendor_name", ""), user.id)
     return {"message": "已更新"}
 
 
 @router.delete("/{sys_id}")
-def delete_system(sys_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
-    db.query(InfoSystem).filter(InfoSystem.id == sys_id).delete()
+def delete_system(sys_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    sys = db.query(InfoSystem).get(sys_id)
+    if not sys:
+        raise HTTPException(404, "记录不存在")
+    if not _is_admin(user) and sys.created_by != user.id:
+        raise HTTPException(403, "只能删除自己创建的数据")
+    db.delete(sys)
     db.commit()
     return {"message": "已删除"}
 
@@ -1034,8 +1170,10 @@ def get_djdj_image(rec_id: int, db: Session = Depends(get_db)):
 
 @router.get("/djdj")
 def list_djdj(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-              search: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user)):
+              search: str = Query(""), db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(DjDjRecord)
+    if not _is_admin(user):
+        q = q.filter((DjDjRecord.claimed_by == user.id) | (DjDjRecord.claimed_by == None))
     if search:
         q = q.filter(DjDjRecord.system_name.like(f"%{search}%") | DjDjRecord.record_no.like(f"%{search}%"))
     total = q.count()
@@ -1047,21 +1185,23 @@ def list_djdj(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
     return {"items": result, "total": total}
 
 @router.post("/djdj")
-def create_djdj(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_djdj(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     data = dict(body)
-    # 兼容旧字段名 dept_name → eval_org
     if "dept_name" in data and "eval_org" not in data:
         data["eval_org"] = data.pop("dept_name")
     elif "dept_name" in data:
         data.pop("dept_name")
+    data["created_by"] = user.id
     rec = DjDjRecord(**{k: v for k, v in data.items() if hasattr(DjDjRecord, k)})
     db.add(rec); db.commit(); db.refresh(rec)
     return {"id": rec.id, "message": "已创建"}
 
 @router.put("/djdj/{rec_id}")
-def update_djdj(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_djdj(rec_id: int, body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     rec = db.query(DjDjRecord).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
+    if not _is_admin(user) and rec.created_by != user.id:
+        raise HTTPException(403, "只能编辑自己创建的数据")
     data = dict(body)
     if "dept_name" in data and "eval_org" not in data:
         data["eval_org"] = data.pop("dept_name")
@@ -1078,9 +1218,12 @@ def update_djdj(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depend
     return {"message": "已更新"}
 
 @router.delete("/djdj/{rec_id}")
-def delete_djdj(rec_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
-    db.query(DjDjRecord).filter(DjDjRecord.id == rec_id).delete()
-    db.commit()
+def delete_djdj(rec_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    rec = db.query(DjDjRecord).get(rec_id)
+    if not rec: raise HTTPException(404, "不存在")
+    if not _is_admin(user) and rec.created_by != user.id:
+        raise HTTPException(403, "只能删除自己创建的数据")
+    db.delete(rec); db.commit()
     return {"message": "已删除"}
 
 @router.post("/djdj/batch-delete")
@@ -1189,8 +1332,10 @@ def export_djdj(db: Session = Depends(get_db), _=Depends(require_admin)):
 
 @router.get("/icp")
 def list_icp(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-             search: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user)):
+             search: str = Query(""), db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(IcpRecord)
+    if not _is_admin(user):
+        q = q.filter((IcpRecord.claimed_by == user.id) | (IcpRecord.claimed_by == None))
     if search:
         q = q.filter(IcpRecord.icp_no.like(f"%{search}%") | IcpRecord.org_name.like(f"%{search}%"))
     total = q.count()
@@ -1198,15 +1343,19 @@ def list_icp(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
     return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
 
 @router.post("/icp")
-def create_icp(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
-    rec = IcpRecord(**{k: v for k, v in body.items() if hasattr(IcpRecord, k)})
+def create_icp(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    data = {k: v for k, v in body.items() if hasattr(IcpRecord, k)}
+    data["created_by"] = user.id
+    rec = IcpRecord(**data)
     db.add(rec); db.commit(); db.refresh(rec)
     return {"id": rec.id, "message": "已创建"}
 
 @router.put("/icp/{rec_id}")
-def update_icp(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_icp(rec_id: int, body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     rec = db.query(IcpRecord).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
+    if not _is_admin(user) and rec.created_by != user.id:
+        raise HTTPException(403, "只能编辑自己创建的数据")
     try:
         for k, v in body.items():
             if hasattr(rec, k) and k != "id" and k not in _READONLY_COLS:
@@ -1218,9 +1367,12 @@ def update_icp(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends
     return {"message": "已更新"}
 
 @router.delete("/icp/{rec_id}")
-def delete_icp(rec_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
-    db.query(IcpRecord).filter(IcpRecord.id == rec_id).delete()
-    db.commit()
+def delete_icp(rec_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    rec = db.query(IcpRecord).get(rec_id)
+    if not rec: raise HTTPException(404, "不存在")
+    if not _is_admin(user) and rec.created_by != user.id:
+        raise HTTPException(403, "只能删除自己创建的数据")
+    db.delete(rec); db.commit()
     return {"message": "已删除"}
 
 
@@ -1331,8 +1483,10 @@ def search_djdj(q: str = Query(""), db: Session = Depends(get_db), _=Depends(get
 
 @router.get("/supply-chain")
 def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-                      search: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user)):
+                      search: str = Query(""), db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(SupplyChain)
+    if not _is_admin(user):
+        q = q.filter((SupplyChain.claimed_by == user.id) | (SupplyChain.claimed_by == None))
     if search:
         q = q.filter(SupplyChain.company_name.contains(search))
     total = q.count()
@@ -1340,8 +1494,10 @@ def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le
     return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
 
 @router.post("/supply-chain")
-def create_supply_chain(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
-    rec = SupplyChain(**{k: v for k, v in body.items() if hasattr(SupplyChain, k)})
+def create_supply_chain(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    data = {k: v for k, v in body.items() if hasattr(SupplyChain, k)}
+    data["created_by"] = user.id
+    rec = SupplyChain(**data)
     db.add(rec); db.commit(); db.refresh(rec)
     return {"id": rec.id, "message": "已创建"}
 
@@ -1468,9 +1624,11 @@ def batch_delete_supply_chain(body: dict, db: Session = Depends(get_db), _=Depen
 
 
 @router.put("/supply-chain/{rec_id}")
-def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     rec = db.query(SupplyChain).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
+    if not _is_admin(user) and rec.created_by != user.id:
+        raise HTTPException(403, "只能编辑自己创建的数据")
     try:
         for k, v in body.items():
             if hasattr(rec, k) and k != "id" and k not in _READONLY_COLS:
@@ -1482,9 +1640,12 @@ def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), 
     return {"message": "已更新"}
 
 @router.delete("/supply-chain/{rec_id}")
-def delete_supply_chain(rec_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
-    db.query(SupplyChain).filter(SupplyChain.id == rec_id).delete()
-    db.commit()
+def delete_supply_chain(rec_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    rec = db.query(SupplyChain).get(rec_id)
+    if not rec: raise HTTPException(404, "不存在")
+    if not _is_admin(user) and rec.created_by != user.id:
+        raise HTTPException(403, "只能删除自己创建的数据")
+    db.delete(rec); db.commit()
     return {"message": "已删除"}
 
 

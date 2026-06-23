@@ -60,7 +60,7 @@
           <div class="sc-section">
             <div class="sc-section-title"><span class="sc-section-icon"><el-icon><Briefcase /></el-icon></span> 供应链情况</div>
             <el-row :gutter="16">
-              <el-col :span="12"><el-form-item label="开发厂商"><el-select v-model="form.vendor_name" filterable clearable allow-create style="width:100%"><el-option v-for="n in vendorNames" :key="n" :label="n" :value="n"/></el-select></el-form-item></el-col>
+              <el-col :span="12"><el-form-item label="开发厂商"><el-select v-model="form.vendor_name" filterable clearable allow-create style="width:100%" @create="(val)=>{vendorNames.push(val);form.vendor_name=val}"><el-option v-for="n in vendorNames" :key="n" :label="n" :value="n"/></el-select></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="产品名称"><el-input v-model="form.product_name"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="版本号"><el-input v-model="form.product_version"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="厂商联系人"><el-input v-model="form.vendor_contact"/></el-form-item></el-col>

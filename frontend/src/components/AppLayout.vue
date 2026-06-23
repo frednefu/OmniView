@@ -75,7 +75,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="/sys/asset-mgmt">
+        <el-sub-menu index="/sys/asset-mgmt" v-if="authStore.isAdmin">
           <template #title>
             <el-icon><Monitor /></el-icon>
             <span>集成管理</span>
@@ -110,7 +110,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="/sys/logs">
+        <el-sub-menu index="/sys/logs" v-if="authStore.isAdmin">
           <template #title>
             <el-icon><Tickets /></el-icon>
             <span>日志信息</span>

@@ -2,11 +2,13 @@
   <div class="page">
     <div class="page-header">
       <h2>信息系统维护</h2>
-      <div class="header-actions" v-if="authStore.isAdmin">
-        <el-button @click="openImportDlg">导入Excel</el-button>
-        <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
-        <el-button type="primary" @click="handleExport">导出Excel</el-button>
-        <el-button type="warning" @click="handleSync" :loading="syncLoading">数据同步</el-button>
+      <div class="header-actions">
+        <template v-if="authStore.isAdmin">
+          <el-button @click="openImportDlg">导入Excel</el-button>
+          <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
+          <el-button type="primary" @click="handleExport">导出Excel</el-button>
+          <el-button type="warning" @click="handleSync" :loading="syncLoading">数据同步</el-button>
+        </template>
         <el-button type="success" @click="openCreate">添加系统</el-button>
       </div>
     </div>
@@ -30,9 +32,11 @@
       </el-select>
       <span style="color:#909399;font-size:13px;line-height:32px;white-space:nowrap">共 {{total}} 条</span>
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
+      <el-button v-if="selectedIds.length>0" type="success" size="small" @click="handleBatchClaim">批量认领 ({{selectedIds.length}})</el-button>
+      <el-button v-if="selectedIds.length>0" type="warning" size="small" @click="handleBatchRevoke">批量撤销 ({{selectedIds.length}})</el-button>
     </div>
     <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" :default-sort="{prop:'id',order:'descending'}">
-      <el-table-column type="selection" width="40" v-if="authStore.isAdmin"/>
+      <el-table-column type="selection" width="40" />
       <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip sortable/>
       <el-table-column prop="system_type" label="资产类型" width="120" sortable/>
       <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip sortable/>
@@ -53,10 +57,13 @@
           <el-tag :type="row.url_status==='在线'?'success':'danger'" size="small">{{row.url_status||'-'}}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
+      <el-table-column label="操作" width="100" fixed="right">
         <template #default="{row}">
-          <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
-          <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id || (authStore.user?.gh && authStore.user.gh === row.manager_gh)">
+            <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
+            <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          </template>
+          <span v-else style="color:#c0c4cc;font-size:12px">-</span>
         </template>
       </el-table-column>
     </el-table>
@@ -158,7 +165,7 @@
           <div class="sc-section">
             <div class="sc-section-title"><span class="sc-section-icon"><el-icon><Briefcase /></el-icon></span> 供应链情况</div>
             <el-row :gutter="16">
-              <el-col :span="12"><el-form-item label="开发厂商"><el-select v-model="form.vendor_name" filterable clearable allow-create style="width:100%"><el-option v-for="n in vendorNames" :key="n" :label="n" :value="n"/></el-select></el-form-item></el-col>
+              <el-col :span="12"><el-form-item label="开发厂商"><el-select v-model="form.vendor_name" filterable clearable allow-create style="width:100%" @create="(val)=>{vendorNames.push(val);form.vendor_name=val}"><el-option v-for="n in vendorNames" :key="n" :label="n" :value="n"/></el-select></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="产品名称"><el-input v-model="form.product_name"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="版本号"><el-input v-model="form.product_version"/></el-form-item></el-col>
               <el-col :span="6"><el-form-item label="厂商联系人"><el-input v-model="form.vendor_contact"/></el-form-item></el-col>
@@ -562,6 +569,14 @@ async function handleSave(){
   finally{saving.value=false}
 }
 
+async function handleBatchClaim(){
+  if(!selectedIds.value.length) return
+  try{await api.post('/info-systems/batch-claim',{model:'info_system',ids:selectedIds.value});ElMessage.success('批量认领成功');selectedIds.value=[];fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'认领失败')}
+}
+async function handleBatchRevoke(){
+  if(!selectedIds.value.length) return
+  try{await ElMessageBox.confirm('确定撤销选中的认领？','确认',{type:'warning'});await api.post('/info-systems/batch-revoke',{model:'info_system',ids:selectedIds.value});ElMessage.success('已撤销');selectedIds.value=[];fetchList()}catch{}
+}
 async function handleDelete(r){try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'});await api.delete('/info-systems/'+r.id);ElMessage.success('已删除');fetchList()}catch{}}
 async function handleBatchDelete(){try{await ElMessageBox.confirm('确定删除选中的 '+selectedIds.value.length+' 条记录?','批量删除',{type:'error'});await api.post('/info-systems/batch-delete',{ids:selectedIds.value});ElMessage.success('已删除');selectedIds.value=[];fetchList()}catch{}}
 async function handleSync(){syncLoading.value=true;try{const r=await api.post('/info-systems/sync-from-platform');ElMessage.success(r.data.message);console.log('Sync stats:',r.data.stats);fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'同步失败')}finally{syncLoading.value=false}}

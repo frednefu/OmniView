@@ -2,10 +2,12 @@
   <div class="page">
     <div class="page-header">
       <h2>等保信息维护</h2>
-      <div class="header-actions" v-if="authStore.isAdmin">
-        <el-button @click="triggerImport">导入Excel</el-button>
-        <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
-        <el-button type="primary" @click="handleExport">导出Excel</el-button>
+      <div class="header-actions">
+        <template v-if="authStore.isAdmin">
+          <el-button @click="triggerImport">导入Excel</el-button>
+          <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
+          <el-button type="primary" @click="handleExport">导出Excel</el-button>
+        </template>
         <el-button type="success" @click="openCreate">添加记录</el-button>
       </div>
     </div>
@@ -17,17 +19,26 @@
       <span style="color:#909399;font-size:13px;line-height:32px">共 {{total}} 条</span>
     </div>
     <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect">
-      <el-table-column type="selection" width="40" v-if="authStore.isAdmin"/>
+      <el-table-column type="selection" width="40" />
       <el-table-column prop="record_no" label="备案编号" width="200" />
       <el-table-column prop="system_name" label="系统名称" min-width="180" show-overflow-tooltip />
       <el-table-column prop="org_name" label="备案单位" min-width="160" />
       <el-table-column prop="eval_org" label="测评单位" min-width="160" />
       <el-table-column prop="level" label="等级" width="80" />
       <el-table-column prop="record_date" label="备案日期" width="120" />
-      <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
+      <el-table-column label="操作" width="140" fixed="right">
         <template #default="{row}">
-          <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
-          <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id">
+            <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
+            <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          </template>
+          <template v-else-if="!row.claimed_by">
+            <el-tooltip content="认领"><el-button link type="success" size="small" @click="handleClaim(row,'djdj')">认领</el-button></el-tooltip>
+          </template>
+          <template v-else-if="row.claimed_by === authStore.user?.id">
+            <el-tooltip content="撤销认领"><el-button link type="warning" size="small" @click="handleRevoke(row,'djdj')">撤销</el-button></el-tooltip>
+          </template>
+          <span v-else style="color:#c0c4cc;font-size:12px">-</span>
         </template>
       </el-table-column>
     </el-table>

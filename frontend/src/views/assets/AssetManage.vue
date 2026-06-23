@@ -4,11 +4,13 @@
       <h2>信息资产管理</h2>
       <div class="header-right">
         <el-switch v-model="hideEmpty" active-text="隐藏空部门" @change="loadTree" />
-        <el-button type="info" plain @click="handleSync" :loading="syncLoading">同步资产</el-button>
-        <el-button @click="showMatchPreview" :loading="previewLoading">分组预览</el-button>
-        <el-button type="primary" @click="handleAutoMatch" :loading="autoMatchLoading">自动分组</el-button>
-        <el-button type="success" plain @click="handleMatchOwner" :loading="ownerMatchLoading">匹配负责人</el-button>
-        <el-button v-if="authStore.isAdmin && selectedVMs.length > 0" type="warning" @click="showAssignDialog(selectedVMs)">指派选中 ({{ selectedVMs.length }})</el-button>
+        <template v-if="authStore.isAdmin">
+          <el-button type="info" plain @click="handleSync" :loading="syncLoading">同步资产</el-button>
+          <el-button @click="showMatchPreview" :loading="previewLoading">分组预览</el-button>
+          <el-button type="primary" @click="handleAutoMatch" :loading="autoMatchLoading">自动分组</el-button>
+          <el-button type="success" plain @click="handleMatchOwner" :loading="ownerMatchLoading">匹配负责人</el-button>
+          <el-button v-if="selectedVMs.length > 0" type="warning" @click="showAssignDialog(selectedVMs)">指派选中 ({{ selectedVMs.length }})</el-button>
+        </template>
       </div>
     </div>
 
@@ -739,25 +741,46 @@ async function handleResetAll() {
 }
 
 let pollTimer = null
-onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
+
+// 页面加载时检查是否有后台任务正在运行，自动恢复轮询
+async function checkRunningTasks() {
+  try {
+    const st = await statusMatchOwner()
+    if (st.running) {
+      ownerMatchLoading.value = true
+      ElMessage.info(st.message || '后台任务运行中...')
+      startPollOwner()
+    }
+  } catch { /* */ }
+}
+
+function startPollOwner() {
+  stopPollOwner()
+  pollTimer = setInterval(async () => {
+    const st = await statusMatchOwner()
+    if (!st.running) {
+      stopPollOwner()
+      ownerMatchLoading.value = false
+      ElMessage.success(st.message)
+      await loadTree()
+      if (selectedNode.value) { await loadVMs() }
+    }
+  }, 2000)
+}
+
+function stopPollOwner() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+
+onBeforeUnmount(() => { stopPollOwner() })
 
 async function handleMatchOwner() {
   ownerMatchLoading.value = true
   try {
     const start = await startMatchOwner()
-    if (!start.running) { ElMessage.warning(start.message); return }
+    if (!start.running) { ownerMatchLoading.value = false; ElMessage.warning(start.message); return }
     ElMessage.info(start.message)
-    pollTimer = setInterval(async () => {
-      const st = await statusMatchOwner()
-      if (!st.running) {
-        clearInterval(pollTimer)
-        pollTimer = null
-        ownerMatchLoading.value = false
-        ElMessage.success(st.message)
-        await loadTree()
-        if (selectedNode.value) { await loadVMs() }
-      }
-    }, 2000)
+    startPollOwner()
   } catch (e) {
     ownerMatchLoading.value = false
     ElMessage.error('启动任务失败：' + (e?.response?.data?.detail || e?.message || ''))
@@ -898,6 +921,7 @@ watch(activeTab, (tab) => {
 onMounted(async () => {
   await loadTree()
   await fetchFilterOptions()
+  checkRunningTasks()
 })
 </script>
 

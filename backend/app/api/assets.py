@@ -11,6 +11,13 @@ from app.models.department import Department
 router = APIRouter(prefix="/assets", tags=["信息资产管理"])
 
 
+def _is_admin_user(u) -> bool:
+    if hasattr(u, "role"):
+        r = u.role
+        return (r.value if hasattr(r, "value") else r) == "admin"
+    return False
+
+
 def _get_sub_dept_ids(db: Session, dept_id: int) -> list[int]:
     """获取部门及其所有下级部门 ID 列表。"""
     dept = db.execute(text("SELECT dwbm FROM departments WHERE id=:id"), {"id": dept_id}).fetchone()
@@ -552,16 +559,20 @@ def get_dept_vms(
     current_user: User = Depends(get_current_user),
 ):
     visible_depts = _get_visible_dept_ids(db, current_user)
+    # 非管理员只能看到自己认领的 + 未认领的
+    owner_filter = ""
+    if not _is_admin_user(current_user):
+        owner_filter = f"AND (a.owner_user_id = {current_user.id} OR a.owner_user_id IS NULL)"
     if dept_id == 0:
         q = db.execute(text(
-            "SELECT v.*, a.department_id, a.owner_user_id, a.claim_status, a.claimed_by, a.claimed_at, "
+            f"SELECT v.*, a.department_id, a.owner_user_id, a.claim_status, a.claimed_by, a.claimed_at, "
             "d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
             "vc.name as vcenter_name FROM vm_inventory v "
             "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
             "LEFT JOIN departments d ON a.department_id = d.id "
             "LEFT JOIN users u ON a.owner_user_id = u.id "
             "LEFT JOIN vcenters vc ON v.vcenter_id = vc.id "
-            "WHERE a.id IS NULL OR a.claim_status = 'unlinked'"
+            f"WHERE (a.id IS NULL OR a.claim_status = 'unlinked') {owner_filter}"
         ))
     else:
         sub_ids = _get_sub_dept_ids(db, dept_id)
@@ -574,7 +585,7 @@ def get_dept_vms(
             f"LEFT JOIN departments d ON a.department_id = d.id "
             f"LEFT JOIN users u ON a.owner_user_id = u.id "
             f"LEFT JOIN vcenters vc ON v.vcenter_id = vc.id "
-            f"WHERE a.department_id IN ({placeholders})"
+            f"WHERE a.department_id IN ({placeholders}) {owner_filter}"
         ))
 
     rows = q.fetchall()
@@ -752,11 +763,18 @@ def get_dept_domains(
 @router.get("/departments/{dept_id}/systems")
 def get_dept_systems(
     dept_id: int, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-    search: str = Query(""), db: Session = Depends(get_db), _=Depends(get_current_user),
+    search: str = Query(""), db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
     """按部门获取信息系统列表。dept_id=0 返回未关联部门的系统。"""
     from app.models.info_system import InfoSystem
     q = db.query(InfoSystem)
+    # 非管理员：本单位 + (自己是管理员 或 未分配)
+    if not _is_admin_user(current_user):
+        dept = getattr(current_user, 'department_id', None)
+        if dept:
+            q = q.filter((InfoSystem.dept_id == dept) | (InfoSystem.dept_id == None))
+        uid = str(current_user.gh or current_user.id)
+        q = q.filter((InfoSystem.manager_gh == uid) | (InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
     if dept_id == 0:
         q = q.filter((InfoSystem.dept_id == None) | (InfoSystem.dept_id == 0))
     elif dept_id > 0:

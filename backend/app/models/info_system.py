@@ -47,6 +47,9 @@ class InfoSystem(Base):
     ops_phone = Column(String(32), nullable=True, comment="运维联系电话")
     entry_url = Column(String(512), nullable=True, comment="入口地址（带https/http的完整URL）")
     url_status = Column(String(16), nullable=True, comment="URL验证状态: 在线/离线")
+    created_by = Column(Integer, nullable=True, comment="创建人ID")
+    claimed_by = Column(Integer, nullable=True, comment="认领人ID")
+    claimed_at = Column(DateTime, nullable=True, comment="认领时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -71,6 +74,9 @@ class SupplyChain(Base):
     data_storage = Column(String(256), nullable=True, comment="存储方式")
     db_type = Column(String(256), nullable=True, comment="数据库类型")
     remark = Column(Text, nullable=True)
+    created_by = Column(Integer, nullable=True, comment="创建人ID")
+    claimed_by = Column(Integer, nullable=True, comment="认领人ID")
+    claimed_at = Column(DateTime, nullable=True, comment="认领时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -87,6 +93,9 @@ class DjDjRecord(Base):
     eval_org = Column(String(256), nullable=True, comment="测评单位")
     image_path = Column(String(512), nullable=True, comment="备案证明图片路径")
     remark = Column(Text, nullable=True)
+    created_by = Column(Integer, nullable=True, comment="创建人ID")
+    claimed_by = Column(Integer, nullable=True, comment="认领人ID")
+    claimed_at = Column(DateTime, nullable=True, comment="认领时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -100,5 +109,6 @@ class IcpRecord(Base):
     domain = Column(String(512), nullable=True, comment="备案域名")
     record_date = Column(Date, nullable=True, comment="备案日期")
     remark = Column(Text, nullable=True)
+    created_by = Column(Integer, nullable=True, comment="创建人ID")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

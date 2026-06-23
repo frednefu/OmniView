@@ -2,10 +2,12 @@
   <div class="page">
     <div class="page-header">
       <h2>ICP备案信息维护</h2>
-      <div class="header-actions" v-if="authStore.isAdmin">
-        <el-button @click="triggerImport">导入Excel</el-button>
-        <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
-        <el-button type="primary" @click="handleExport">导出Excel</el-button>
+      <div class="header-actions">
+        <template v-if="authStore.isAdmin">
+          <el-button @click="triggerImport">导入Excel</el-button>
+          <input ref="fileInput" type="file" accept=".xlsx" style="display:none" @change="onFileChange" />
+          <el-button type="primary" @click="handleExport">导出Excel</el-button>
+        </template>
         <el-button type="success" @click="openCreate">添加记录</el-button>
       </div>
     </div>
@@ -20,10 +22,13 @@
       <el-table-column prop="org_name" label="备案主体" min-width="160" sortable />
       <el-table-column prop="domain" label="备案域名" min-width="200" show-overflow-tooltip sortable />
       <el-table-column prop="record_date" label="备案日期" width="120" sortable />
-      <el-table-column label="操作" width="100" fixed="right" v-if="authStore.isAdmin">
+      <el-table-column label="操作" width="100" fixed="right">
         <template #default="{row}">
-          <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
-          <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id">
+            <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
+            <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
+          </template>
+          <span v-else style="color:#c0c4cc;font-size:12px">-</span>
         </template>
       </el-table-column>
     </el-table>

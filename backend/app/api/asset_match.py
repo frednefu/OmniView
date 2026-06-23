@@ -42,8 +42,9 @@ def _run_match_owner():
             for name in _extract_names(v.remark):
                 all_names.add(name)
         name_list = sorted(all_names)
+        _task_status["owner"] = {"running": True, "message": f"开始查询 {len(name_list)} 个人名的API数据..."}
 
-        # 查询API
+        # 查询API（逐条异常保护，失败不中断整体）
         name_cache = {}
         api_errors = []
         for idx, name in enumerate(name_list):
@@ -54,8 +55,13 @@ def _run_match_owner():
             except Exception as e:
                 api_errors.append(f"{name}:{e}")
                 name_cache[name] = []
-            if idx % 10 == 0:
-                _task_status["owner"] = {"running": True, "message": f"查询API中 {idx+1}/{len(name_list)}..."}
+            if idx % 5 == 0 or idx == len(name_list) - 1:
+                _task_status["owner"] = {"running": True, "message": f"API查询进度 {idx+1}/{len(name_list)}"}
+                # 保活：刷新 DB 连接
+                try:
+                    db.execute(text("SELECT 1"))
+                except Exception:
+                    db = SessionLocal()
 
         # 匹配VM
         matched = 0
@@ -74,25 +80,33 @@ def _run_match_owner():
                     break
                 staff_list = name_cache.get(name, [])
                 # 检查VM的部门链(向上追溯父部门)
-                vm_codes = {v.dwbm}
+                vm_codes = {v.dwbm} if v.dwbm else set()
                 current_dwbm = v.dwbm
                 for _ in range(3):
+                    if not current_dwbm:
+                        break
                     parent_row = db.execute(text("SELECT lsdwh FROM departments WHERE dwbm=:d"), {"d": current_dwbm}).fetchone()
                     if parent_row and parent_row.lsdwh:
                         vm_codes.add(parent_row.lsdwh)
                         current_dwbm = parent_row.lsdwh
                     else:
                         break
+                # 按部门匹配筛选：优先同部门，其次父部门
                 found = None
+                dept_matched = []
                 for s in staff_list:
                     sd = (s.get("SZDWBM") or "").strip()
                     gh = s.get("GH", "").strip()
-                    if sd and any(sd == c or c.startswith(sd) or sd.startswith(c) for c in vm_codes):
-                        if gh.startswith("10"):
-                            found = s
-                            break
-                        if not found:
-                            found = s
+                    if sd and any(sd == c or c.startswith(sd) or sd.startswith(c) for c in vm_codes if c):
+                        dept_matched.append(s)
+                # 只有确认部门匹配的才自动分配（避免重名误配）
+                if dept_matched:
+                    dept_matched.sort(key=lambda x: (1 if x.get("GH","").startswith("10") else 0), reverse=True)
+                    found = dept_matched[0]
+                elif len(staff_list) == 1 and v.dwbm:
+                    # 只有一个人且VM有部门信息，允许匹配
+                    found = staff_list[0]
+                # 多人且无部门匹配 → 跳过（不自动分配，避免错配）
                 if found:
                     gh = found.get("GH", "").strip()
                     xm = found.get("XM", "").strip()
@@ -123,9 +137,9 @@ def _run_match_owner():
                     db.commit()
                     matched += 1
                     break
-        msg = f"完成：共{len(vms)}个VM，匹配{matched}人，API查询{len(name_list)}人"
+        msg = f"匹配负责人完成：共 {len(vms)} 个 VM，成功匹配 {matched} 人，API 查询 {len(name_list)} 人"
         if api_errors:
-            msg += f"，API错误{len(api_errors)}个"
+            msg += f"，API 异常 {len(api_errors)} 个"
         _task_status["owner"] = {"running": False, "message": msg}
         logger.info(f"后台匹配负责人: {msg}")
     except Exception as e:
@@ -293,8 +307,8 @@ def execute_match(db: Session = Depends(get_db), _=Depends(require_admin)):
 def start_match_owner(_=Depends(require_admin)):
     """启动后台匹配负责人任务。"""
     if _task_status.get("owner", {}).get("running"):
-        return {"running": True, "message": "任务已在运行中..."}
-    _task_status["owner"] = {"running": True, "message": "正在启动..."}
+        return {"running": True, "message": "匹配负责人任务正在运行中，请稍后查询进度"}
+    _task_status["owner"] = {"running": True, "message": "匹配负责人任务已启动，正在准备数据..."}
     t = threading.Thread(target=_run_match_owner, daemon=True)
     t.start()
     return {"running": True, "message": "任务已开始，正在查询外部API..."}
