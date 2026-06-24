@@ -333,6 +333,35 @@ def batch_claim(body: dict, db: Session = Depends(get_db), user=Depends(get_curr
     return {"message": f"成功认领 {count} 条", "count": count}
 
 
+@router.post("/batch-cancel")
+def batch_cancel_systems(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """批量申请注销（本人认领的记录可申请注销）。"""
+    models = {"info_system": InfoSystem, "djdj": DjDjRecord, "icp": IcpRecord, "supply_chain": SupplyChain}
+    m = models.get(body.get("model", ""))
+    if not m: raise HTTPException(400, "不支持的类型")
+    ids = body.get("ids", [])
+    if not ids: raise HTTPException(400, "请选择记录")
+    user_gh = str(user.gh or user.id)
+    count = 0
+    for rid in ids:
+        rec = db.query(m).get(rid)
+        if not rec: continue
+        # 只有管理员或本人认领的才能申请注销
+        is_owner = False
+        if hasattr(rec, 'manager_gh') and str(rec.manager_gh or '') == user_gh:
+            is_owner = True
+        elif hasattr(rec, 'claimed_by') and rec.claimed_by == user.id:
+            is_owner = True
+        elif hasattr(rec, 'created_by') and rec.created_by == user.id:
+            is_owner = True
+        if _is_admin(user) or is_owner:
+            if hasattr(rec, 'fill_type'):
+                rec.fill_type = "申请注销"
+            count += 1
+    db.commit()
+    return {"message": f"已申请注销 {count} 条"}
+
+
 @router.post("/batch-revoke")
 def batch_revoke(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     models = {"info_system": InfoSystem, "djdj": DjDjRecord, "icp": IcpRecord, "supply_chain": SupplyChain}

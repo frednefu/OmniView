@@ -331,6 +331,66 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
     }
 
 
+@router.post("/batch-cancel")
+def batch_cancel(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """批量申请注销（本人认领的记录可申请）。"""
+    ids = body.get("ids", [])
+    typ = body.get("type", "")
+    if not ids: raise HTTPException(400, "请选择记录")
+    count = 0
+    if typ == "vm":
+        # 只有本人认领的VM才能申请注销
+        id_tuple = tuple(int(i) for i in ids if str(i).isdigit())
+        if not id_tuple:
+            raise HTTPException(400, "无效的ID列表")
+        if len(id_tuple) == 1:
+            where_in = f"({id_tuple[0]})"
+        else:
+            where_in = str(id_tuple)
+        rows = db.execute(text(
+            f"SELECT v.id FROM vm_inventory v JOIN asset_inventory a ON v.vm_name=a.vm_name "
+            f"WHERE v.id IN {where_in} AND a.owner_user_id=:uid"
+        ), {"uid": user.id}).fetchall()
+        allowed = tuple(r.id for r in rows)
+        if allowed:
+            update_in = f"({allowed[0]})" if len(allowed) == 1 else str(allowed)
+            db.execute(text(f"UPDATE vm_inventory SET claim_status='申请注销' WHERE id IN {update_in}"))
+            count = len(allowed)
+    elif typ == "domain":
+        # 域名：通过IP匹配找对应VM的owner，本人认领的才能注销
+        for domain_name in ids:
+            d = db.execute(text(
+                "SELECT ip_address FROM zdns_domain_map WHERE domain_name=:d LIMIT 1"
+            ), {"d": domain_name}).fetchone()
+            if not d or not d.ip_address:
+                continue
+            ip = d.ip_address.strip()
+            vm = db.execute(text(
+                "SELECT v.id FROM vm_inventory v WHERE v.ip_address LIKE :ip1 OR v.ip_address LIKE :ip2 OR v.ip_address=:ip3 LIMIT 1"
+            ), {"ip1": f"{ip},%", "ip2": f"%,{ip}", "ip3": ip}).fetchone()
+            if vm:
+                owner = db.execute(text(
+                    "SELECT a.owner_user_id FROM asset_inventory a JOIN vm_inventory v ON a.vm_name=v.vm_name WHERE v.id=:vid"
+                ), {"vid": vm.id}).fetchone()
+                if owner and owner.owner_user_id == user.id:
+                    db.execute(text(f"UPDATE vm_inventory SET claim_status='申请注销' WHERE id={vm.id}"))
+                    count += 1
+    elif typ == "info_system":
+        user_gh = str(user.gh or user.id)
+        for rid in ids:
+            sid = int(rid) if str(rid).isdigit() else None
+            if not sid: continue
+            from app.models.info_system import InfoSystem
+            s = db.query(InfoSystem).get(sid)
+            if s and (str(s.manager_gh or '') == user_gh or s.created_by == user.id or _is_admin_user(user)):
+                s.fill_type = "申请注销"
+                count += 1
+    else:
+        raise HTTPException(400, "不支持的类型")
+    db.commit()
+    return {"message": f"已申请注销 {count} 条"}
+
+
 @router.get("/tree")
 def get_asset_tree(
     db: Session = Depends(get_db),
@@ -827,7 +887,8 @@ def get_dept_domains(
 @router.get("/departments/{dept_id}/systems")
 def get_dept_systems(
     dept_id: int, page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-    search: str = Query(""), db: Session = Depends(get_db), current_user=Depends(get_current_user),
+    search: str = Query(""), fill_type: str = Query(""), claimed: str = Query(""),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
     """按部门获取信息系统列表。dept_id=0 返回未关联部门的系统。"""
     from app.models.info_system import InfoSystem
@@ -850,6 +911,12 @@ def get_dept_systems(
             InfoSystem.ip_address.contains(search) |
             InfoSystem.domain.contains(search)
         )
+    if fill_type:
+        q = q.filter(InfoSystem.fill_type == fill_type)
+    if claimed == "yes":
+        q = q.filter(InfoSystem.manager_gh.isnot(None), InfoSystem.manager_gh != "")
+    elif claimed == "no":
+        q = q.filter((InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
     total = q.count()
     items = q.order_by(InfoSystem.system_name).offset((page - 1) * size).limit(size).all()
     # 批量查询部门名称

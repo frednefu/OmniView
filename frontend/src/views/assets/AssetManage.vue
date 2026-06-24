@@ -112,6 +112,7 @@
                 <el-button type="primary" size="small" @click="vmPage=1;loadVMs()">查询</el-button>
                 <el-button type="success" size="small" :disabled="selectedVMs.length===0" @click="handleClaim">认领资产</el-button>
                 <el-button type="warning" size="small" :disabled="selectedVMs.length===0" @click="handleRevoke">撤销认领</el-button>
+                <el-button type="danger" size="small" :disabled="selectedVMs.length===0" @click="handleCancelClaim">申请注销</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
               <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}">
@@ -169,6 +170,9 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="owner_name" label="管理员" width="80" />
+                <el-table-column prop="claim_status" label="填报状态" width="90">
+                  <template #default="{row}"><el-tag :type="row.claim_status==='auto'?'success':row.claim_status==='manual'?'':row.claim_status==='注销'||row.claim_status==='申请注销'?'danger':'info'" size="small">{{ statusLabel(row.claim_status) }}</el-tag></template>
+                </el-table-column>
               </el-table>
               <el-pagination
                 v-if="vmTotal>0"
@@ -193,30 +197,32 @@
                   <el-option label="AAAA" value="AAAA" />
                   <el-option label="CNAME" value="CNAME" />
                 </el-select>
+                <el-select v-model="domainClaimedFilter" placeholder="认领状态" clearable size="small" style="width:100px" @change="domainPage=1;loadDomains()">
+                  <el-option label="已认领" value="yes"/><el-option label="未认领" value="no"/>
+                </el-select>
                 <el-button type="primary" size="small" @click="domainPage=1;loadDomains()">查询</el-button>
                 <el-button type="success" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">认领域名</el-button>
                 <el-button type="warning" size="small" :disabled="selectedDomains.length===0" @click="revokeDomains">撤销认领</el-button>
+                <el-button type="danger" size="small" :disabled="selectedDomains.length===0" @click="handleDomainCancel">申请注销</el-button>
               </div>
               <div class="total-info">共 {{ domainTotal }} 条，已选 {{ selectedDomains.length }} 条</div>
-              <el-table :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect">
+              <el-table :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect" :default-sort="{prop:'domain_name',order:'ascending'}">
                 <el-table-column type="selection" width="35" />
-                <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip />
-                <el-table-column prop="record_type" label="类型" width="70" />
-                <el-table-column prop="ip_address" label="IP" width="140" />
-                <el-table-column prop="source" label="来源" width="60">
+                <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="record_type" label="类型" width="70" sortable="custom" />
+                <el-table-column prop="ip_address" label="IP" width="140" sortable="custom" />
+                <el-table-column prop="source" label="来源" width="60" sortable="custom">
                   <template #default="{ row }">
                     <el-tag :type="row.source === 'ZDNS' ? '' : 'success'" size="small">{{ row.source }}</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="数据关联" min-width="160" show-overflow-tooltip>
-                  <template #default="{row}">
-                    <span>{{ row.vm_name || row.domain_name || '-' }}</span>
-                    <el-tag size="small" :type="row.source_type==='is'?'warning':''" style="margin-left:4px">{{ row.source_type === 'is' ? '信息系统' : row.source_type === 'vm' ? 'VM' : '' }}</el-tag>
-                  </template>
+                <el-table-column label="数据关联" min-width="160" show-overflow-tooltip sortable="custom" prop="vm_name" />
+                <el-table-column prop="dept_name" label="单位信息" width="120" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="owner_name" label="管理员" width="80" sortable="custom" />
+                <el-table-column label="填报状态" width="90">
+                  <template #default="{row}"><el-tag :type="row.owner_name?'success':'info'" size="small">{{ row.owner_name?'已认领':'未认领' }}</el-tag></template>
                 </el-table-column>
-                <el-table-column prop="dept_name" label="单位信息" width="120" show-overflow-tooltip />
-                <el-table-column prop="owner_name" label="管理员" width="80" />
-                <el-table-column label="认领" width="65">
+                <el-table-column label="认领" width="65" sortable="custom" prop="owner_name">
                   <template #default="{ row }">
                     <el-tag :type="row.owner_name ? '' : 'info'" size="small">{{ row.owner_name ? '已认领' : '未认领' }}</el-tag>
                   </template>
@@ -237,19 +243,29 @@
 
             <el-tab-pane label="信息系统" name="systems">
               <div class="filter-bar">
-                <el-input v-model="sysSearch" placeholder="搜索名称/IP/域名" clearable size="small" style="width:260px" @keyup.enter="sysPage=1;loadSystems()" @clear="sysPage=1;loadSystems()" />
+                <el-input v-model="sysSearch" placeholder="搜索名称/IP/域名" clearable size="small" style="width:220px" @keyup.enter="sysPage=1;loadSystems()" @clear="sysPage=1;loadSystems()" />
+                <el-select v-model="sysFillTypeFilter" placeholder="填报状态" clearable size="small" style="width:110px" @change="sysPage=1;loadSystems()">
+                  <el-option v-for="t in ['导入','手动','自动','注销','申请注销']" :key="t" :label="t" :value="t"/>
+                </el-select>
+                <el-select v-model="sysClaimedFilter" placeholder="认领状态" clearable size="small" style="width:100px" @change="sysPage=1;loadSystems()">
+                  <el-option label="已认领" value="yes"/><el-option label="未认领" value="no"/>
+                </el-select>
                 <el-button type="primary" size="small" @click="sysPage=1;loadSystems()">查询</el-button>
+                <el-button type="success" size="small" :disabled="selectedSys.length===0" @click="handleSysClaim">认领</el-button>
+                <el-button type="warning" size="small" :disabled="selectedSys.length===0" @click="handleSysRevoke">撤销认领</el-button>
+                <el-button type="danger" size="small" :disabled="selectedSys.length===0" @click="handleSysCancel">申请注销</el-button>
               </div>
               <div class="total-info">共 {{ sysTotal }} 条</div>
-              <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)">
-                <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip />
-                <el-table-column prop="system_type" label="资产类型" width="120" />
-                <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip />
-                <el-table-column prop="dept_name" label="所属部门" width="120" show-overflow-tooltip />
-                <el-table-column prop="ip_address" label="IP地址" width="130" show-overflow-tooltip />
-                <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip />
-                <el-table-column prop="manager_name" label="管理员" width="80" />
-                <el-table-column prop="owner_name" label="负责人" width="80" />
+              <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onSysSelect">
+                <el-table-column type="selection" width="35" />
+                <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="system_type" label="资产类型" width="120" sortable="custom" />
+                <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="dept_name" label="所属部门" width="120" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="ip_address" label="IP地址" width="130" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip sortable="custom" />
+                <el-table-column prop="manager_name" label="管理员" width="80" sortable="custom" />
+                <el-table-column prop="owner_name" label="负责人" width="80" sortable="custom" />
                 <el-table-column prop="fill_type" label="填报状态" width="90">
                   <template #default="{row}"><el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':''" size="small">{{ row.fill_type||'手动' }}</el-tag></template>
                 </el-table-column>
@@ -489,6 +505,7 @@ const domainList = ref([])
 const domainLoading = ref(false)
 const domainSearch = ref('')
 const domainTypeFilter = ref('')
+const domainClaimedFilter = ref('')
 const domainPage = ref(1)
 const domainSize = ref(50)
 const domainTotal = ref(0)
@@ -496,6 +513,25 @@ const selectedDomains = ref([])
 function onDomainSelect(val) { selectedDomains.value = val }
 
 const sysList = ref([]), sysLoading = ref(false), sysPage = ref(1), sysSize = ref(20), sysTotal = ref(0), sysSearch = ref('')
+const sysFillTypeFilter = ref('')
+const sysClaimedFilter = ref('')
+const selectedSys = ref([])
+function onSysSelect(v){selectedSys.value=v.map(r=>r.id)}
+
+// 申请注销（VM/域名/信息系统通用）
+async function handleCancelClaim(){
+  if(!selectedVMs.value.length)return
+  const ids = selectedVMs.value.map(v => v.id || v)
+  try{await api.post('/assets/batch-cancel',{ids,type:'vm'});ElMessage.success('已申请注销');selectedVMs.value=[];loadVMs()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+}
+async function handleDomainCancel(){
+  if(!selectedDomains.value.length)return
+  const ids = selectedDomains.value.map(d=>d.domain_name)
+  try{await api.post('/assets/batch-cancel',{ids,type:'domain'});ElMessage.success('已申请注销');selectedDomains.value=[];loadDomains()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+}
+async function handleSysClaim(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-claim',{model:'info_system',ids:selectedSys.value});ElMessage.success('认领成功');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
+async function handleSysRevoke(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-revoke',{model:'info_system',ids:selectedSys.value});ElMessage.success('已撤销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
+async function handleSysCancel(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-cancel',{model:'info_system',ids:selectedSys.value});ElMessage.success('已申请注销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
 
 const claimVisible = ref(false)
 const claimKeyword = ref('')
@@ -596,7 +632,11 @@ const matchPreviewVisible = ref(false)
 const matchPreviewData = ref({ items: [], total_vms: 0, matched_count: 0 })
 
 function statusLabel(s) {
-  return s === 'auto' ? '自动' : s === 'manual' ? '手动' : '未关联'
+  if (!s || s === 'unlinked') return '未分组'
+  if (s === 'auto') return '自动'
+  if (s === 'manual') return '手动'
+  if (s === '注销' || s === '申请注销') return s
+  return s
 }
 function formatDate(t) { return t ? new Date(t).toLocaleDateString('zh-CN') : '' }
 function isBackupStale(t) {
@@ -699,6 +739,7 @@ async function loadDomains() {
     const res = await getDeptDomains(deptId, {
       page: domainPage.value, size: domainSize.value,
       search: domainSearch.value, record_type: domainTypeFilter.value,
+      claimed: domainClaimedFilter.value,
     })
     domainList.value = res.items
     domainTotal.value = res.total
@@ -711,7 +752,7 @@ async function loadSystems() {
   try {
     const deptId = selectedNode.value.id === -1 ? 0 : selectedNode.value.id
     const res = await api.get(`/assets/departments/${deptId}/systems`, {
-      params: { page: sysPage.value, size: sysSize.value, search: sysSearch.value },
+      params: { page: sysPage.value, size: sysSize.value, search: sysSearch.value, fill_type: sysFillTypeFilter.value, claimed: sysClaimedFilter.value },
     })
     sysList.value = res.data.items
     sysTotal.value = res.data.total
