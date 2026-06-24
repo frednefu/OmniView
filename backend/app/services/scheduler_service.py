@@ -275,6 +275,32 @@ def _asset_sync_job():
         scan_log.hosts_found = r.rowcount + vs.rowcount + d.rowcount + dc.rowcount
         scan_log.completed_at = now_end
         scan_log.duration_seconds = round((now_end - now8).total_seconds(), 1) if now8 else None
+        # 数据关联：有管理员的VM → 回写信息系统管理员
+        try:
+            vm_rows = db.execute(text(
+                "SELECT v.ip_address, u.name as owner_name, u.gh as owner_gh "
+                "FROM vm_inventory v JOIN users u ON v.owner_user_id = u.id "
+                "WHERE v.owner_user_id IS NOT NULL"
+            )).fetchall()
+            zdns_all = db.execute(text("SELECT LOWER(domain_name) as d, ip_address FROM zdns_domain_map")).fetchall()
+            zdns_by_ip = {}
+            for z in zdns_all:
+                ip = (z.ip_address or "").strip()
+                if ip and ip not in zdns_by_ip:
+                    zdns_by_ip[ip] = z.d
+            for v in vm_rows:
+                if not v.ip_address: continue
+                for ip in [x.strip() for x in v.ip_address.split(",") if x.strip()]:
+                    domain = zdns_by_ip.get(ip)
+                    if domain:
+                        db.execute(text(
+                            "UPDATE info_systems SET manager_name=:name, manager_gh=:gh "
+                            "WHERE (manager_gh IS NULL OR manager_gh='') "
+                            "AND (LOWER(domain) LIKE :d1 OR LOWER(domain) LIKE :d2 OR LOWER(domain)=:d3)"
+                        ), {"name": v.owner_name, "gh": v.owner_gh,
+                            "d1": f"%{domain}%", "d2": f"%{domain},%", "d3": domain})
+        except Exception:
+            pass
         db.commit()
         if r.rowcount > 0:
             logger.info(f"资产同步：新增 {r.rowcount} 个 VM")

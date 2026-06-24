@@ -246,6 +246,50 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
     except Exception:
         db.rollback()
 
+    # 5. 数据关联：有管理员的VM → 匹配域名 → 回写信息系统的管理员
+    is_manager_synced = 0
+    try:
+        # 查询有 owner 的 VM，获取其 IP、owner 信息
+        vm_rows = db.execute(text(
+            "SELECT v.ip_address, v.owner_user_id, u.name as owner_name, u.gh as owner_gh "
+            "FROM vm_inventory v JOIN users u ON v.owner_user_id = u.id "
+            "WHERE v.owner_user_id IS NOT NULL"
+        )).fetchall()
+        if vm_rows:
+            # 预加载 ZDNS 域名→IP 映射
+            zdns_all = db.execute(text(
+                "SELECT LOWER(domain_name) as d, ip_address FROM zdns_domain_map"
+            )).fetchall()
+            zdns_by_ip = {}
+            for z in zdns_all:
+                ip = (z.ip_address or "").strip()
+                if ip and ip not in zdns_by_ip:
+                    zdns_by_ip[ip] = z.d
+
+            # 为每个 VM 的 IP 查找对应域名，匹配 InfoSystem
+            for v in vm_rows:
+                if not v.ip_address:
+                    continue
+                vm_ips = [ip.strip() for ip in v.ip_address.split(",") if ip.strip()]
+                for ip in vm_ips:
+                    domain = zdns_by_ip.get(ip)
+                    if not domain:
+                        continue
+                    # 查找域名匹配的信息系统（管理员为空时更新）
+                    updated = db.execute(text(
+                        "UPDATE info_systems SET manager_name = :name, manager_gh = :gh "
+                        "WHERE (manager_gh IS NULL OR manager_gh = '') "
+                        "AND (LOWER(domain) LIKE :d1 OR LOWER(domain) LIKE :d2 OR LOWER(domain) = :d3)"
+                    ), {
+                        "name": v.owner_name, "gh": v.owner_gh,
+                        "d1": f"%{domain}%", "d2": f"%{domain},%", "d3": domain,
+                    }).rowcount
+                    is_manager_synced += updated
+        if is_manager_synced > 0:
+            db.commit()
+    except Exception:
+        db.rollback()
+
     ai_after = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
     unlinked = db.execute(text(
         "SELECT COUNT(*) FROM asset_inventory WHERE claim_status = 'unlinked'"
@@ -258,11 +302,14 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
         msg_parts.append(f"域名同步 {domain_count} 条")
     if is_synced:
         msg_parts.append(f"信息系统域名同步 {is_synced} 条")
+    if is_manager_synced:
+        msg_parts.append(f"管理员关联 {is_manager_synced} 条")
     msg_parts.append(f"共 {ai_after} 个（{unlinked} 个未关联）")
     return {
         "message": "，".join(msg_parts),
         "new": new_count, "stale": stale_count,
         "domain_claimed": domain_count, "is_synced": is_synced,
+        "is_manager_synced": is_manager_synced,
         "total": ai_after, "unlinked": unlinked,
     }
 

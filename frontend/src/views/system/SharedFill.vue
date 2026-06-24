@@ -317,16 +317,23 @@ async function loadData(pwd = '') {
 async function verifyPwd() { verifying.value = true; await loadData(password.value); verifying.value = false }
 
 async function handleSave() {
-  if (!form.company_name) { ElMessage.warning('请输入单位名称'); return }
+  // 根据类型校验必填字段
+  if (targetType.value === 'info_system') {
+    if (!form.system_name || !form.system_name.trim()) { ElMessage.warning('请输入系统名称'); return }
+  } else {
+    if (!form.company_name) { ElMessage.warning('请输入单位名称'); return }
+  }
   saving.value = true
   try {
-    // 合并地址和复选框数据
-    form.address = addressArr.value.length > 0 ? addressArr.value.join(',') : (form.address || '')
-    form.industry = industryArr.value.join(',')
-    form.service_type = serviceTypeArr.value.join(',')
-    form.data_location = dataLocationArr.value.join(',')
-    form.data_storage = dataStorageArr.value.join(',')
-    form.db_type = dbTypeArr.value.join(',')
+    // 供应链：合并复选框数据
+    if (targetType.value !== 'info_system') {
+      form.address = addressArr.value.length > 0 ? addressArr.value.join(',') : (form.address || '')
+      form.industry = industryArr.value.join(',')
+      form.service_type = serviceTypeArr.value.join(',')
+      form.data_location = dataLocationArr.value.join(',')
+      form.data_storage = dataStorageArr.value.join(',')
+      form.db_type = dbTypeArr.value.join(',')
+    }
     const params = {}
     if (info.value.has_password || password.value) params.password = password.value
     await api.post(`/shared-links/shared/${token}`, form, { params })
