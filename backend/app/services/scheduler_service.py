@@ -268,48 +268,56 @@ def _asset_sync_job():
                         "ip1": f"{ip},%", "ip2": f"%,{ip}", "ip3": ip})
         except Exception:
             pass
-        db.commit()
-        # 更新扫描日志为成功
-        now_end = datetime.now(tz8).replace(tzinfo=None)
-        scan_log.status = ScanStatus.success
-        scan_log.hosts_found = r.rowcount + vs.rowcount + d.rowcount + dc.rowcount
-        scan_log.completed_at = now_end
-        scan_log.duration_seconds = round((now_end - now8).total_seconds(), 1) if now8 else None
         # 数据关联：有管理员的VM → 回写信息系统管理员
+        mgr_synced = 0
         try:
             vm_rows = db.execute(text(
                 "SELECT v.ip_address, u.name as owner_name, u.gh as owner_gh "
                 "FROM vm_inventory v JOIN users u ON v.owner_user_id = u.id "
                 "WHERE v.owner_user_id IS NOT NULL"
             )).fetchall()
-            zdns_all = db.execute(text("SELECT LOWER(domain_name) as d, ip_address FROM zdns_domain_map")).fetchall()
-            zdns_by_ip = {}
-            for z in zdns_all:
-                ip = (z.ip_address or "").strip()
-                if ip and ip not in zdns_by_ip:
-                    zdns_by_ip[ip] = z.d
-            for v in vm_rows:
-                if not v.ip_address: continue
-                for ip in [x.strip() for x in v.ip_address.split(",") if x.strip()]:
-                    domain = zdns_by_ip.get(ip)
-                    if domain:
-                        db.execute(text(
-                            "UPDATE info_systems SET manager_name=:name, manager_gh=:gh "
-                            "WHERE (manager_gh IS NULL OR manager_gh='') "
-                            "AND (LOWER(domain) LIKE :d1 OR LOWER(domain) LIKE :d2 OR LOWER(domain)=:d3)"
-                        ), {"name": v.owner_name, "gh": v.owner_gh,
-                            "d1": f"%{domain}%", "d2": f"%{domain},%", "d3": domain})
-        except Exception:
-            pass
+            if vm_rows:
+                zdns_all = db.execute(text(
+                    "SELECT LOWER(domain_name) as d, ip_address FROM zdns_domain_map"
+                )).fetchall()
+                zdns_by_ip = {}
+                for z in zdns_all:
+                    ip = (z.ip_address or "").strip()
+                    if ip and ip not in zdns_by_ip:
+                        zdns_by_ip[ip] = z.d
+                for v in vm_rows:
+                    if not v.ip_address: continue
+                    for ip in [x.strip() for x in v.ip_address.split(",") if x.strip()]:
+                        domain = zdns_by_ip.get(ip)
+                        if domain:
+                            upd = db.execute(text(
+                                "UPDATE info_systems SET manager_name=:name, manager_gh=:gh "
+                                "WHERE (manager_gh IS NULL OR manager_gh='') "
+                                "AND (LOWER(domain) LIKE :d1 OR LOWER(domain) LIKE :d2 OR LOWER(domain)=:d3)"
+                            ), {"name": v.owner_name, "gh": v.owner_gh,
+                                "d1": f"%{domain}%", "d2": f"%{domain},%", "d3": domain})
+                            mgr_synced += upd.rowcount
+        except Exception as e:
+            logger.warning(f"管理员关联失败: {e}")
         db.commit()
-        if r.rowcount > 0:
-            logger.info(f"资产同步：新增 {r.rowcount} 个 VM")
-        if vs.rowcount > 0:
-            logger.info(f"资产同步：清理 {vs.rowcount} 条过期VM")
-        if d.rowcount > 0:
-            logger.info(f"资产同步：清理 {d.rowcount} 条僵尸记录")
-        if dc.rowcount > 0:
-            logger.info(f"资产同步：域名认领 {dc.rowcount} 条")
+        # 更新扫描日志为成功
+        now_end = datetime.now(tz8).replace(tzinfo=None)
+        scan_log.status = ScanStatus.success
+        scan_log.hosts_found = getattr(r, 'rowcount', 0) + getattr(vs, 'rowcount', 0) + getattr(d, 'rowcount', 0) + getattr(dc, 'rowcount', 0) + mgr_synced
+        scan_log.completed_at = now_end
+        scan_log.duration_seconds = round((now_end - now8).total_seconds(), 1) if now8 else None
+        db.commit()
+        rc = getattr(r, 'rowcount', 0)
+        if rc > 0:
+            logger.info(f"资产同步：新增 {rc} 个 VM")
+        if getattr(vs, 'rowcount', 0) > 0:
+            logger.info(f"资产同步：清理 {getattr(vs, 'rowcount', 0)} 条过期VM")
+        if getattr(d, 'rowcount', 0) > 0:
+            logger.info(f"资产同步：清理 {getattr(d, 'rowcount', 0)} 条僵尸记录")
+        if getattr(dc, 'rowcount', 0) > 0:
+            logger.info(f"资产同步：域名认领 {getattr(dc, 'rowcount', 0)} 条")
+        if mgr_synced > 0:
+            logger.info(f"资产同步：管理员关联 {mgr_synced} 条")
     except Exception as e:
         logger.error(f"资产同步失败：{e}")
         db.rollback()

@@ -46,7 +46,8 @@ def list_logs(
     items = q.offset((page - 1) * size).limit(size).all()
     return {"items": [{
         "id": r.id, "username": r.username, "ip_address": r.ip_address,
-        "method": r.method, "api_path": r.api_path, "status_code": r.status_code,
+        "method": r.method, "api_path": r.api_path,
+        "function_name": r.function_name or r.api_path, "status_code": r.status_code,
         "duration_ms": r.duration_ms, "detail": r.detail,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     } for r in items], "total": total}

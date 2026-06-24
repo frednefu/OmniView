@@ -24,7 +24,8 @@
       <el-table-column prop="method" label="方式" width="70" sortable="custom">
         <template #default="{row}"><el-tag :type="methodTag(row.method)" size="small">{{ row.method }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="api_path" label="操作路径" min-width="200" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="function_name" label="系统功能" min-width="200" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="api_path" label="API路径" min-width="180" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="detail" label="操作描述" min-width="140" show-overflow-tooltip />
       <el-table-column prop="status_code" label="状态码" width="80" sortable="custom">
         <template #default="{row}">

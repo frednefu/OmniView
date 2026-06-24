@@ -110,5 +110,7 @@ class IcpRecord(Base):
     record_date = Column(Date, nullable=True, comment="备案日期")
     remark = Column(Text, nullable=True)
     created_by = Column(Integer, nullable=True, comment="创建人ID")
+    claimed_by = Column(Integer, nullable=True, comment="认领人ID")
+    claimed_at = Column(DateTime, nullable=True, comment="认领时间")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

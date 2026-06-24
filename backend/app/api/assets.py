@@ -152,6 +152,14 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
 
     还清理 asset_inventory 中在 vm_inventory 已不存在的僵尸记录。
     """
+    from app.models.scan_log import ScanLog as SL, ScanStatus as SST, TriggerType as TT
+    from datetime import datetime as dt, timezone as tz, timedelta as td
+    tz8 = tz(td(hours=8))
+    now_start = dt.now(tz8).replace(tzinfo=None)
+    sl = SL(source_type="asset_sync", source_name="资产同步",
+            triggered_by=TT.manual, status=SST.running, started_at=now_start)
+    db.add(sl); db.commit(); db.refresh(sl)
+
     vi_total = db.execute(text("SELECT COUNT(*) FROM vm_inventory")).scalar() or 0
     ai_before = db.execute(text("SELECT COUNT(*) FROM asset_inventory")).scalar() or 0
 
@@ -305,6 +313,15 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
     if is_manager_synced:
         msg_parts.append(f"管理员关联 {is_manager_synced} 条")
     msg_parts.append(f"共 {ai_after} 个（{unlinked} 个未关联）")
+
+    # 标记扫描日志成功
+    now_end = dt.now(tz8).replace(tzinfo=None)
+    sl.status = SST.success
+    sl.hosts_found = new_count + stale_count + domain_count + is_synced + is_manager_synced
+    sl.completed_at = now_end
+    sl.duration_seconds = round((now_end - now_start).total_seconds(), 1)
+    db.commit()
+
     return {
         "message": "，".join(msg_parts),
         "new": new_count, "stale": stale_count,
