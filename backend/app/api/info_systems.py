@@ -242,12 +242,16 @@ def register_staff(body: dict, db: Session = Depends(get_db), _=Depends(require_
 
 # ── InfoSystem CRUD ──
 
+_IS_SORTABLE = {"system_name","system_type","sub_type","ip_address","domain","entry_url",
+    "manager_name","owner_name","fill_type","url_status","remark","belong_dept_name"}
+
 @router.get("")
 def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
                  search: str = Query(""), fill_type: str = Query(""),
                  system_type: str = Query(""), sub_type: str = Query(""),
                  manager_name: str = Query(""), owner_name: str = Query(""),
                  url_status: str = Query(""),
+                 sort_field: str = Query(""), sort_order: str = Query("desc"),
                  db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(InfoSystem)
     # 非管理员：本单位 + (自己是管理员 或 未分配管理员)
@@ -273,7 +277,16 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
     if url_status:
         q = q.filter(InfoSystem.url_status == url_status)
     total = q.count()
-    items = q.order_by(InfoSystem.id).offset((page - 1) * size).limit(size).all()
+    # 排序：白名单字段 + 方向
+    if sort_field and sort_field in _IS_SORTABLE:
+        col = getattr(InfoSystem, sort_field, None)
+        if col is not None:
+            q = q.order_by(col.desc()) if sort_order == "desc" else q.order_by(col.asc())
+        else:
+            q = q.order_by(InfoSystem.id.desc())
+    else:
+        q = q.order_by(InfoSystem.id.desc())
+    items = q.offset((page - 1) * size).limit(size).all()
     # 批量查询部门名称
     dept_ids = {r.dept_id for r in items if r.dept_id}
     dept_map = {}
@@ -1168,16 +1181,24 @@ def get_djdj_image(rec_id: int, db: Session = Depends(get_db)):
     return FileResponse(filepath)
 
 
+_DJ_SORTABLE = {"record_no","system_name","org_name","eval_org","level","record_date"}
+
 @router.get("/djdj")
 def list_djdj(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-              search: str = Query(""), db: Session = Depends(get_db), user=Depends(get_current_user)):
+              search: str = Query(""), sort_field: str = Query(""), sort_order: str = Query("desc"),
+              db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(DjDjRecord)
     if not _is_admin(user):
         q = q.filter((DjDjRecord.claimed_by == user.id) | (DjDjRecord.claimed_by == None))
     if search:
         q = q.filter(DjDjRecord.system_name.like(f"%{search}%") | DjDjRecord.record_no.like(f"%{search}%"))
     total = q.count()
-    items = q.order_by(DjDjRecord.id).offset((page - 1) * size).limit(size).all()
+    if sort_field and sort_field in _DJ_SORTABLE:
+        col = getattr(DjDjRecord, sort_field, None)
+        q = q.order_by(col.desc()) if sort_order == "desc" and col else q.order_by(col.asc()) if col else q.order_by(DjDjRecord.id.desc())
+    else:
+        q = q.order_by(DjDjRecord.id.desc())
+    items = q.offset((page - 1) * size).limit(size).all()
     result = []
     for r in items:
         d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
@@ -1330,16 +1351,24 @@ def export_djdj(db: Session = Depends(get_db), _=Depends(require_admin)):
 
 # ── ICP记录 CRUD ──
 
+_ICP_SORTABLE = {"icp_no","org_name","domain","record_date"}
+
 @router.get("/icp")
 def list_icp(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-             search: str = Query(""), db: Session = Depends(get_db), user=Depends(get_current_user)):
+             search: str = Query(""), sort_field: str = Query(""), sort_order: str = Query("desc"),
+             db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(IcpRecord)
     if not _is_admin(user):
         q = q.filter((IcpRecord.claimed_by == user.id) | (IcpRecord.claimed_by == None))
     if search:
         q = q.filter(IcpRecord.icp_no.like(f"%{search}%") | IcpRecord.org_name.like(f"%{search}%"))
     total = q.count()
-    items = q.order_by(IcpRecord.id).offset((page - 1) * size).limit(size).all()
+    if sort_field and sort_field in _ICP_SORTABLE:
+        col = getattr(IcpRecord, sort_field, None)
+        q = q.order_by(col.desc()) if sort_order == "desc" and col else q.order_by(col.asc()) if col else q.order_by(IcpRecord.id.desc())
+    else:
+        q = q.order_by(IcpRecord.id.desc())
+    items = q.offset((page - 1) * size).limit(size).all()
     return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
 
 @router.post("/icp")
@@ -1481,16 +1510,24 @@ def search_djdj(q: str = Query(""), db: Session = Depends(get_db), _=Depends(get
 
 # ── 供应链 CRUD ──
 
+_SC_SORTABLE = {"company_name","credit_code","company_type","importance","security_contact","security_phone"}
+
 @router.get("/supply-chain")
 def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
-                      search: str = Query(""), db: Session = Depends(get_db), user=Depends(get_current_user)):
+                      search: str = Query(""), sort_field: str = Query(""), sort_order: str = Query("desc"),
+                      db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(SupplyChain)
     if not _is_admin(user):
         q = q.filter((SupplyChain.claimed_by == user.id) | (SupplyChain.claimed_by == None))
     if search:
         q = q.filter(SupplyChain.company_name.contains(search))
     total = q.count()
-    items = q.order_by(SupplyChain.id).offset((page - 1) * size).limit(size).all()
+    if sort_field and sort_field in _SC_SORTABLE:
+        col = getattr(SupplyChain, sort_field, None)
+        q = q.order_by(col.desc()) if sort_order == "desc" and col else q.order_by(col.asc()) if col else q.order_by(SupplyChain.id.desc())
+    else:
+        q = q.order_by(SupplyChain.id.desc())
+    items = q.offset((page - 1) * size).limit(size).all()
     return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
 
 @router.post("/supply-chain")

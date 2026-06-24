@@ -249,7 +249,7 @@
                 <el-table-column prop="ip_address" label="IP地址" width="130" show-overflow-tooltip />
                 <el-table-column prop="domain" label="域名" min-width="150" show-overflow-tooltip />
                 <el-table-column prop="manager_name" label="管理员" width="80" />
-                <el-table-column prop="owner_name" label="管理员" width="80" />
+                <el-table-column prop="owner_name" label="负责人" width="80" />
                 <el-table-column prop="fill_type" label="填报状态" width="90">
                   <template #default="{row}"><el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':''" size="small">{{ row.fill_type||'手动' }}</el-tag></template>
                 </el-table-column>

@@ -35,7 +35,7 @@
       <el-button v-if="selectedIds.length>0" type="success" size="small" @click="handleBatchClaim">批量认领 ({{selectedIds.length}})</el-button>
       <el-button v-if="selectedIds.length>0" type="warning" size="small" @click="handleBatchRevoke">批量撤销 ({{selectedIds.length}})</el-button>
     </div>
-    <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" :default-sort="{prop:'id',order:'descending'}">
+    <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @sort-change="onSort" :default-sort="{prop:'id',order:'descending'}">
       <el-table-column type="selection" width="40" />
       <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip sortable/>
       <el-table-column prop="system_type" label="资产类型" width="120" sortable/>
@@ -323,6 +323,8 @@ const authStore=useAuthStore()
 const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
 const filterSysType=ref(''),filterSubType=ref(''),filterManager=ref(''),filterOwner=ref(''),filterFillType=ref(''),filterUrlStatus=ref('')
 const selectedIds=ref([]),dlg=ref(false),isEdit=ref(false),editId=ref(null),fileInput=ref(null),syncLoading=ref(false),saving=ref(false)
+const sortField=ref(''),sortOrder=ref('')
+function onSort({prop,order}){sortField.value=prop||'';sortOrder.value=order==='ascending'?'asc':'desc';page.value=1;fetchList()}
 const djdjSearching=ref(false),djdjOptions=ref([]),vendorNames=ref([]),deptOptions=ref([])
 // 导入相关
 const importDlg=ref(false),importing=ref(false),importFile=ref(null),importMode=ref('supplement'),importResult=ref(null)
@@ -387,7 +389,7 @@ function resetForm(){
   djdjOptions.value=[]
 }
 
-async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems',{params:{page:page.value,size:size.value,search:search.value,system_type:filterSysType.value,sub_type:filterSubType.value,manager_name:filterManager.value,owner_name:filterOwner.value,fill_type:filterFillType.value,url_status:filterUrlStatus.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
+async function fetchList(){loading.value=true;try{const p={page:page.value,size:size.value,search:search.value,system_type:filterSysType.value,sub_type:filterSubType.value,manager_name:filterManager.value,owner_name:filterOwner.value,fill_type:filterFillType.value,url_status:filterUrlStatus.value};if(sortField.value){p.sort_field=sortField.value;p.sort_order=sortOrder.value}const r=await api.get('/info-systems',{params:p});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
 function openEdit(r){
   resetForm()  // 先清空所有字段，防止上次编辑/新建的残留数据泄漏
