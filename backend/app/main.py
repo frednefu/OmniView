@@ -1,6 +1,23 @@
 import os
 import time
+import logging.config
 from contextlib import asynccontextmanager
+
+# 配置 uvicorn 日志格式（仅在 worker 子进程生效，避免 reloader 父进程重复输出）
+logging.config.dictConfig({
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {"format": "%(asctime)s %(levelname)s: %(message)s", "datefmt": "%Y-%m-%d %H:%M:%S"}
+    },
+    "handlers": {
+        "default": {"class": "logging.StreamHandler", "formatter": "default", "stream": "ext://sys.stdout"}
+    },
+    "loggers": {
+        "uvicorn.access": {"level": "INFO", "handlers": ["default"], "propagate": False},
+        "uvicorn.error": {"level": "INFO", "handlers": ["default"], "propagate": False},
+    }
+})
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
