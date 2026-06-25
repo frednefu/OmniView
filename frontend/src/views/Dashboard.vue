@@ -10,7 +10,54 @@
       </el-button>
     </div>
 
-    <!-- ═══════════ 统计卡片 ═══════════ -->
+    <!-- ═══════════ 普通用户：个人统计卡片 ═══════════ -->
+    <template v-if="!authStore.isAdmin">
+      <el-row :gutter="16" class="stat-row">
+        <el-col :span="6">
+          <div class="stat-card" @click="go('/sys/assets')">
+            <div class="stat-icon" style="background:linear-gradient(135deg,#6366f1,#818cf8)"><el-icon :size="22"><Monitor /></el-icon></div>
+            <div class="stat-info"><div class="stat-value">{{ personal.my_vms }}</div><div class="stat-title">我的虚拟机</div></div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-card" @click="go('/sys/assets')">
+            <div class="stat-icon" style="background:linear-gradient(135deg,#10b981,#34d399)"><el-icon :size="22"><Connection /></el-icon></div>
+            <div class="stat-info"><div class="stat-value">{{ personal.my_domains }}</div><div class="stat-title">我的域名</div></div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-card" @click="go('/sys/info-systems')">
+            <div class="stat-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)"><el-icon :size="22"><Discount /></el-icon></div>
+            <div class="stat-info"><div class="stat-value">{{ personal.my_systems }}</div><div class="stat-title">我的信息系统</div></div>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="stat-card" @click="go('/subnets')">
+            <div class="stat-icon" style="background:linear-gradient(135deg,#ef4444,#f87171)"><el-icon :size="22"><Grid /></el-icon></div>
+            <div class="stat-info"><div class="stat-value">{{ personal.my_subnets }}</div><div class="stat-title">我的地址段</div></div>
+          </div>
+        </el-col>
+      </el-row>
+      <!-- 个人子网 IP 利用率 -->
+      <el-card shadow="hover" class="chart-card" style="margin-top:16px">
+        <template #header>我的地址段 IP 利用率</template>
+        <div v-if="personal.subnet_utilization && personal.subnet_utilization.length>0" ref="personalBarRef" class="chart-container"></div>
+        <el-empty v-else description="暂无地址段数据" />
+      </el-card>
+      <!-- 已占用 IP 对话框 -->
+      <el-dialog v-model="personalOccupiedVisible" :title="'已占用 IP - '+personalOccupiedCidr" width="800px">
+        <el-table :data="personalOccupiedData" v-loading="personalOccupiedLoading" stripe size="small" max-height="400">
+          <el-table-column prop="ip" label="IP 地址" width="160" />
+          <el-table-column prop="mac" label="MAC 地址" width="160" />
+          <el-table-column prop="vm_name" label="关联 VM" min-width="140" />
+          <el-table-column prop="domain" label="关联域名" min-width="160" />
+        </el-table>
+        <el-pagination v-if="personalOccupiedTotal>20" v-model:current-page="personalOccupiedPage" :page-size="20" :total="personalOccupiedTotal" layout="prev,pager,next" small @current-change="(p)=>{personalOccupiedPage=p;fetchPersonalOccupiedIps()}" style="margin-top:10px;justify-content:center"/>
+      </el-dialog>
+    </template>
+
+    <!-- ═══════════ 管理员：统计卡片 ═══════════ -->
+    <template v-else>
     <el-row :gutter="16" class="stat-row">
       <el-col :span="6">
         <div class="stat-card" @click="go('/switches')">
@@ -419,14 +466,18 @@
         />
       </div>
     </el-dialog>
+  </template>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/store/auth'
 import * as echarts from 'echarts'
 import api from '@/api'
+
+const authStore = useAuthStore()
 
 const router = useRouter()
 
@@ -441,6 +492,12 @@ const stats = reactive({
   scan_by_source: [],
   last_scan_total: 0, last_scan_success: 0, last_scan_failed: 0,
 })
+const personal = reactive({ my_vms: 0, my_domains: 0, my_systems: 0, my_subnets: 0, subnet_utilization: [] })
+const personalBarRef = ref(null)
+const personalOccupiedVisible = ref(false), personalOccupiedLoading = ref(false)
+const personalOccupiedCidr = ref(''), personalOccupiedData = ref([])
+const personalOccupiedTotal = ref(0), personalOccupiedPage = ref(1)
+let personalOccupiedSubnetId = null
 
 const subnets = ref([])
 const selectedSubnetId = ref(null)
@@ -570,7 +627,7 @@ async function fetchVMs() {
 }
 
 // ── 图表实例 ──
-let vmDonutChart, dnsPieChart, f5DonutChart, scanBarChart, subnetBarChart, vcResourceChart
+let vmDonutChart, dnsPieChart, f5DonutChart, scanBarChart, subnetBarChart, vcResourceChart, personalBarChart
 let qaxOSChart, vcOSChart, vcCpuChart, vcMemChart, esxiCpuChart, dsStorageChart
 
 function go(path) {
@@ -629,9 +686,67 @@ async function fetchIpMacList() {
   finally { loadingIpMac.value = false }
 }
 
+async function fetchPersonal() {
+  try {
+    const { data } = await api.get('/dashboard/personal')
+    personal.my_vms = data.my_vms; personal.my_domains = data.my_domains
+    personal.my_systems = data.my_systems; personal.my_subnets = data.my_subnets
+    personal.subnet_utilization = data.subnet_utilization || []
+    nextTick(() => renderPersonalBar())
+  } catch {}
+}
+function renderPersonalBar() {
+  const el = personalBarRef.value; if (!el) return
+  const data = personal.subnet_utilization; if (!data.length) return
+  if (!personalBarChart) personalBarChart = echarts.init(el)
+  personalBarChart.off('click')
+  personalBarChart.on('click', (params) => {
+    if (params.componentType === 'series') {
+      const item = data[params.dataIndex]
+      if (item) {
+        personalOccupiedSubnetId = item.subnet_id
+        personalOccupiedCidr.value = item.subnet_cidr
+        personalOccupiedPage.value = 1
+        fetchPersonalOccupiedIps()
+        personalOccupiedVisible.value = true
+      }
+    }
+  })
+  const names = data.map(d => (d.name||d.subnet_cidr||'')+'\n'+d.subnet_cidr)
+  const used = data.map(d => d.used_ips)
+  const free = data.map(d => d.free_ips)
+  personalBarChart.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: function(params) {
+        const el = data[params[0].dataIndex]
+        return '<b>'+el.name+'</b> ('+el.subnet_cidr+')<br/>已用: <b style=\"color:#ef4444\">'+el.used_ips+'</b> | 可用: <b style=\"color:#10b981\">'+el.free_ips+'</b> | 总计: '+el.total_ips+'<br/>利用率: '+el.utilization_pct+'%<br/><span style=\"color:#94a3b8;font-size:11px\">点击查看已占用 IP</span>'
+      }
+    },
+    legend: { data: ['已用','可用'], itemWidth: 12, itemHeight: 12, itemGap: 20, textStyle: { color: '#64748b', fontSize: 13 }, bottom: 0 },
+    grid: { left: '3%', right: '4%', top: '3%', bottom: '12%', containLabel: true },
+    xAxis: { type: 'category', data: names, axisLabel: { interval: 0, rotate: 30, fontSize: 11, color: '#64748b' }, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e2e8f0' } } },
+    yAxis: { type: 'value', name: 'IP 数量', nameTextStyle: { color: '#94a3b8', fontSize: 12 }, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
+    series: [
+      { name: '已用', type: 'bar', stack: 'total', data: used, barWidth: 28, itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#f87171'},{offset:1,color:'#ef4444'}]) } },
+      { name: '可用', type: 'bar', stack: 'total', data: free, barWidth: 28, itemStyle: { borderRadius: [6,6,0,0], color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#34d399'},{offset:1,color:'#10b981'}]) } },
+    ]
+  }, { notMerge: true })
+}
+async function fetchPersonalOccupiedIps() {
+  personalOccupiedLoading.value = true
+  try {
+    const { data } = await api.get('/dashboard/subnet-occupied-ips', {
+      params: { subnet_id: personalOccupiedSubnetId, page: personalOccupiedPage.value, size: 20 }
+    })
+    personalOccupiedData.value = data.occupied; personalOccupiedTotal.value = data.total
+  } catch {} finally { personalOccupiedLoading.value = false }
+}
+
 async function refreshAll() {
   refreshing.value = true
-  await Promise.all([fetchStats(), fetchUtilization()])
+  const tasks = [fetchStats(), fetchUtilization()]
+  if (!authStore.isAdmin) tasks.push(fetchPersonal())
+  await Promise.all(tasks)
   refreshing.value = false
 }
 
@@ -935,6 +1050,7 @@ function disposeCharts() {
   f5DonutChart?.dispose()
   scanBarChart?.dispose()
   subnetBarChart?.dispose()
+  personalBarChart?.dispose()
   vcResourceChart?.dispose()
   qaxOSChart?.dispose()
   vcOSChart?.dispose()
@@ -945,8 +1061,8 @@ function disposeCharts() {
 }
 
 onMounted(() => {
-  fetchStats()
-  fetchUtilization()
+  if (authStore.isAdmin) { fetchStats(); fetchUtilization() }
+  else { fetchPersonal() }
 })
 
 onBeforeUnmount(() => {

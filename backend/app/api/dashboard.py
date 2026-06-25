@@ -17,6 +17,8 @@ from app.models.zdns import ZDNSDevice, ZDNSRecord, ZDNSDomainMap
 from app.models.qax import QianXinDevice, QianXinServer
 from app.models.scan_log import ScanLog, ScanStatus
 from app.models.history import History
+from app.models.info_system import InfoSystem
+from sqlalchemy import text
 from app.schemas.subnet import (
     DashboardStats, AssetDashboardStats, VCenterStats, VCenterResourceStat,
     F5Stats, ZDNSStats, ZDNSRecordTypeStat, QAXStats,
@@ -493,6 +495,34 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
     )
     set_json("dashboard:stats", result.model_dump(), ttl=DASHBOARD_STATS_TTL)
     return result
+
+
+@router.get("/personal")
+def personal_dashboard(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """普通用户仪表盘：个人资产统计 + 子网利用率。"""
+    uid = current_user.id
+    user_gh = str(current_user.gh or uid)
+    # 认领的 VM 数
+    my_vms = db.execute(text(
+        "SELECT COUNT(*) FROM asset_inventory WHERE owner_user_id=:u"
+    ), {"u": uid}).scalar() or 0
+    # 关联域名数
+    my_domains = db.execute(text(
+        "SELECT COUNT(DISTINCT z.domain_name) FROM zdns_domain_map z "
+        "JOIN vm_inventory v ON (v.ip_address LIKE CONCAT('%,',z.ip_address) "
+        "OR v.ip_address LIKE CONCAT(z.ip_address,',%') OR v.ip_address=z.ip_address) "
+        "JOIN asset_inventory a ON v.vm_name=a.vm_name WHERE a.owner_user_id=:u"
+    ), {"u": uid}).scalar() or 0
+    # 管理的信息系统
+    my_systems = db.query(InfoSystem).filter(InfoSystem.manager_gh == user_gh).count()
+    # 个人子网
+    my_subnets = db.query(Subnet).filter(Subnet.created_by == uid).count()
+    # 子网利用率
+    return {
+        "my_vms": my_vms, "my_domains": my_domains, "my_systems": my_systems,
+        "my_subnets": my_subnets,
+        "subnet_utilization": [SubnetUtilization(**item) for item in get_subnet_utilization(db, uid, False)]
+    }
 
 
 @router.get("/subnet-utilization", response_model=list[SubnetUtilization])

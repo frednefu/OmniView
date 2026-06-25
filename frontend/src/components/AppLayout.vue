@@ -34,10 +34,9 @@
           </el-menu-item>
         </template>
         <template v-else>
-          <el-menu-item index="/dashboard" class="menu-item-wip" @click.prevent>
+          <el-menu-item index="/dashboard">
             <el-icon><HomeFilled /></el-icon>
             <span>仪表盘</span>
-            <el-tag size="small" type="info" class="menu-badge">待开发</el-tag>
           </el-menu-item>
         </template>
         <el-menu-item index="/asset-profile">
