@@ -318,6 +318,44 @@ def _asset_sync_job():
             logger.info(f"资产同步：域名认领 {getattr(dc, 'rowcount', 0)} 条")
         if mgr_synced > 0:
             logger.info(f"资产同步：管理员关联 {mgr_synced} 条")
+        # 同步 DomainInventory 物理表（不覆盖已有认领信息）
+        try:
+            from app.models.domain_inventory import DomainInventory
+            db.execute(text(
+                "INSERT IGNORE INTO domain_inventory (domain_name, record_type, ip_address, source) "
+                "SELECT domain_name, record_type, ip_address, 'ZDNS' FROM zdns_domain_map WHERE domain_name NOT LIKE '%.in-addr.arpa'"
+            )).rowcount
+            db.execute(text(
+                "UPDATE domain_inventory d JOIN zdns_domain_map z ON d.domain_name=z.domain_name "
+                "SET d.ip_address=z.ip_address, d.record_type=z.record_type"
+            ))
+            db.execute(text(
+                "UPDATE domain_inventory d JOIN (SELECT DISTINCT z.domain_name, a.owner_user_id, u.name as owner_name, a.department_id "
+                "FROM zdns_domain_map z JOIN vm_inventory v ON (v.ip_address LIKE CONCAT('%,',z.ip_address) OR v.ip_address LIKE CONCAT(z.ip_address,',%') OR v.ip_address=z.ip_address) "
+                "JOIN asset_inventory a ON v.vm_name=a.vm_name LEFT JOIN users u ON a.owner_user_id=u.id WHERE a.owner_user_id IS NOT NULL"
+                ") t ON d.domain_name=t.domain_name AND d.owner_user_id IS NULL "
+                "SET d.owner_user_id=t.owner_user_id, d.owner_name=t.owner_name, d.department_id=t.department_id, d.vm_name='', d.source_type='vm'"
+            )).rowcount
+            from app.models.info_system import InfoSystem
+            is_rows = db.query(InfoSystem).filter(InfoSystem.domain.isnot(None), InfoSystem.domain!="").all()
+            for s in is_rows:
+                for raw in [x.strip() for x in s.domain.split(",") if x.strip()]:
+                    dom = raw.lower()
+                    for p in ("https://","http://"):
+                        if dom.startswith(p): dom = dom[len(p):]
+                    dom = dom.split("/")[0].split(":")[0]
+                    if not dom: continue
+                    db.execute(text(
+                        "UPDATE domain_inventory SET owner_name=COALESCE(NULLIF(owner_name,''),:o), department_id=COALESCE(department_id,:d), vm_name=COALESCE(NULLIF(vm_name,''),:v), source_type=COALESCE(NULLIF(source_type,''),'is') "
+                        "WHERE domain_name=:dn AND (owner_user_id IS NULL OR department_id IS NULL)"
+                    ), {"o":s.manager_name or "","d":s.dept_id,"v":s.system_name,"dn":dom})
+            db.execute(text(
+                "DELETE FROM domain_inventory WHERE source='ZDNS' AND domain_name NOT IN (SELECT domain_name FROM zdns_domain_map)"
+            ))
+            db.commit()
+            logger.info("资产同步：DomainInventory 已更新")
+        except Exception as e:
+            logger.warning(f"DomainInventory 同步失败: {e}")
     except Exception as e:
         logger.error(f"资产同步失败：{e}")
         db.rollback()

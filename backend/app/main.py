@@ -128,6 +128,13 @@ async def lifespan(app: FastAPI):
         pass
     _migrate_columns("operation_logs", [("function_name", "VARCHAR(256)")])
     _migrate_columns("subnets", [("created_by", "INTEGER")])
+    _migrate_columns("zdns_domain_map", [
+        ("owner_user_id", "INTEGER"), ("department_id", "INTEGER"), ("owner_name", "VARCHAR(128)")
+    ])
+    try:
+        Base.metadata.create_all(bind=engine, tables=[DomainInventory.__table__])
+    except Exception:
+        pass
     # 去掉 subnet_cidr 全局唯一约束，改为 (cidr+created_by) 组合
     try:
         with engine.connect() as conn:

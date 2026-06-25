@@ -21,5 +21,6 @@ from app.models.dingjia import DingJiaDevice, DingJiaBackupRecord
 from app.models.info_system import InfoSystem, DjDjRecord, IcpRecord, SupplyChain
 from app.models.shared_link import SharedLink
 from app.models.operation_log import OperationLog
+from app.models.domain_inventory import DomainInventory
 
 __all__ = ["User", "Switch", "ScanResult", "RouteTable", "ScanLog", "ScanStep", "Subnet", "History", "VCenter", "VMInventory", "EsxiHost", "Datastore", "F5Device", "F5VirtualServer", "F5PoolMember", "F5Rule", "F5ApplicationMap", "ZDNSDevice", "ZDNSRecord", "ZDNSDomainMap", "QianXinDevice", "QianXinServer", "QianXinPort", "QianXinProcess", "QianXinSoftware", "ScanWorker", "Department", "StaffInfo", "ApiConfig", "AssetInventory", "DingJiaDevice", "DingJiaBackupRecord", "InfoSystem", "DjDjRecord", "IcpRecord", "SupplyChain", "SharedLink", "OperationLog"]

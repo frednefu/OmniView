@@ -48,21 +48,25 @@ def _should_skip_domain(name: str) -> bool:
 
 
 def _collect_domains(db: Session, linked_ips: set = None) -> list[dict]:
-    """收集 ZDNS + F5 域名，去重合并，排除反向解析。"""
+    """从 domain_inventory 物理表收集域名。"""
     seen = {}
-    zdns_rows = db.execute(text(
-        "SELECT domain_name, record_type, ip_address FROM zdns_domain_map"
+    rows = db.execute(text(
+        "SELECT domain_name, record_type, ip_address, source, owner_user_id, department_id, owner_name, source_type, vm_name FROM domain_inventory"
     )).fetchall()
-    for r in zdns_rows:
+    for r in rows:
         name = (r.domain_name or "").strip()
-        if _should_skip_domain(name):
-            continue
-        if linked_ips is not None and (r.ip_address or "").strip() in linked_ips:
-            continue
+        if _should_skip_domain(name): continue
+        if linked_ips is not None:
+            if (r.ip_address or "").strip() in linked_ips: continue
+            if r.owner_user_id or r.department_id: continue
         key = name.lower()
         if key not in seen:
             seen[key] = {"domain_name": name, "record_type": r.record_type,
-                         "ip_address": r.ip_address, "source": "ZDNS", "vm_name": None, "vm_id": None, "source_type": ""}
+                         "ip_address": r.ip_address, "source": r.source or "ZDNS",
+                         "vm_name": r.vm_name or None, "vm_id": None,
+                         "source_type": r.source_type or "",
+                         "owner_user_id": r.owner_user_id, "owner_name": r.owner_name or "",
+                         "department_id": r.department_id}
     return list(seen.values())
 
 
@@ -312,6 +316,100 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
         msg_parts.append(f"信息系统域名同步 {is_synced} 条")
     if is_manager_synced:
         msg_parts.append(f"管理员关联 {is_manager_synced} 条")
+    # 物理同步：域名表写入认领信息
+    domain_phy = 0
+    try:
+        # 从 VM 写入域名认领
+        d1 = db.execute(text(
+            "UPDATE zdns_domain_map z JOIN ("
+            "SELECT DISTINCT z2.id, a.owner_user_id, u.name as owner_name, a.department_id "
+            "FROM zdns_domain_map z2 "
+            "JOIN vm_inventory v ON (v.ip_address LIKE CONCAT('%,',z2.ip_address) OR v.ip_address LIKE CONCAT(z2.ip_address,',%') OR v.ip_address=z2.ip_address) "
+            "JOIN asset_inventory a ON v.vm_name=a.vm_name "
+            "LEFT JOIN users u ON a.owner_user_id=u.id "
+            "WHERE a.owner_user_id IS NOT NULL"
+            ") t ON z.id=t.id "
+            "SET z.owner_user_id=t.owner_user_id, z.owner_name=t.owner_name, z.department_id=t.department_id"
+        )).rowcount
+        # 从 IS 写入域名认领
+        d2 = db.execute(text(
+            "UPDATE zdns_domain_map z JOIN ("
+            "SELECT DISTINCT z2.id, s.manager_name as owner_name, s.dept_id "
+            "FROM zdns_domain_map z2 JOIN info_systems s ON LOWER(z2.domain_name) IN ("
+            "  SELECT TRIM(LOWER(SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(domain,',',n),',',-1),'/',1))) AS d "
+            "  FROM info_systems CROSS JOIN (SELECT 1 n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) nums "
+            "  WHERE domain IS NOT NULL"
+            ") "
+            "WHERE s.manager_name IS NOT NULL AND s.manager_name!=''"
+            ") t ON z.id=t.id "
+            "SET z.owner_name=COALESCE(z.owner_name,t.owner_name), z.department_id=COALESCE(z.department_id,t.dept_id)"
+        )).rowcount
+        domain_phy = d1 + d2
+        if domain_phy > 0:
+            db.commit()
+    except Exception:
+        pass
+    if domain_phy:
+        msg_parts.append(f"域名认领物理写入 {domain_phy} 条")
+    # 同步 ZDNS → DomainInventory（物理表，不覆盖已有的认领信息）
+    di_count = 0
+    try:
+        from app.models.domain_inventory import DomainInventory
+        # 1. 新增域名（不在物理表中的 ZDNS 域名）
+        di_count += db.execute(text(
+            "INSERT IGNORE INTO domain_inventory (domain_name, record_type, ip_address, source) "
+            "SELECT domain_name, record_type, ip_address, 'ZDNS' FROM zdns_domain_map "
+            "WHERE domain_name NOT LIKE '%.in-addr.arpa'"
+        )).rowcount
+        # 2. 更新 ip_address（ZDNS 扫描可能变化，但保留 owner/department）
+        db.execute(text(
+            "UPDATE domain_inventory d JOIN zdns_domain_map z ON d.domain_name=z.domain_name "
+            "SET d.ip_address=z.ip_address, d.record_type=z.record_type"
+        ))
+        db.commit()
+        # 3. VM 关联：IP→VM→owner→回写 domain_inventory（仅填写空的 owner）
+        db.execute(text(
+            "UPDATE domain_inventory d JOIN ("
+            "SELECT DISTINCT z.domain_name, a.owner_user_id, u.name as owner_name, a.department_id "
+            "FROM zdns_domain_map z "
+            "JOIN vm_inventory v ON (v.ip_address LIKE CONCAT('%,',z.ip_address) OR v.ip_address LIKE CONCAT(z.ip_address,',%') OR v.ip_address=z.ip_address) "
+            "JOIN asset_inventory a ON v.vm_name=a.vm_name "
+            "LEFT JOIN users u ON a.owner_user_id=u.id WHERE a.owner_user_id IS NOT NULL"
+            ") t ON d.domain_name=t.domain_name AND d.owner_user_id IS NULL "
+            "SET d.owner_user_id=t.owner_user_id, d.owner_name=t.owner_name, d.department_id=t.department_id, d.vm_name='', d.source_type='vm'"
+        )).rowcount
+        db.commit()
+        # 4. IS 关联：IS.domain→ZDNS→回写 domain_inventory（填写空的 owner 和 dept）
+        import re
+        is_rows = db.query(InfoSystem).filter(
+            InfoSystem.domain.isnot(None), InfoSystem.domain != "",
+        ).all()
+        for s in is_rows:
+            for raw in [x.strip() for x in s.domain.split(",") if x.strip()]:
+                dom = raw.lower()
+                for p in ("https://", "http://"):
+                    if dom.startswith(p): dom = dom[len(p):]
+                dom = dom.split("/")[0].split(":")[0]
+                if not dom: continue
+                db.execute(text(
+                    "UPDATE domain_inventory SET "
+                    "owner_name=COALESCE(NULLIF(owner_name,''),:o), "
+                    "department_id=COALESCE(department_id,:d), "
+                    "vm_name=COALESCE(NULLIF(vm_name,''),:v), "
+                    "source_type=COALESCE(NULLIF(source_type,''),'is') "
+                    "WHERE domain_name=:dn AND (owner_user_id IS NULL OR department_id IS NULL)"
+                ), {"o": s.manager_name or "", "d": s.dept_id, "v": s.system_name, "dn": dom})
+        db.commit()
+        # 5. 清理域名：不在 ZDNS 中的旧域名
+        db.execute(text(
+            "DELETE FROM domain_inventory WHERE source='ZDNS' AND domain_name NOT IN (SELECT domain_name FROM zdns_domain_map)"
+        ))
+        db.commit()
+        di_count = db.execute(text("SELECT COUNT(*) FROM domain_inventory")).scalar() or 0
+    except Exception:
+        pass
+    if di_count:
+        msg_parts.append(f"域名清单同步 {di_count} 条")
     msg_parts.append(f"共 {ai_after} 个（{unlinked} 个未关联）")
 
     # 标记扫描日志成功
@@ -324,9 +422,10 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
 
     return {
         "message": "，".join(msg_parts),
-        "new": new_count, "stale": stale_count,
+        "new": new_count, "stale": stale_count, "vm_stale": vm_stale_count,
         "domain_claimed": domain_count, "is_synced": is_synced,
         "is_manager_synced": is_manager_synced,
+        "di_count": di_count,
         "total": ai_after, "unlinked": unlinked,
     }
 
@@ -389,6 +488,58 @@ def batch_cancel(body: dict, db: Session = Depends(get_db), user=Depends(get_cur
         raise HTTPException(400, "不支持的类型")
     db.commit()
     return {"message": f"已申请注销 {count} 条"}
+
+
+@router.post("/domain-assign")
+def assign_domains_api(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+    """管理员指领域名 — 直接写物理认领字段。"""
+    names = body.get("domain_names", [])
+    dept_id = body.get("department_id")
+    user_id = body.get("user_id")
+    user_name = body.get("user_name", "")
+    if not names: raise HTTPException(400, "请选择域名")
+    count = 0
+    for name in names:
+        db.execute(text("UPDATE domain_inventory SET owner_user_id=:u,department_id=:d,owner_name=:o WHERE domain_name=:n"),
+                   {"u": user_id, "d": dept_id, "o": user_name or "", "n": name})
+        db.execute(text("UPDATE zdns_domain_map SET owner_user_id=:u,department_id=:d,owner_name=:o WHERE domain_name=:n"),
+                   {"u": user_id, "d": dept_id, "o": user_name or "", "n": name})
+        count += 1
+    db.commit()
+    return {"message": f"成功指派 {count} 个域名", "count": count}
+
+
+@router.post("/domain-claim")
+def claim_domains_api(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """认领域名 — 写入物理认领字段。"""
+    names = body.get("domain_names", [])
+    if not names: raise HTTPException(400, "请选择域名")
+    dept_id = getattr(user, 'department_id', None)
+    count = 0
+    for name in names:
+        db.execute(text("UPDATE domain_inventory SET owner_user_id=:u,department_id=:d,owner_name=:o WHERE domain_name=:n"),
+                   {"u": user.id, "d": dept_id, "o": user.name or user.username, "n": name})
+        db.execute(text("UPDATE zdns_domain_map SET owner_user_id=:u,department_id=:d,owner_name=:o WHERE domain_name=:n"),
+                   {"u": user.id, "d": dept_id, "o": user.name or user.username, "n": name})
+        count += 1
+    db.commit()
+    return {"message": f"成功认领 {count} 个域名", "count": count}
+
+
+@router.post("/domain-revoke")
+def revoke_domains_api(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """撤销域名认领 — 清空物理认领字段。"""
+    names = body.get("domain_names", [])
+    if not names: raise HTTPException(400, "请选择域名")
+    count = 0
+    for name in names:
+        row = db.execute(text("SELECT owner_user_id FROM domain_inventory WHERE domain_name=:n"), {"n": name}).fetchone()
+        if not row: continue
+        if row.owner_user_id != user.id and not _is_admin_user(user): continue
+        db.execute(text("UPDATE domain_inventory SET owner_user_id=NULL,department_id=NULL,owner_name=NULL WHERE domain_name=:n"), {"n": name})
+        db.execute(text("UPDATE zdns_domain_map SET owner_user_id=NULL,department_id=NULL,owner_name=NULL WHERE domain_name=:n"), {"n": name})
+    db.commit()
+    return {"message": f"成功撤销 {count} 个域名认领", "count": count}
 
 
 @router.post("/batch-uncancel")
@@ -802,6 +953,49 @@ def get_dept_vms(
     return {"items": all_items[start:start + size], "total": total, "page": page, "size": size}
 
 
+def _supplement_is_domains(db, results, dept_id):
+    """补充信息系统域名到域名清单（从 domain_inventory 物理表读取）。"""
+    from app.models.info_system import InfoSystem
+    di_all = db.execute(text(
+        "SELECT LOWER(domain_name) as d, domain_name, ip_address, record_type, owner_user_id, department_id FROM domain_inventory"
+    )).fetchall()
+    di_map = {r.d: r for r in di_all}
+    is_systems = db.query(InfoSystem).filter(
+        InfoSystem.domain.isnot(None), InfoSystem.domain != "",
+    ).all()  # 所有有域名的IS（不要求有manager）
+    is_dept_map = {}
+    is_dept_ids = {s.dept_id for s in is_systems if s.dept_id}
+    if is_dept_ids:
+        depts = db.query(Department).filter(Department.id.in_(is_dept_ids)).all()
+        is_dept_map = {d.id: d.dwmc for d in depts}
+    sub_ids_set = set(_get_sub_dept_ids(db, dept_id)) if dept_id > 0 else None
+    seen = {d["domain_name"].lower() for d in results}
+    for s in is_systems:
+        if sub_ids_set and s.dept_id and s.dept_id not in sub_ids_set:
+            continue
+        # 未关联资产视图：只显示无管理员的IS域名
+        if dept_id == 0 and s.manager_name and s.manager_name.strip():
+            continue
+        for x in [x.strip() for x in s.domain.split(",") if x.strip()]:
+            x = x.lower()
+            for p in ("https://", "http://"):
+                if x.startswith(p): x = x[len(p):]
+            x = x.split("/")[0].split(":")[0]
+            if not x or x in seen: continue
+            zdns = di_map.get(x)
+            if not zdns: continue
+            if dept_id == 0 and (zdns.owner_user_id or zdns.department_id): continue
+            results.append({
+                "domain_name": zdns.domain_name, "record_type": zdns.record_type,
+                "ip_address": zdns.ip_address, "source": "ZDNS",
+                "vm_name": s.system_name or "", "vm_id": None,
+                "owner_name": s.manager_name or "",
+                "dept_name": is_dept_map.get(s.dept_id, ""),
+                "source_type": "is",
+            })
+            seen.add(x)
+
+
 @router.get("/departments/{dept_id}/domains")
 def get_dept_domains(
     dept_id: int,
@@ -832,6 +1026,14 @@ def get_dept_domains(
                 if ip:
                     linked_ips.add(ip)
         results = _collect_domains(db, linked_ips)
+        # 填充物理认领字段到 owner_name
+        for d in results:
+            if d.get("owner_name") and not d.get("dept_name") and d.get("department_id"):
+                from app.models.department import Department
+                dept = db.query(Department).get(d["department_id"])
+                if dept: d["dept_name"] = dept.dwmc
+        # 补充信息系统域名
+        _supplement_is_domains(db, results, dept_id)
     else:
         if visible is not None and dept_id not in visible:
             return {"items": [], "total": 0}
@@ -861,59 +1063,35 @@ def get_dept_domains(
                 vi = vm_by_ip[ip]
                 d["vm_name"] = vi[0]
                 d["vm_id"] = vi[1]
-                d["owner_name"] = vi[2]
-                d["dept_name"] = vi[3] or ""
+                # 优先使用物理认领字段，其次用 VM 的 owner
+                if not d.get("owner_name") or not d.get("department_id"):
+                    d["owner_name"] = vi[2]
+                    d["dept_name"] = vi[3] or ""
                 d["source_type"] = "vm"
                 results.append(d)
                 matched_domain_ips.add(ip)
 
-        # 补充：信息系统域名匹配（预加载 ZDNS 全表避免 N+1 查询）
-        from app.models.info_system import InfoSystem
-        # 预加载 ZDNS 域名→记录 映射（一次性查询替代逐条查询）
-        zdns_all = db.execute(text(
-            "SELECT LOWER(domain_name) as d, domain_name, ip_address, record_type FROM zdns_domain_map"
+        _supplement_is_domains(db, results, dept_id)
+
+        # 补充物理认领的域名（department_id 匹配的域名）
+        seen_doms = {d["domain_name"].lower() for d in results}
+        phys_rows = db.execute(text(
+            f"SELECT z.domain_name, z.record_type, z.ip_address, z.owner_name, z.department_id, d.dwmc "
+            f"FROM zdns_domain_map z LEFT JOIN departments d ON z.department_id=d.id "
+            f"WHERE z.department_id IN ({placeholders}) AND z.owner_user_id IS NOT NULL"
         )).fetchall()
-        zdns_map = {r.d: r for r in zdns_all}
-        # 预加载 InfoSystem + 部门
-        is_systems = db.query(InfoSystem).filter(
-            InfoSystem.domain.isnot(None), InfoSystem.domain != "",
-            InfoSystem.manager_name.isnot(None), InfoSystem.manager_name != "",
-        ).all()
-        is_dept_map = {}
-        is_dept_ids = {s.dept_id for s in is_systems if s.dept_id}
-        if is_dept_ids:
-            depts = db.query(Department).filter(Department.id.in_(is_dept_ids)).all()
-            is_dept_map = {d.id: d.dwmc for d in depts}
-        # 预计算子部门列表
-        sub_ids_set = set(_get_sub_dept_ids(db, dept_id)) if dept_id > 0 else None
-        seen_domains = {d["domain_name"].lower() for d in results}
-        for s in is_systems:
-            if sub_ids_set and s.dept_id and s.dept_id not in sub_ids_set:
-                continue
-            raw = [x.strip() for x in s.domain.split(",") if x.strip()]
-            for x in raw:
-                x = x.lower()
-                for p in ("https://", "http://"):
-                    if x.startswith(p): x = x[len(p):]
-                x = x.split("/")[0].split(":")[0]
-                if not x or x in seen_domains:
-                    continue
-                zdns = zdns_map.get(x)
-                if not zdns:
-                    continue
-                dept_name = is_dept_map.get(s.dept_id, "")
-                results.append({
-                    "domain_name": zdns.domain_name,
-                    "record_type": zdns.record_type,
-                    "ip_address": zdns.ip_address,
-                    "source": "ZDNS",
-                    "vm_name": s.system_name or "",
-                    "vm_id": None,
-                    "owner_name": s.manager_name or "",
-                    "dept_name": dept_name,
-                    "source_type": "is",
-                })
-                seen_domains.add(x)
+        for r in phys_rows:
+            key = r.domain_name.lower() if r.domain_name else ""
+            if key in seen_doms: continue
+            results.append({
+                "domain_name": r.domain_name, "record_type": r.record_type,
+                "ip_address": r.ip_address, "source": "ZDNS",
+                "vm_name": "", "vm_id": None,
+                "owner_name": r.owner_name or "",
+                "dept_name": r.dwmc or "",
+                "source_type": "phys",
+            })
+            seen_doms.add(key)
 
     if search:
         kw = search.lower()

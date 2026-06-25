@@ -77,6 +77,9 @@ class ZDNSDomainMap(Base):
     zone_name = Column(String(255), default="")
     is_enabled = Column(String(8), default="")
     ip_status = Column(String(16), default="")
+    owner_user_id = Column(Integer, nullable=True, comment="认领人ID")
+    department_id = Column(Integer, nullable=True, comment="所属部门ID")
+    owner_name = Column(String(128), nullable=True, comment="管理员姓名")
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     device = relationship("ZDNSDevice", back_populates="domain_maps")

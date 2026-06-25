@@ -29,7 +29,7 @@
           @node-click="handleNodeClick"
         >
           <template #default="{ data }">
-            <span class="tree-node">
+            <span class="tree-node" :class="{ 'my-dept': data.id === authStore.user?.department_id }">
               <el-icon v-if="data.id === -1"><WarningFilled /></el-icon>
               <el-icon v-else><OfficeBuilding /></el-icon>
               <span class="node-label">{{ data.label }}</span>
@@ -116,7 +116,7 @@
                 <el-button size="small" :disabled="selectedVMs.length===0" @click="handleUncancelClaim">撤销注销</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
-              <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}">
+              <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}" :row-class-name="rowClass">
                 <el-table-column type="selection" width="35" />
                 <el-table-column prop="vm_name" label="名称" width="150" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="power_state" label="电源" width="65" sortable="custom">
@@ -202,8 +202,9 @@
                   <el-option label="已认领" value="yes"/><el-option label="未认领" value="no"/>
                 </el-select>
                 <el-button type="primary" size="small" @click="domainPage=1;loadDomains()">查询</el-button>
-                <el-button type="success" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">认领域名</el-button>
-                <el-button type="warning" size="small" :disabled="selectedDomains.length===0" @click="revokeDomains">撤销认领</el-button>
+                <el-button type="success" size="small" :disabled="selectedDomains.length===0" @click="handleDomainClaim">认领域名</el-button>
+                <el-button type="warning" size="small" :disabled="selectedDomains.length===0" @click="handleDomainRevoke">撤销认领</el-button>
+                <el-button v-if="authStore.isAdmin" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">管理员指派</el-button>
                 <el-button type="danger" size="small" :disabled="selectedDomains.length===0" @click="handleDomainCancel">申请注销</el-button>
                 <el-button size="small" :disabled="selectedDomains.length===0" @click="handleDomainUncancel">撤销注销</el-button>
               </div>
@@ -218,7 +219,14 @@
                     <el-tag :type="row.source === 'ZDNS' ? '' : 'success'" size="small">{{ row.source }}</el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="数据关联" min-width="160" show-overflow-tooltip sortable="custom" prop="vm_name" />
+                <el-table-column label="数据关联" min-width="180" show-overflow-tooltip sortable="custom" prop="vm_name">
+                  <template #default="{row}">
+                    <span>{{ row.vm_name || row.domain_name || '-' }}</span>
+                    <el-tag v-if="row.source_type==='vm'" size="small" type="primary" style="margin-left:4px">虚拟机</el-tag>
+                    <el-tag v-else-if="row.source_type==='is'" size="small" type="warning" style="margin-left:4px">信息系统</el-tag>
+                    <el-tag v-else-if="row.source_type==='phys'" size="small" type="success" style="margin-left:4px">认领</el-tag>
+                  </template>
+                </el-table-column>
                 <el-table-column prop="dept_name" label="单位信息" width="120" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="owner_name" label="管理员" width="80" sortable="custom" />
                 <el-table-column label="填报状态" width="90">
@@ -353,7 +361,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, WarningFilled, OfficeBuilding, Folder, FolderOpened } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
@@ -527,6 +535,16 @@ async function handleCancelClaim(){
   const ids = selectedVMs.value.map(v => v.id || v)
   try{await api.post('/assets/batch-cancel',{ids,type:'vm'});ElMessage.success('已申请注销');selectedVMs.value=[];loadVMs()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
 }
+async function handleDomainClaim(){
+  if(!selectedDomains.value.length)return
+  const domain_names = selectedDomains.value.map(d=>d.domain_name)
+  try{await api.post('/assets/domain-claim',{domain_names});ElMessage.success('认领成功');selectedDomains.value=[];loadDomains()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+}
+async function handleDomainRevoke(){
+  if(!selectedDomains.value.length)return
+  const domain_names = selectedDomains.value.map(d=>d.domain_name)
+  try{await ElMessageBox.confirm('确定撤销选中域名的认领？','确认',{type:'warning'});await api.post('/assets/domain-revoke',{domain_names});ElMessage.success('已撤销');selectedDomains.value=[];loadDomains()}catch{}
+}
 async function handleDomainCancel(){
   if(!selectedDomains.value.length)return
   const ids = selectedDomains.value.map(d=>d.domain_name)
@@ -555,7 +573,61 @@ const claimSelected = ref([])
 const claimSubmitting = ref(false)
 
 const selectedVMs = ref([])
-function onVMSelect(val) { selectedVMs.value = val }
+function rowClass({row}) { return selectedVMs.value.some(v => v.id === row.id) ? 'vm-row-selected' : '' }
+function onVMSelect(val) { selectedVMs.value = val; highlightFolderNode(val) }
+
+function findFolderNodeId(folderPath) {
+  // 遍历 folderTree 查找包含此路径的节点
+  if (!folderTree.value || !folderTree.value.length) return null
+  const parts = folderPath.split('/').slice(1)  // 跳过第一级
+  if (parts.length === 0) return null
+  const search = parts.join('/')
+  // 递归搜索节点
+  function searchNode(nodes) {
+    for (const n of nodes) {
+      if (n.id === search) return n.id
+      if (n.id.endsWith('/' + search)) return n.id
+      if (search.endsWith('/' + n.id)) return n.id
+      if (n.children?.length) {
+        const found = searchNode(n.children)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  return searchNode(folderTree.value)
+}
+
+function highlightFolderNode(vms) {
+  nextTick(() => {
+    if (vms.length === 1 && vms[0].vm_folder) {
+      // 部门树定位
+      if (treeRef.value && vms[0].department_id) {
+        treeRef.value.setCurrentKey(vms[0].department_id)
+      }
+      // 文件夹树定位
+      if (folderTreeRef.value) {
+        const nodeId = findFolderNodeId(vms[0].vm_folder)
+        if (nodeId) {
+          // 展开父节点
+          const parts = nodeId.split('/')
+          let path = ''
+          for (let i = 0; i < parts.length; i++) {
+            path = path ? path + '/' + parts[i] : parts[i]
+            try {
+              const node = folderTreeRef.value.getNode(path)
+              if (node) node.expanded = true
+            } catch(e) {}
+          }
+          folderTreeRef.value.setCurrentKey(nodeId)
+        }
+      }
+    } else {
+      if (folderTreeRef.value) folderTreeRef.value.setCurrentKey(null)
+      if (treeRef.value) treeRef.value.setCurrentKey(null)
+    }
+  })
+}
 function onVMSort({prop, order}) {
   if (!order) { loadVMs(); return }
   vmList.value.sort((a,b) => {
@@ -927,14 +999,27 @@ async function handleAssignSearch() {
 function onAssignSelect(val) { assignSelected.value = val }
 
 async function handleAssignSubmit() {
-  const vmIds = assignSelected.value
-    .filter(i => i.asset_type === 'vm' && i.id)
-    .map(i => i.id)
-  if (vmIds.length === 0) { ElMessage.warning('请选择 VM 资产'); return }
+  const vmIds = assignSelected.value.filter(i => i.asset_type === 'vm' && i.id).map(i => i.id)
+  const domainNames = assignSelected.value.filter(i => i.asset_type === 'domain').map(i => i.name)
+  if (vmIds.length === 0 && domainNames.length === 0) { ElMessage.warning('请选择资产'); return }
   assignSubmitting.value = true
   try {
-    const res = await assignAssets({ vm_ids: vmIds, department_id: assignDeptId.value || null, user_id: assignUserId.value || null })
-    ElMessage.success(res.message)
+    if (vmIds.length > 0) {
+      const res = await assignAssets({ vm_ids: vmIds, department_id: assignDeptId.value || null, user_id: assignUserId.value || null })
+      ElMessage.success(res.message)
+    }
+    if (domainNames.length > 0) {
+      const userRes = assignUserId.value
+        ? await api.get(`/users/${assignUserId.value}`).then(r => r.data).catch(() => null)
+        : null
+      const res = await api.post('/assets/domain-assign', {
+        domain_names: domainNames,
+        department_id: assignDeptId.value || null,
+        user_id: assignUserId.value || null,
+        user_name: userRes?.name || ''
+      })
+      ElMessage.success(res.data.message)
+    }
     assignVisible.value = false
     await loadTree()
     if (selectedNode.value) { await loadVMs(); await loadDomains() }
@@ -990,8 +1075,11 @@ onMounted(async () => {
 .tree-resizer { width: 6px; cursor: col-resize; flex-shrink: 0; background: transparent; transition: background .2s; }
 .tree-resizer:hover { background: #409eff; }
 .detail-panel { flex: 1; border: 1px solid #e4e7ed; border-radius: 6px; padding: 16px; overflow-y: auto; background: #fff; }
+:deep(.vm-row-selected) { background-color: #ecf5ff !important; }
+:deep(.vm-row-selected) td { background-color: #ecf5ff !important; }
 .detail-header h3 { margin: 0 0 12px 0; font-size: 17px; }
 .tree-node { display: flex; align-items: center; gap: 6px; flex: 1; }
+.tree-node.my-dept .node-label { color: #1d4ed8; font-weight: 600; }
 .node-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-stats { margin-left: auto; font-size: 10px; display: flex; gap: 4px; white-space: nowrap; }
 .stat-v { color: #409eff; }
