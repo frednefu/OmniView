@@ -113,6 +113,7 @@
                 <el-button type="success" size="small" :disabled="selectedVMs.length===0" @click="handleClaim">认领资产</el-button>
                 <el-button type="warning" size="small" :disabled="selectedVMs.length===0" @click="handleRevoke">撤销认领</el-button>
                 <el-button type="danger" size="small" :disabled="selectedVMs.length===0" @click="handleCancelClaim">申请注销</el-button>
+                <el-button size="small" :disabled="selectedVMs.length===0" @click="handleUncancelClaim">撤销注销</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
               <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}">
@@ -204,6 +205,7 @@
                 <el-button type="success" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">认领域名</el-button>
                 <el-button type="warning" size="small" :disabled="selectedDomains.length===0" @click="revokeDomains">撤销认领</el-button>
                 <el-button type="danger" size="small" :disabled="selectedDomains.length===0" @click="handleDomainCancel">申请注销</el-button>
+                <el-button size="small" :disabled="selectedDomains.length===0" @click="handleDomainUncancel">撤销注销</el-button>
               </div>
               <div class="total-info">共 {{ domainTotal }} 条，已选 {{ selectedDomains.length }} 条</div>
               <el-table :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect" :default-sort="{prop:'domain_name',order:'ascending'}">
@@ -254,6 +256,7 @@
                 <el-button type="success" size="small" :disabled="selectedSys.length===0" @click="handleSysClaim">认领</el-button>
                 <el-button type="warning" size="small" :disabled="selectedSys.length===0" @click="handleSysRevoke">撤销认领</el-button>
                 <el-button type="danger" size="small" :disabled="selectedSys.length===0" @click="handleSysCancel">申请注销</el-button>
+                <el-button size="small" :disabled="selectedSys.length===0" @click="handleSysUncancel">撤销注销</el-button>
               </div>
               <div class="total-info">共 {{ sysTotal }} 条</div>
               <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onSysSelect">
@@ -529,9 +532,20 @@ async function handleDomainCancel(){
   const ids = selectedDomains.value.map(d=>d.domain_name)
   try{await api.post('/assets/batch-cancel',{ids,type:'domain'});ElMessage.success('已申请注销');selectedDomains.value=[];loadDomains()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
 }
+async function handleUncancelClaim(){
+  if(!selectedVMs.value.length)return
+  const ids = selectedVMs.value.map(v=>v.id||v)
+  try{await api.post('/assets/batch-uncancel',{ids,type:'vm'});ElMessage.success('已撤销注销');selectedVMs.value=[];loadVMs()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+}
+async function handleDomainUncancel(){
+  if(!selectedDomains.value.length)return
+  const ids = selectedDomains.value.map(d=>d.domain_name)
+  try{await api.post('/assets/batch-uncancel',{ids,type:'domain'});ElMessage.success('已撤销注销');selectedDomains.value=[];loadDomains()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+}
 async function handleSysClaim(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-claim',{model:'info_system',ids:selectedSys.value});ElMessage.success('认领成功');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
 async function handleSysRevoke(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-revoke',{model:'info_system',ids:selectedSys.value});ElMessage.success('已撤销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
 async function handleSysCancel(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-cancel',{model:'info_system',ids:selectedSys.value});ElMessage.success('已申请注销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
+async function handleSysUncancel(){if(!selectedSys.value.length)return;try{await api.post('/assets/batch-uncancel',{ids:selectedSys.value,type:'info_system'});ElMessage.success('已撤销注销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
 
 const claimVisible = ref(false)
 const claimKeyword = ref('')

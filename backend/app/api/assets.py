@@ -391,6 +391,53 @@ def batch_cancel(body: dict, db: Session = Depends(get_db), user=Depends(get_cur
     return {"message": f"已申请注销 {count} 条"}
 
 
+@router.post("/batch-uncancel")
+def batch_uncancel(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """批量撤销注销（恢复为手动状态）。"""
+    ids = body.get("ids", [])
+    typ = body.get("type", "")
+    if not ids: raise HTTPException(400, "请选择记录")
+    count = 0
+    if typ == "vm":
+        id_tuple = tuple(int(i) for i in ids if str(i).isdigit())
+        if not id_tuple: raise HTTPException(400, "无效的ID列表")
+        where_in = f"({id_tuple[0]})" if len(id_tuple) == 1 else str(id_tuple)
+        rows = db.execute(text(
+            f"SELECT v.id FROM vm_inventory v JOIN asset_inventory a ON v.vm_name=a.vm_name "
+            f"WHERE v.id IN {where_in} AND a.owner_user_id=:uid AND v.claim_status='申请注销'"
+        ), {"uid": user.id}).fetchall()
+        allowed = tuple(r.id for r in rows)
+        if allowed:
+            up = f"({allowed[0]})" if len(allowed) == 1 else str(allowed)
+            db.execute(text(f"UPDATE vm_inventory SET claim_status='manual' WHERE id IN {up}"))
+            count = len(allowed)
+    elif typ == "domain":
+        for domain_name in ids:
+            d = db.execute(text("SELECT ip_address FROM zdns_domain_map WHERE domain_name=:d LIMIT 1"), {"d": domain_name}).fetchone()
+            if not d or not d.ip_address: continue
+            ip = d.ip_address.strip()
+            vm = db.execute(text("SELECT v.id FROM vm_inventory v WHERE v.ip_address LIKE :ip1 OR v.ip_address LIKE :ip2 OR v.ip_address=:ip3 LIMIT 1"), {"ip1": f"{ip},%", "ip2": f"%,{ip}", "ip3": ip}).fetchone()
+            if vm:
+                owner = db.execute(text("SELECT a.owner_user_id FROM asset_inventory a JOIN vm_inventory v ON a.vm_name=v.vm_name WHERE v.id=:vid"), {"vid": vm.id}).fetchone()
+                if owner and owner.owner_user_id == user.id:
+                    db.execute(text(f"UPDATE vm_inventory SET claim_status='manual' WHERE id={vm.id}"))
+                    count += 1
+    elif typ == "info_system":
+        user_gh = str(user.gh or user.id)
+        for rid in ids:
+            sid = int(rid) if str(rid).isdigit() else None
+            if not sid: continue
+            from app.models.info_system import InfoSystem
+            s = db.query(InfoSystem).get(sid)
+            if s and s.fill_type == '申请注销' and (str(s.manager_gh or '') == user_gh or _is_admin_user(user)):
+                s.fill_type = '手动'
+                count += 1
+    else:
+        raise HTTPException(400, "不支持的类型")
+    db.commit()
+    return {"message": f"已撤销注销 {count} 条"}
+
+
 @router.get("/tree")
 def get_asset_tree(
     db: Session = Depends(get_db),
