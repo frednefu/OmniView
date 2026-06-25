@@ -892,7 +892,7 @@ function startPollOwner() {
       await loadTree()
       if (selectedNode.value) { await loadVMs() }
     }
-  }, 2000)
+  }, 5000)
 }
 
 function stopPollOwner() {
@@ -1061,7 +1061,6 @@ watch(activeTab, (tab) => {
 onMounted(async () => {
   await loadTree()
   await fetchFilterOptions()
-  checkRunningTasks()
 })
 </script>
 
