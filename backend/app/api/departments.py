@@ -7,7 +7,7 @@ from app.database import get_db
 from app.models.department import Department
 from app.models.user import User
 from app.schemas.department import DepartmentTreeNode, DepartmentSyncResult
-from app.api.deps import require_admin
+from app.api.deps import require_admin, get_current_user
 from app.services import external_api_service
 
 logger = logging.getLogger(__name__)
@@ -120,9 +120,9 @@ def sync_departments(db: Session = Depends(get_db), _=Depends(require_admin)):
 def get_department_tree(
     all: bool = Query(False, description="是否显示全部部门（含无账号部门）"),
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    """获取组织树，默认仅显示有关联账号的部门。"""
+    """获取组织树。所有已登录用户均可查看全部部门树。"""
     departments = db.query(Department).all()
     # 统计每个部门的用户数
     from sqlalchemy import func as sa_func

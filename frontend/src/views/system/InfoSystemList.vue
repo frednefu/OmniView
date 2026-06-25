@@ -577,10 +577,31 @@ async function handleBatchClaim(){
 }
 async function handleBatchRevoke(){
   if(!selectedIds.value.length) return
-  try{await ElMessageBox.confirm('确定撤销选中的认领？','确认',{type:'warning'});await api.post('/info-systems/batch-revoke',{model:'info_system',ids:selectedIds.value});ElMessage.success('已撤销');selectedIds.value=[];fetchList()}catch{}
+  try{await ElMessageBox.confirm('确定撤销选中的认领？','确认',{type:'warning'})}catch{return}
+  try{
+    await api.post('/info-systems/batch-revoke',{model:'info_system',ids:selectedIds.value})
+    ElMessage.success('已撤销')
+    selectedIds.value=[]
+    fetchList()
+  }catch(e){ElMessage.error(e.response?.data?.detail || '撤销失败，可能是权限不足')}
 }
-async function handleDelete(r){try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'});await api.delete('/info-systems/'+r.id);ElMessage.success('已删除');fetchList()}catch{}}
-async function handleBatchDelete(){try{await ElMessageBox.confirm('确定删除选中的 '+selectedIds.value.length+' 条记录?','批量删除',{type:'error'});await api.post('/info-systems/batch-delete',{ids:selectedIds.value});ElMessage.success('已删除');selectedIds.value=[];fetchList()}catch{}}
+async function handleDelete(r){
+  try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'})}catch{return}
+  try{
+    await api.delete('/info-systems/'+r.id)
+    ElMessage.success('已删除')
+    fetchList()
+  }catch(e){ElMessage.error(e.response?.data?.detail || '删除失败，可能是权限不足')}
+}
+async function handleBatchDelete(){
+  try{await ElMessageBox.confirm('确定删除选中的 '+selectedIds.value.length+' 条记录?','批量删除',{type:'error'})}catch{return}
+  try{
+    await api.post('/info-systems/batch-delete',{ids:selectedIds.value})
+    ElMessage.success('已删除')
+    selectedIds.value=[]
+    fetchList()
+  }catch(e){ElMessage.error(e.response?.data?.detail || '批量删除失败，需要管理员权限')}
+}
 async function handleSync(){syncLoading.value=true;try{const r=await api.post('/info-systems/sync-from-platform');ElMessage.success(r.data.message);console.log('Sync stats:',r.data.stats);fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'同步失败')}finally{syncLoading.value=false}}
 function openImportDlg(){importDlg.value=true;importFile.value=null;importFileList.value=[];importResult.value=null;importMode.value='supplement'}
 function onImportFileSelect(uploadFile){importFile.value=uploadFile.raw}

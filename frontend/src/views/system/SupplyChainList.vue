@@ -329,8 +329,14 @@ async function handleSave(){
   }catch(e){ElMessage.error(e.response?.data?.detail||'保存失败')}
   finally{saving.value=false}
 }
-async function handleDelete(r){try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'});await api.delete('/info-systems/supply-chain/'+r.id);ElMessage.success('已删除');fetchList()}catch{}}
-async function handleBatchDelete(){try{await ElMessageBox.confirm('确定删除选中的 '+selectedIds.value.length+' 条记录?','批量删除',{type:'error'});await api.post('/info-systems/supply-chain/batch-delete',{ids:selectedIds.value});ElMessage.success('已删除');selectedIds.value=[];fetchList()}catch{}}
+async function handleDelete(r){
+  try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'})}catch{return}
+  try{await api.delete('/info-systems/supply-chain/'+r.id);ElMessage.success('已删除');fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'删除失败，可能是权限不足')}
+}
+async function handleBatchDelete(){
+  try{await ElMessageBox.confirm('确定删除选中的 '+selectedIds.value.length+' 条记录?','批量删除',{type:'error'})}catch{return}
+  try{await api.post('/info-systems/supply-chain/batch-delete',{ids:selectedIds.value});ElMessage.success('已删除');selectedIds.value=[];fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'批量删除失败，需要管理员权限')}
+}
 function triggerImport(){fileInput.value?.click()}
 async function onFileChange(e){const file=e.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);loading.value=true;try{const r=await api.post('/info-systems/supply-chain/import',fd);ElMessage.success(r.data.message);fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'导入失败')}finally{loading.value=false;e.target.value=''}}
 async function handleExport(){try{const r=await api.get('/info-systems/supply-chain/export',{responseType:'blob'});const url=URL.createObjectURL(r.data);const a=document.createElement('a');a.href=url;a.download='supply_chain_export.xlsx';a.click();URL.revokeObjectURL(url)}catch{}}

@@ -56,7 +56,7 @@ def _gen_asset_id(db: Session = None) -> str:
 # ── 人员查询 + 自动注册 ──
 
 @router.get("/staff-search")
-def search_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db), _=Depends(require_admin)):
+def search_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """按姓名或工号搜索系统用户，未找到则返回空。"""
     items = db.query(User).filter(
         (User.name.contains(q)) | (User.gh.contains(q)) | (User.username.contains(q))
@@ -66,7 +66,7 @@ def search_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db)
 
 
 @router.get("/staff-lookup")
-def lookup_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db), _=Depends(require_admin)):
+def lookup_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """查找人员（系统用户 + 数据中台教职工API），返回合并结果供确认。"""
     results = []
     # 1. 系统用户
@@ -134,7 +134,7 @@ def lookup_staff(q: str = Query("", min_length=1), db: Session = Depends(get_db)
 
 
 @router.post("/staff-register")
-def register_staff(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
+def register_staff(body: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """查询教职工并自动注册为系统用户（如不存在）。返回用户信息。"""
     name = (body.get("name") or "").strip()
     gh = (body.get("gh") or "").strip()

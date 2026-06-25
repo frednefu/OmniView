@@ -75,7 +75,10 @@ async function fetchList() { loading.value = true; try { const r = await api.get
 function openCreate() { resetForm(); isEdit.value = false; dlg.value = true }
 function openEdit(r) { editId.value = r.id; isEdit.value = true; Object.keys(form).forEach(k => { if (r[k] !== undefined) form[k] = r[k] }); dlg.value = true }
 async function handleSave() { try { if (isEdit.value) { await api.put('/info-systems/icp/' + editId.value, form); ElMessage.success('已更新') } else { await api.post('/info-systems/icp', form); ElMessage.success('已创建') } dlg.value = false; fetchList() } catch (e) { ElMessage.error(e.response?.data?.detail || '保存失败') } }
-async function handleDelete(r) { try { await ElMessageBox.confirm('确定删除?', '确认', { type: 'warning' }); await api.delete('/info-systems/icp/' + r.id); ElMessage.success('已删除'); fetchList() } catch { } }
+async function handleDelete(r) {
+  try { await ElMessageBox.confirm('确定删除?', '确认', { type: 'warning' }) } catch { return }
+  try { await api.delete('/info-systems/icp/' + r.id); ElMessage.success('已删除'); fetchList() } catch(e) { ElMessage.error(e.response?.data?.detail || '删除失败，可能是权限不足') }
+}
 function triggerImport() { fileInput.value?.click() }
 async function onFileChange(e) { const file = e.target.files[0]; if (!file) return; const fd = new FormData(); fd.append('file', file); try { const r = await api.post('/info-systems/icp/import', fd); ElMessage.success(r.data.message); fetchList() } catch { ElMessage.error('导入失败') } finally { e.target.value = '' } }
 async function handleExport() { try { const r = await api.get('/info-systems/icp/export', { responseType: 'blob' }); const url = URL.createObjectURL(r.data); const a = document.createElement('a'); a.href = url; a.download = 'icp_export.xlsx'; a.click(); URL.revokeObjectURL(url) } catch { } }

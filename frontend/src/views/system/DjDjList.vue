@@ -98,8 +98,14 @@ async function handleSave(){
     dlg.value=false;fetchList()
   }catch(e){ElMessage.error(e.response?.data?.detail||'保存失败')}
 }
-async function handleDelete(r){try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'});await api.delete('/info-systems/djdj/'+r.id);ElMessage.success('已删除');fetchList()}catch{}}
-async function handleBatchDelete(){try{await ElMessageBox.confirm('确定删除选中记录?','批量删除',{type:'error'});await api.post('/info-systems/djdj/batch-delete',{ids:selectedIds.value});ElMessage.success('已删除');selectedIds.value=[];fetchList()}catch{}}
+async function handleDelete(r){
+  try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'})}catch{return}
+  try{await api.delete('/info-systems/djdj/'+r.id);ElMessage.success('已删除');fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'删除失败，可能是权限不足')}
+}
+async function handleBatchDelete(){
+  try{await ElMessageBox.confirm('确定删除选中记录?','批量删除',{type:'error'})}catch{return}
+  try{await api.post('/info-systems/djdj/batch-delete',{ids:selectedIds.value});ElMessage.success('已删除');selectedIds.value=[];fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'批量删除失败，需要管理员权限')}
+}
 function triggerImport(){fileInput.value?.click()}
 async function onFileChange(e){const file=e.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await api.post('/info-systems/djdj/import',fd);const dupes=r.data.duplicates;if(dupes&&dupes.length>0){let msg=dupes.map(d=>`${d['备案编号']}: ${d['导入系统名']} ⇄ ${d['已存在系统名']}`).join('<br>');ElMessageBox.alert(msg,'重复数据('+dupes.length+'条)',{dangerouslyUseHTMLString:true,confirmButtonText:'知道了'})}ElMessage.success(r.data.message);fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'导入失败')}finally{e.target.value=''}}
 async function onImageUpload(e){const file=e.target.files[0];if(!file)return;const fd=new FormData();fd.append('file',file);try{const r=await api.post('/info-systems/djdj/upload-image/'+editId.value,fd);form.image_path=r.data.image_path;ElMessage.success('已上传')}catch{ElMessage.error('上传失败')}}
