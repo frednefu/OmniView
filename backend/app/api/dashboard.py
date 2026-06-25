@@ -205,6 +205,13 @@ def _normalize_cpu_types(rows) -> list:
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 
 
+def _is_admin_user(u):
+    if hasattr(u, "role"):
+        r = u.role
+        return (r.value if hasattr(r, "value") else r) == "admin"
+    return False
+
+
 DASHBOARD_STATS_TTL = 30  # 仪表盘统计缓存 30 秒
 
 
@@ -224,8 +231,13 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
         ScanResult.mac_address != "", ScanResult.mac_address.isnot(None)
     ).scalar() or 0
 
-    # ── 子网 ──
-    subnet_count = db.query(func.count(Subnet.id)).scalar() or 0
+    # ── 子网（非管理员只看自己创建的）──
+    if _is_admin_user(current_user):
+        subnet_count = db.query(func.count(Subnet.id)).filter(
+            (Subnet.created_by == current_user.id) | (Subnet.created_by == None)
+        ).scalar() or 0
+    else:
+        subnet_count = db.query(func.count(Subnet.id)).filter(Subnet.created_by == current_user.id).scalar() or 0
 
     # ── vCenter + VM ──
     vcenter_count = db.query(func.count(VCenter.id)).filter(VCenter.is_active == True).scalar() or 0
@@ -485,7 +497,9 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
 
 @router.get("/subnet-utilization", response_model=list[SubnetUtilization])
 def subnet_utilization(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    return [SubnetUtilization(**item) for item in get_subnet_utilization(db)]
+    uid = current_user.id
+    is_adm = _is_admin_user(current_user)
+    return [SubnetUtilization(**item) for item in get_subnet_utilization(db, uid, is_adm)]
 
 
 @router.get("/available-ips", response_model=AvailableIpResponse)

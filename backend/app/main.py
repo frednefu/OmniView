@@ -127,6 +127,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     _migrate_columns("operation_logs", [("function_name", "VARCHAR(256)")])
+    _migrate_columns("subnets", [("created_by", "INTEGER")])
+    # 去掉 subnet_cidr 全局唯一约束，改为 (cidr+created_by) 组合
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE subnets DROP INDEX subnet_cidr"))
+            conn.commit()
+    except Exception:
+        pass
     # 信息系统新增归属字段
     _migrate_columns("info_systems", [
         ("dept_id", "INTEGER"),

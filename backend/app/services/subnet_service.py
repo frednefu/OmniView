@@ -29,11 +29,17 @@ def _used_ips_in_subnet(db: Session, net_int: int, broad_int: int) -> set:
     return used
 
 
-def get_subnet_utilization(db: Session) -> list[dict]:
+def get_subnet_utilization(db: Session, user_id: int = None, admin: bool = False) -> list[dict]:
     """For each managed subnet, calculate total/used/free IPs."""
     from app.models.subnet import Subnet
 
-    subnets = db.query(Subnet).all()
+    q = db.query(Subnet)
+    if user_id:
+        if admin:
+            q = q.filter((Subnet.created_by == user_id) | (Subnet.created_by == None))
+        else:
+            q = q.filter(Subnet.created_by == user_id)
+    subnets = q.all()
     if not subnets:
         return []
 
