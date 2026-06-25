@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    hmr: { port: 0 },  // 端口0=禁用HMR服务器，避免后台自动刷新页面
+    hmr: false,  // 禁用热更新，避免后台自动刷新页面
     allowedHosts: ['ov.nefu.edu.cn', '.nefu.edu.cn'],
     proxy: {
       '/api': 'http://localhost:8000',
