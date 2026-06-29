@@ -152,6 +152,7 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine, tables=[DomainInventory.__table__])
     except Exception:
         pass
+    _migrate_columns("domain_inventory", [("claim_status", "VARCHAR(16) DEFAULT ''")])
     # 去掉 subnet_cidr 全局唯一约束，改为 (cidr+created_by) 组合
     try:
         with engine.connect() as conn:

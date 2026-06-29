@@ -18,5 +18,7 @@ class DomainInventory(Base):
     # 关联来源
     source_type = Column(String(16), nullable=True, comment="关联来源: vm/is/phys")
     vm_name = Column(String(255), nullable=True, comment="关联VM名称")
+    # 认领状态
+    claim_status = Column(String(16), default="", comment="认领状态: manual/unlinked/申请注销")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

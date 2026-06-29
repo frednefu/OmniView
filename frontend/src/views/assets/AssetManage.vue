@@ -198,6 +198,10 @@
                   <el-option label="AAAA" value="AAAA" />
                   <el-option label="CNAME" value="CNAME" />
                 </el-select>
+                <el-select v-model="domainStatusFilter" placeholder="填报状态" clearable size="small" style="width:110px" @change="domainPage=1;loadDomains()">
+                  <el-option label="自动" value="auto"/><el-option label="手动" value="manual"/>
+                  <el-option label="申请注销" value="申请注销"/><el-option label="未分组" value="unlinked"/>
+                </el-select>
                 <el-select v-model="domainClaimedFilter" placeholder="认领状态" clearable size="small" style="width:100px" @change="domainPage=1;loadDomains()">
                   <el-option label="已认领" value="yes"/><el-option label="未认领" value="no"/>
                 </el-select>
@@ -230,7 +234,7 @@
                 <el-table-column prop="dept_name" label="单位信息" width="120" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="owner_name" label="管理员" width="80" sortable="custom" />
                 <el-table-column label="填报状态" width="90">
-                  <template #default="{row}"><el-tag :type="row.owner_name?'success':'info'" size="small">{{ row.owner_name?'已认领':'未认领' }}</el-tag></template>
+                  <template #default="{row}"><el-tag :type="row.claim_status==='auto'?'success':row.claim_status==='manual'?'':row.claim_status==='注销'||row.claim_status==='申请注销'?'danger':'info'" size="small">{{ statusLabel(row.claim_status) }}</el-tag></template>
                 </el-table-column>
                 <el-table-column label="认领" width="65" sortable="custom" prop="owner_name">
                   <template #default="{ row }">
@@ -516,6 +520,7 @@ const domainList = ref([])
 const domainLoading = ref(false)
 const domainSearch = ref('')
 const domainTypeFilter = ref('')
+const domainStatusFilter = ref('')
 const domainClaimedFilter = ref('')
 const domainPage = ref(1)
 const domainSize = ref(50)
@@ -538,27 +543,53 @@ async function handleCancelClaim(){
 async function handleDomainClaim(){
   if(!selectedDomains.value.length)return
   const domain_names = selectedDomains.value.map(d=>d.domain_name)
-  try{await api.post('/assets/domain-claim',{domain_names});ElMessage.success('认领成功');selectedDomains.value=[];loadDomains()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+  try{
+    const res = await api.post('/assets/domain-claim',{domain_names})
+    ElMessage.success(res.data.message || '认领成功')
+    selectedDomains.value=[]
+    loadDomains()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'认领失败')}
 }
 async function handleDomainRevoke(){
   if(!selectedDomains.value.length)return
   const domain_names = selectedDomains.value.map(d=>d.domain_name)
-  try{await ElMessageBox.confirm('确定撤销选中域名的认领？','确认',{type:'warning'});await api.post('/assets/domain-revoke',{domain_names});ElMessage.success('已撤销');selectedDomains.value=[];loadDomains()}catch{}
+  try{await ElMessageBox.confirm('确定撤销选中域名的认领？','确认',{type:'warning'})}catch{return}
+  try{
+    const res = await api.post('/assets/domain-revoke',{domain_names})
+    ElMessage.success(res.data.message || '已撤销')
+    selectedDomains.value=[]
+    loadDomains()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'撤销失败，可能是权限不足')}
 }
 async function handleDomainCancel(){
   if(!selectedDomains.value.length)return
   const ids = selectedDomains.value.map(d=>d.domain_name)
-  try{await api.post('/assets/batch-cancel',{ids,type:'domain'});ElMessage.success('已申请注销');selectedDomains.value=[];loadDomains()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+  try{
+    const res = await api.post('/assets/batch-cancel',{ids,type:'domain'})
+    ElMessage.success(res.data.message || '已申请注销')
+    selectedDomains.value=[]
+    loadDomains()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
 }
 async function handleUncancelClaim(){
   if(!selectedVMs.value.length)return
   const ids = selectedVMs.value.map(v=>v.id||v)
-  try{await api.post('/assets/batch-uncancel',{ids,type:'vm'});ElMessage.success('已撤销注销');selectedVMs.value=[];loadVMs()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+  try{
+    const res = await api.post('/assets/batch-uncancel',{ids,type:'vm'})
+    ElMessage.success(res.data.message || '已撤销注销')
+    selectedVMs.value=[]
+    loadVMs()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
 }
 async function handleDomainUncancel(){
   if(!selectedDomains.value.length)return
   const ids = selectedDomains.value.map(d=>d.domain_name)
-  try{await api.post('/assets/batch-uncancel',{ids,type:'domain'});ElMessage.success('已撤销注销');selectedDomains.value=[];loadDomains()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
+  try{
+    const res = await api.post('/assets/batch-uncancel',{ids,type:'domain'})
+    ElMessage.success(res.data.message || '已撤销注销')
+    selectedDomains.value=[]
+    loadDomains()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'失败')}
 }
 async function handleSysClaim(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-claim',{model:'info_system',ids:selectedSys.value});ElMessage.success('认领成功');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
 async function handleSysRevoke(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-revoke',{model:'info_system',ids:selectedSys.value});ElMessage.success('已撤销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
@@ -650,12 +681,13 @@ async function handleClaim() {
 async function handleRevoke() {
   const ids = selectedVMs.value.map(v => v.id).filter(Boolean)
   if (ids.length === 0) return ElMessage.warning('请选择 VM')
+  try { await ElMessageBox.confirm('确定撤销选中资产的认领吗？', '撤销确认', { type: 'warning' }) } catch { return }
   try {
-    await ElMessageBox.confirm('确定撤销选中资产的认领吗？', '撤销确认', { type: 'warning' })
     const res = await revokeAssets({ vm_ids: ids })
     ElMessage.success(res.message)
+    selectedVMs.value = []
     await loadVMs(); await loadTree()
-  } catch { /* 取消 */ }
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '撤销失败，可能是权限不足') }
 }
 
 const assignVisible = ref(false)
@@ -779,6 +811,7 @@ async function handleNodeClick(data) {
   vmFolderFilter.value = ''
   domainSearch.value = ''
   domainTypeFilter.value = ''
+  domainStatusFilter.value = ''
   domainPage.value = 1
   sysSearch.value = ''
   sysPage.value = 1
@@ -825,7 +858,7 @@ async function loadDomains() {
     const res = await getDeptDomains(deptId, {
       page: domainPage.value, size: domainSize.value,
       search: domainSearch.value, record_type: domainTypeFilter.value,
-      claimed: domainClaimedFilter.value,
+      status: domainStatusFilter.value, claimed: domainClaimedFilter.value,
     })
     domainList.value = res.items
     domainTotal.value = res.total
