@@ -14,19 +14,95 @@ from app.models.scan_log import ScanLog, ScanStatus, TriggerType
 logger = logging.getLogger(__name__)
 
 
-def _ping_ip(ip_address: str, timeout: int = 3) -> bool:
-    """跨平台 ICMP ping，返回 True 表示可达。"""
+# 模块级缓存：IPv6 可用性检测结果（只需检测一次）
+_ipv6_available = None
+
+
+def _check_ipv6_available() -> bool:
+    """检测当前环境是否支持 IPv6 网络（模块级缓存，只检测一次）。"""
+    global _ipv6_available
+    if _ipv6_available is not None:
+        return _ipv6_available
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        s.settimeout(1.5)
+        s.connect(("2001:4860:4860::8888", 80))  # Google DNS IPv6
+        s.close()
+        _ipv6_available = True
+    except (OSError, Exception):
+        _ipv6_available = False
+    return _ipv6_available
+
+
+def _ping6_via_proxy(ips: list[str], timeout: int = 3) -> dict[str, bool]:
+    """通过宿主机 ping6 代理检测 IPv6 连通性（Docker 无 IPv6 时使用）。"""
+    import urllib.request, json as _json
+    try:
+        data = _json.dumps({"ips": ips}).encode()
+        req = urllib.request.Request(
+            "http://host.docker.internal:5199/ping6",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=timeout + 5)
+        return _json.loads(resp.read())
+    except Exception:
+        return {ip: False for ip in ips}
+
+
+def _tcp_probe(ip_address: str, port: int = 80, timeout: int = 3) -> bool:
+    """通过 TCP 连接检测目标是否可达。"""
+    import socket
+    try:
+        family = socket.AF_INET6 if ":" in ip_address else socket.AF_INET
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect((ip_address, port))
+        sock.close()
+        return True
+    except Exception:
+        return False
+
+
+def _ping_ip(ip_address: str, timeout: int = 3) -> bool | None:
+    """跨平台可达性检测。IPv4 用 ICMP ping + TCP 备用。
+    IPv6 在 Docker 环境无网络时返回 None（表示无法检测，应标记为"待定"）。"""
+    is_ipv6 = ":" in ip_address
+
+    if is_ipv6:
+        if not _check_ipv6_available():
+            return None  # 无法检测，标记为"待定"
+        # IPv6 环境可用：TCP 探测 + ICMP ping
+        for port in (80, 443, 22, 8080, 8443):
+            if _tcp_probe(ip_address, port, timeout):
+                return True
+        if platform.system() == "Windows":
+            cmd = ["ping", "-6", "-n", "1", "-w", str(timeout * 1000), ip_address]
+        else:
+            cmd = ["ping", "-6", "-c", "1", "-W", str(timeout), ip_address]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    # IPv4: 优先 ICMP ping
     if platform.system() == "Windows":
         cmd = ["ping", "-n", "1", "-w", str(timeout * 1000), ip_address]
     else:
         cmd = ["ping", "-c", "1", "-W", str(timeout), ip_address]
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout + 5
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, Exception):
-        return False
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        if result.returncode == 0:
+            return True
+    except Exception:
+        pass
+    # ICMP 失败，TCP 探测常用端口作为补充
+    for port in (80, 443, 22):
+        if _tcp_probe(ip_address, port, timeout):
+            return True
+    return False
 
 
 async def _run_zdns_ip_scan_async(zdns_device_id: int, scan_log_id: int | None = None):
@@ -103,10 +179,18 @@ async def _run_zdns_ip_scan_async(zdns_device_id: int, scan_log_id: int | None =
         known_online = switch_ips | f5_up_ips
         ips_to_ping = [ip for ip in unique_ips if ip not in known_online]
 
+        # 检测 IPv6 可用性
+        ipv6_ok = _check_ipv6_available()
+        # 分离 IPv4/IPv6
+        ipv6_ips = [ip for ip in ips_to_ping if ":" in ip]
+        ipv4_ips = [ip for ip in ips_to_ping if ":" not in ip]
+
         if scan_log_id:
             append_log(scan_log_id, f"唯一 IP: {len(unique_ips)} 个")
+            append_log(scan_log_id, f"IPv6 网络: {'容器直连' if ipv6_ok else '宿主机代理'}")
             append_log(scan_log_id, f"来源于交换机: {len(switch_ips)} 个, 来源于 F5 up: {len(f5_up_ips - switch_ips)} 个")
-            append_log(scan_log_id, f"已知在线: {len(known_online)} 个, 待 Ping 探测: {len(ips_to_ping)} 个")
+            append_log(scan_log_id, f"已知在线: {len(known_online)} 个")
+            append_log(scan_log_id, f"待 Ping: IPv4={len(ipv4_ips)} IPv6={len(ipv6_ips)}")
             update_progress(scan_log_id, 20, f"待 Ping {len(ips_to_ping)} 个 IP")
 
         # 为已知在线的 IP 更新状态
@@ -114,47 +198,79 @@ async def _run_zdns_ip_scan_async(zdns_device_id: int, scan_log_id: int | None =
             if r.ip_address in known_online:
                 r.ip_status = "online"
 
-        # 对需要探测的 IP 执行 ping（限并发 20）
-        semaphore = asyncio.Semaphore(20)
+        ping_results = {}
+        step1_id = None
 
-        async def _ping_with_limit(ip):
-            async with semaphore:
-                reachable = await loop.run_in_executor(None, _ping_ip, ip)
-                return ip, reachable
+        if ipv4_ips:
+            # IPv4: 容器内 ICMP ping（限并发 20）
+            semaphore = asyncio.Semaphore(20)
 
-        if ips_to_ping:
+            async def _ping4(ip):
+                async with semaphore:
+                    reachable = await loop.run_in_executor(None, _ping_ip, ip)
+                    return ip, reachable
+
             if scan_log_id:
-                step1_id = add_step(scan_log_id, 1, f"Ping 探测 ({len(ips_to_ping)} 个 IP)")
-                append_log(scan_log_id, f"开始 Ping 探测 {len(ips_to_ping)} 个 IP (并发20)...")
-
-            # 分批 ping，每 25% 更新进度
-            batch_size = max(1, len(ips_to_ping) // 4)
-            ping_results = {}
-            for batch_idx in range(0, len(ips_to_ping), batch_size):
-                batch = ips_to_ping[batch_idx:batch_idx + batch_size]
-                tasks = [_ping_with_limit(ip) for ip in batch]
+                step1_id = add_step(scan_log_id, 1, f"IPv4 Ping ({len(ipv4_ips)} 个 IP)")
+                append_log(scan_log_id, f"开始 IPv4 Ping {len(ipv4_ips)} 个...")
+            batch_size = max(1, len(ipv4_ips) // 4) if ipv4_ips else 1
+            for batch_idx in range(0, len(ipv4_ips), batch_size):
+                batch = ipv4_ips[batch_idx:batch_idx + batch_size]
+                tasks = [_ping4(ip) for ip in batch]
                 batch_results = await asyncio.gather(*tasks)
                 ping_results.update(dict(batch_results))
+            if scan_log_id and ipv4_ips:
+                v4_online = sum(1 for v in ping_results.values() if v is True)
+                append_log(scan_log_id, f"IPv4 Ping 完成: 在线 {v4_online}, 离线 {len(ipv4_ips) - v4_online}")
 
-                progress_pct = 20 + int(60 * min(batch_idx + batch_size, len(ips_to_ping)) / len(ips_to_ping))
-                batch_online = sum(1 for v in dict(batch_results).values() if v)
+        if ipv6_ips:
+            # IPv6: 容器直连或将批量请求通过宿主机代理
+            if ipv6_ok:
+                semaphore = asyncio.Semaphore(20)
+
+                async def _ping6(ip):
+                    async with semaphore:
+                        reachable = await loop.run_in_executor(None, _ping_ip, ip)
+                        return ip, reachable
+
                 if scan_log_id:
-                    update_progress(scan_log_id, progress_pct,
-                                    f"Ping {min(batch_idx + batch_size, len(ips_to_ping))}/{len(ips_to_ping)} (在线 {batch_online})")
+                    append_log(scan_log_id, f"开始容器直连 IPv6 Ping {len(ipv6_ips)} 个...")
+                for batch_idx in range(0, len(ipv6_ips), 20):
+                    batch = ipv6_ips[batch_idx:batch_idx + 20]
+                    tasks = [_ping6(ip) for ip in batch]
+                    batch_results = await asyncio.gather(*tasks)
+                    ping_results.update(dict(batch_results))
+            else:
+                if scan_log_id:
+                    append_log(scan_log_id, f"开始宿主机代理 IPv6 Ping {len(ipv6_ips)} 个...")
+                # 批量发送到宿主机代理（一次请求）
+                proxy_results = await loop.run_in_executor(None, _ping6_via_proxy, ipv6_ips)
+                ping_results.update(proxy_results)
+            if scan_log_id:
+                v6_online = sum(1 for ip in ipv6_ips if ping_results.get(ip) is True)
+                append_log(scan_log_id, f"IPv6 Ping 完成: 在线 {v6_online}, 离线 {len(ipv6_ips) - v6_online}")
 
-            for r in rows:
-                if r.ip_address in ping_results:
-                    total_checked += 1
-                    if ping_results[r.ip_address]:
-                        r.ip_status = "online"
-                        online_count += 1
-                    else:
+        # 应用 ping 结果
+        pending_count = 0
+        for r in rows:
+            if r.ip_address in ping_results:
+                total_checked += 1
+                result = ping_results[r.ip_address]
+                if result is True:
+                    r.ip_status = "online"
+                    online_count += 1
+                elif result is None:
+                    r.ip_status = "pending"
+                    pending_count += 1
+                else:
                         r.ip_status = "offline"
                         offline_count += 1
 
-            if scan_log_id:
+            if scan_log_id and step1_id:
                 finish_step(step1_id, "success", len(ips_to_ping), len(ips_to_ping))
-                append_log(scan_log_id, f"Ping 完成: 在线 {online_count}, 离线 {offline_count} (总已知在线 {len(known_online) + online_count})")
+                parts = [f"在线 {online_count}", f"离线 {offline_count}"]
+                if pending_count: parts.append(f"待定 {pending_count}")
+                append_log(scan_log_id, f"Ping 完成: {', '.join(parts)} (总已知在线 {len(known_online) + online_count})")
                 update_progress(scan_log_id, 90, "Ping 探测完成")
 
         db.commit()
