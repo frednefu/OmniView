@@ -1438,93 +1438,13 @@ def delete_icp(rec_id: int, db: Session = Depends(get_db), user=Depends(get_curr
 
 @router.post("/sync-from-platform")
 def sync_from_platform(db: Session = Depends(get_db), _=Depends(require_admin)):
-    """域名清洗 + ZDNS 匹配同步（不再验证URL可达性，直接用ZDNS数据判断）。"""
-    # 加载 ZDNS 域名→IP 映射
-    zdns_map = {}  # domain → ip
+    """域名清洗 + ZDNS 匹配同步（手动触发，写入扫描日志）。"""
+    from app.services.scheduler_service import run_info_system_sync_manual
     try:
-        for r in db.execute(text("SELECT LOWER(TRIM(domain_name)), ip_address FROM zdns_domain_map WHERE ip_address IS NOT NULL AND ip_address != ''")).fetchall():
-            d = (r[0] or "").strip()
-            ip = (r[1] or "").strip()
-            if d and d not in zdns_map:
-                zdns_map[d] = ip
-    except Exception:
-        pass
-
-    def strip_domain(dom: str) -> str:
-        """去掉 http/https 前缀和路径，只保留纯域名。"""
-        dom = (dom or "").strip().lower()
-        for p in ("https://", "http://"):
-            if dom.startswith(p):
-                dom = dom[len(p):]
-        return dom.split("/")[0].split(":")[0]
-
-    def split_domains(raw: str) -> list[str]:
-        """按逗号/分号/空格拆分多个域名。"""
-        parts = []
-        for seg in (raw or "").replace(";", ",").replace(" ", ",").split(","):
-            d = seg.strip()
-            if d:
-                parts.append(d)
-        return parts
-
-    stats = {"cleaned": 0, "auto": 0, "deprecated": 0, "online": 0, "offline": 0, "skipped": 0}
-    items = db.query(InfoSystem).all()
-
-    for sys in items:
-        try:
-            raw_domains = split_domains(sys.domain or "")
-            if not raw_domains:
-                stats["skipped"] += 1
-                continue
-
-            # 清洗域名：去掉 http/https/路径，只保留纯域名
-            clean = []
-            for d in raw_domains:
-                cd = strip_domain(d)
-                if cd and cd not in clean:
-                    clean.append(cd)
-            if not clean:
-                stats["skipped"] += 1
-                continue
-
-            new_domain = ",".join(clean)
-            if sys.domain != new_domain:
-                sys.domain = new_domain
-                stats["cleaned"] += 1
-
-            # 入口地址：直接拼 https://域名（不验证）
-            sys.entry_url = f"https://{clean[0]}"
-
-            # ZDNS 匹配：任意域名有匹配 → 自动+在线，保存ZDNS IP
-            matched = None
-            for d in clean:
-                if d in zdns_map:
-                    matched = d
-                    break
-
-            if matched:
-                sys.fill_type = "自动"
-                sys.url_status = "在线"
-                # ZDNS IP 替换系统记录的 IP
-                zdns_ip = zdns_map[matched]
-                if zdns_ip and zdns_ip != (sys.ip_address or "").strip():
-                    sys.ip_address = zdns_ip
-                stats["auto"] += 1
-                stats["online"] += 1
-            else:
-                sys.fill_type = "注销"
-                sys.url_status = "离线"
-                stats["deprecated"] += 1
-                stats["offline"] += 1
-        except Exception:
-            stats["skipped"] += 1
-            continue
-
-    db.commit()
-    return {
-        "message": f"同步完成：域名清洗 {stats['cleaned']}，自动 {stats['auto']}，注销 {stats['deprecated']}，在线 {stats['online']}，离线 {stats['offline']}",
-        "stats": stats,
-    }
+        result = run_info_system_sync_manual()
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"同步失败：{e}")
 
 
 # ── 等保关联查询 ──

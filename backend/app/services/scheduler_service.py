@@ -177,6 +177,15 @@ def start_scheduler():
             replace_existing=True,
             misfire_grace_time=300,
         )
+    # 信息系统数据同步（每 4 小时）
+    if not scheduler.get_job("info_system_sync"):
+        scheduler.add_job(
+            _info_system_sync_job,
+            trigger=IntervalTrigger(hours=4),
+            id="info_system_sync",
+            replace_existing=True,
+            misfire_grace_time=600,
+        )
     # 过期外链清理（每 10 分钟）
     if not scheduler.get_job("cleanup_expired_links"):
         scheduler.add_job(
@@ -388,9 +397,219 @@ def _cleanup_expired_links():
     finally:
         db.close()
 
+def _info_system_sync_job():
+    """定时执行信息系统数据同步（域名清洗 + ZDNS 匹配）。"""
+    from sqlalchemy import text
+    from app.models.info_system import InfoSystem
+
+    db = SessionLocal()
+    tz8 = __import__('datetime').timezone(__import__('datetime').timedelta(hours=8))
+    now8 = datetime.now(tz8).replace(tzinfo=None)
+    scan_log = ScanLog(
+        source_type="info_system_sync",
+        source_name="信息系统数据同步",
+        triggered_by=TriggerType.scheduled,
+        status=ScanStatus.running,
+        started_at=now8,
+    )
+    db.add(scan_log)
+    db.commit()
+    db.refresh(scan_log)
+
+    stats = {"cleaned": 0, "auto": 0, "deprecated": 0, "online": 0, "offline": 0, "skipped": 0}
+    synced = 0
+    try:
+        # 加载 ZDNS 域名→IP 映射
+        zdns_map = {}
+        try:
+            for r in db.execute(text("SELECT LOWER(TRIM(domain_name)), ip_address FROM zdns_domain_map WHERE ip_address IS NOT NULL AND ip_address != ''")).fetchall():
+                d = (r[0] or "").strip()
+                ip = (r[1] or "").strip()
+                if d and d not in zdns_map:
+                    zdns_map[d] = ip
+        except Exception:
+            pass
+
+        def strip_domain(dom: str) -> str:
+            dom = (dom or "").strip().lower()
+            for p in ("https://", "http://"):
+                if dom.startswith(p):
+                    dom = dom[len(p):]
+            return dom.split("/")[0].split(":")[0]
+
+        def split_domains(raw: str) -> list:
+            parts = []
+            for seg in (raw or "").replace(";", ",").replace(" ", ",").split(","):
+                d = seg.strip()
+                if d:
+                    parts.append(d)
+            return parts
+
+        items = db.query(InfoSystem).all()
+        for sys in items:
+            try:
+                raw_domains = split_domains(sys.domain or "")
+                if not raw_domains:
+                    stats["skipped"] += 1
+                    continue
+                clean = []
+                for d in raw_domains:
+                    cd = strip_domain(d)
+                    if cd and cd not in clean:
+                        clean.append(cd)
+                if not clean:
+                    stats["skipped"] += 1
+                    continue
+                new_domain = ",".join(clean)
+                if sys.domain != new_domain:
+                    sys.domain = new_domain
+                    stats["cleaned"] += 1
+                sys.entry_url = f"https://{clean[0]}"
+                matched = None
+                for d in clean:
+                    if d in zdns_map:
+                        matched = d
+                        break
+                if matched:
+                    sys.fill_type = "自动"
+                    sys.url_status = "在线"
+                    zdns_ip = zdns_map[matched]
+                    if zdns_ip and zdns_ip != (sys.ip_address or "").strip():
+                        sys.ip_address = zdns_ip
+                    stats["auto"] += 1
+                    stats["online"] += 1
+                else:
+                    sys.fill_type = "注销"
+                    sys.url_status = "离线"
+                    stats["deprecated"] += 1
+                    stats["offline"] += 1
+                synced += 1
+            except Exception:
+                stats["skipped"] += 1
+                continue
+        db.commit()
+
+        scan_log.status = ScanStatus.success
+        scan_log.hosts_found = synced
+        scan_log.completed_at = datetime.now(tz8).replace(tzinfo=None)
+        scan_log.duration_seconds = round((scan_log.completed_at - scan_log.started_at).total_seconds(), 1)
+        db.commit()
+        logger.info("信息系统数据同步完成：清洗 %s 条，自动 %s 条，注销 %s 条，在线 %s 条，离线 %s 条",
+                    stats["cleaned"], stats["auto"], stats["deprecated"], stats["online"], stats["offline"])
+    except Exception as e:
+        logger.error(f"信息系统数据同步失败：{e}")
+        db.rollback()
+        try:
+            scan_log.status = ScanStatus.failed
+            scan_log.error_message = str(e)[:500]
+            scan_log.completed_at = datetime.now(tz8).replace(tzinfo=None)
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+# 导出供 API 手动触发
+def run_info_system_sync_manual() -> dict:
+    """手动触发信息系统数据同步（写入扫描日志）。"""
+    from sqlalchemy import text
+    from app.models.info_system import InfoSystem
+
+    db = SessionLocal()
+    now8 = datetime.now(__import__('datetime').timezone(__import__('datetime').timedelta(hours=8))).replace(tzinfo=None)
+    scan_log = ScanLog(
+        source_type="info_system_sync",
+        source_name="信息系统数据同步",
+        triggered_by=TriggerType.manual,
+        status=ScanStatus.running,
+        started_at=now8,
+    )
+    db.add(scan_log)
+    db.commit()
+    db.refresh(scan_log)
+
+    stats = {"cleaned": 0, "auto": 0, "deprecated": 0, "online": 0, "offline": 0, "skipped": 0}
+    synced = 0
+    try:
+        zdns_map = {}
+        try:
+            for r in db.execute(text("SELECT LOWER(TRIM(domain_name)), ip_address FROM zdns_domain_map WHERE ip_address IS NOT NULL AND ip_address != ''")).fetchall():
+                d = (r[0] or "").strip()
+                ip = (r[1] or "").strip()
+                if d and d not in zdns_map:
+                    zdns_map[d] = ip
+        except Exception:
+            pass
+
+        def strip_domain(dom):
+            dom = (dom or "").strip().lower()
+            for p in ("https://", "http://"):
+                if dom.startswith(p): dom = dom[len(p):]
+            return dom.split("/")[0].split(":")[0]
+
+        def split_domains(raw):
+            parts = []
+            for seg in (raw or "").replace(";", ",").replace(" ", ",").split(","):
+                d = seg.strip()
+                if d: parts.append(d)
+            return parts
+
+        items = db.query(InfoSystem).all()
+        for sys in items:
+            try:
+                raw_domains = split_domains(sys.domain or "")
+                if not raw_domains: stats["skipped"] += 1; continue
+                clean = []
+                for d in raw_domains:
+                    cd = strip_domain(d)
+                    if cd and cd not in clean: clean.append(cd)
+                if not clean: stats["skipped"] += 1; continue
+                new_domain = ",".join(clean)
+                if sys.domain != new_domain:
+                    sys.domain = new_domain; stats["cleaned"] += 1
+                sys.entry_url = f"https://{clean[0]}"
+                matched = next((d for d in clean if d in zdns_map), None)
+                if matched:
+                    sys.fill_type = "自动"; sys.url_status = "在线"
+                    zdns_ip = zdns_map[matched]
+                    if zdns_ip and zdns_ip != (sys.ip_address or "").strip():
+                        sys.ip_address = zdns_ip
+                    stats["auto"] += 1; stats["online"] += 1
+                else:
+                    sys.fill_type = "注销"; sys.url_status = "离线"
+                    stats["deprecated"] += 1; stats["offline"] += 1
+                synced += 1
+            except Exception:
+                stats["skipped"] += 1; continue
+        db.commit()
+
+        scan_log.status = ScanStatus.success
+        scan_log.hosts_found = synced
+        scan_log.completed_at = datetime.now(__import__('datetime').timezone(__import__('datetime').timedelta(hours=8))).replace(tzinfo=None)
+        scan_log.duration_seconds = round((scan_log.completed_at - scan_log.started_at).total_seconds(), 1)
+        db.commit()
+        return {
+            "message": f"同步完成：域名清洗 {stats['cleaned']}，自动 {stats['auto']}，注销 {stats['deprecated']}，在线 {stats['online']}，离线 {stats['offline']}",
+            "stats": stats, "scan_log_id": scan_log.id,
+        }
+    except Exception as e:
+        db.rollback()
+        try:
+            scan_log.status = ScanStatus.failed
+            scan_log.error_message = str(e)[:500]
+            db.commit()
+        except Exception:
+            pass
+        raise
+    finally:
+        db.close()
+
+
 _JOB_NAMES = {
     "cleanup_stale_workers": "清理过期Worker",
     "asset_sync": "资产同步",
+    "info_system_sync": "信息系统数据同步",
     "cleanup_expired_links": "清理过期外链",
 }
 

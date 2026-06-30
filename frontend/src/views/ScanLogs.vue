@@ -17,6 +17,8 @@
           <el-option label="IP扫描" value="zdns_ip" />
           <el-option label="椒图" value="qax" />
           <el-option label="鼎甲备份" value="dingjia" />
+          <el-option label="资产同步" value="asset_sync" />
+          <el-option label="信息系统同步" value="info_system_sync" />
         </el-select>
       </el-form-item>
       <el-form-item label="状态">
@@ -131,7 +133,7 @@ function sourceColor(type) {
 }
 
 function sourceLabel(type) {
-  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图', dingjia: '鼎甲备份', asset_sync: '资产同步' }
+  const map = { switch: '交换机', vcenter: 'vCenter', f5: 'F5', zdns: 'ZDNS', zdns_ip: 'IP扫描', qax: '椒图', dingjia: '鼎甲备份', asset_sync: '资产同步', info_system_sync: '信息系统同步' }
   return map[type] || type
 }
 
