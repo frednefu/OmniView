@@ -205,30 +205,48 @@ def _int_or_none(val) -> int | None:
 
 
 def _build_domain_map(records: list) -> list:
-    """从 DNS 记录中筛选 A/AAAA 记录，构建域名→IP 映射（含 IP 分类）。"""
+    """从 DNS 记录中筛选 A/AAAA/CNAME 记录，构建域名→IP/别名 映射。
+       过滤 .in-addr.arpa 和 .ip6.arpa 反向解析记录。"""
     rows = []
     for r in records:
         rtype = r.get("record_type", "")
-        if rtype not in ("A", "AAAA"):
+        if rtype not in ("A", "AAAA", "CNAME"):
             continue
-        ip_str = r.get("rdata", "").strip()
-        if not ip_str:
+        full_domain = r.get("full_domain", "")
+        # 过滤反向解析记录
+        if full_domain.endswith(".in-addr.arpa") or full_domain.endswith(".ip6.arpa"):
+            continue
+        rdata = r.get("rdata", "").strip()
+        if not rdata:
             continue
 
-        ip_category = "IPv6" if rtype == "AAAA" else "IPv4"
-        network_type = _is_private_ip(ip_str)
-
-        rows.append({
-            "domain_name": r["full_domain"],
-            "record_type": rtype,
-            "ip_address": ip_str,
-            "ip_category": ip_category,
-            "network_type": network_type,
-            "ttl": r.get("ttl"),
-            "view_name": r["view_name"],
-            "zone_name": r["zone_name"],
-            "is_enabled": r.get("is_enabled", ""),
-        })
+        if rtype in ("A", "AAAA"):
+            ip_category = "IPv6" if rtype == "AAAA" else "IPv4"
+            network_type = _is_private_ip(rdata)
+            rows.append({
+                "domain_name": full_domain,
+                "record_type": rtype,
+                "ip_address": rdata,
+                "ip_category": ip_category,
+                "network_type": network_type,
+                "ttl": r.get("ttl"),
+                "view_name": r["view_name"],
+                "zone_name": r["zone_name"],
+                "is_enabled": r.get("is_enabled", ""),
+            })
+        elif rtype == "CNAME":
+            # CNAME 的 rdata 是目标域名，存到 ip_address 字段标识指向
+            rows.append({
+                "domain_name": full_domain,
+                "record_type": "CNAME",
+                "ip_address": rdata.rstrip("."),
+                "ip_category": "",
+                "network_type": "",
+                "ttl": r.get("ttl"),
+                "view_name": r["view_name"],
+                "zone_name": r["zone_name"],
+                "is_enabled": r.get("is_enabled", ""),
+            })
     return rows
 
 

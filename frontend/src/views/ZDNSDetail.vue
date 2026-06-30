@@ -62,6 +62,7 @@
               <el-option label="全部" value="" />
               <el-option label="A" value="A" />
               <el-option label="AAAA" value="AAAA" />
+              <el-option label="CNAME" value="CNAME" />
             </el-select>
             <el-select v-model="filterIsEnabled" clearable placeholder="启用" style="width:90px" @change="fetchDomainMap">
               <el-option label="全部" value="" />
@@ -85,11 +86,12 @@
               <el-empty description="暂无映射数据，请先触发扫描" :image-size="60" />
             </template>
             <el-table-column prop="domain_name" label="域名" min-width="220" show-overflow-tooltip />
-            <el-table-column prop="ip_address" label="IP 地址" width="160" />
+            <el-table-column prop="ip_address" label="IP/指向" width="180" show-overflow-tooltip />
             <el-table-column label="记录类型" width="80">
               <template #default="{ row }">
                 <el-tag v-if="row.record_type === 'A'" type="primary" size="small">A</el-tag>
                 <el-tag v-else-if="row.record_type === 'AAAA'" type="success" size="small">AAAA</el-tag>
+                <el-tag v-else-if="row.record_type === 'CNAME'" type="warning" size="small">CNAME</el-tag>
                 <span v-else>{{ row.record_type }}</span>
               </template>
             </el-table-column>
