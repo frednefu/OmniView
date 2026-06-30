@@ -9,7 +9,6 @@
           <el-button @click="showMatchPreview" :loading="previewLoading">分组预览</el-button>
           <el-button type="primary" @click="handleAutoMatch" :loading="autoMatchLoading">自动分组</el-button>
           <el-button type="success" plain @click="handleMatchOwner" :loading="ownerMatchLoading">匹配负责人</el-button>
-          <el-button v-if="selectedVMs.length > 0" type="warning" @click="showAssignDialog(selectedVMs)">指派选中 ({{ selectedVMs.length }})</el-button>
         </template>
       </div>
     </div>
@@ -114,6 +113,7 @@
                 <el-button type="warning" size="small" :disabled="selectedVMs.length===0" @click="handleRevoke">撤销认领</el-button>
                 <el-button type="danger" size="small" :disabled="selectedVMs.length===0" @click="handleCancelClaim">申请注销</el-button>
                 <el-button size="small" :disabled="selectedVMs.length===0" @click="handleUncancelClaim">撤销注销</el-button>
+                <el-button v-if="authStore.isAdmin" type="primary" size="small" :disabled="selectedVMs.length===0" @click="showAssignDialog(selectedVMs)">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
               <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}" :row-class-name="rowClass">
@@ -208,12 +208,12 @@
                 <el-button type="primary" size="small" @click="domainPage=1;loadDomains()">查询</el-button>
                 <el-button type="success" size="small" :disabled="selectedDomains.length===0" @click="handleDomainClaim">认领域名</el-button>
                 <el-button type="warning" size="small" :disabled="selectedDomains.length===0" @click="handleDomainRevoke">撤销认领</el-button>
-                <el-button v-if="authStore.isAdmin" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">管理员指派</el-button>
                 <el-button type="danger" size="small" :disabled="selectedDomains.length===0" @click="handleDomainCancel">申请注销</el-button>
                 <el-button size="small" :disabled="selectedDomains.length===0" @click="handleDomainUncancel">撤销注销</el-button>
+                <el-button v-if="authStore.isAdmin" type="primary" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ domainTotal }} 条，已选 {{ selectedDomains.length }} 条</div>
-              <el-table :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect" :default-sort="{prop:'domain_name',order:'ascending'}">
+              <el-table :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect" @sort-change="onDomainSort" :default-sort="{prop:'domain_name',order:'ascending'}">
                 <el-table-column type="selection" width="35" />
                 <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="record_type" label="类型" width="70" sortable="custom" />
@@ -238,7 +238,7 @@
                 </el-table-column>
                 <el-table-column label="认领" width="65" sortable="custom" prop="owner_name">
                   <template #default="{ row }">
-                    <el-tag :type="row.owner_name ? '' : 'info'" size="small">{{ row.owner_name ? '已认领' : '未认领' }}</el-tag>
+                    <el-tag :type="row.owner_user_id ? '' : 'info'" size="small">{{ row.owner_user_id ? '已认领' : '未认领' }}</el-tag>
                   </template>
                 </el-table-column>
               </el-table>
@@ -324,26 +324,23 @@
     </el-dialog>
 
     <!-- 管理员指派对话框 -->
-    <el-dialog v-model="assignVisible" title="管理员指派" width="700px" @closed="assignSearchResult=[]">
-      <el-input v-model="assignKeyword" placeholder="搜索未关联资产..." clearable @keyup.enter="handleAssignSearch">
-        <template #append><el-button :icon="Search" @click="handleAssignSearch" :loading="assignSearching" /></template>
-      </el-input>
-      <div style="margin-top:12px;display:flex;gap:10px">
+    <el-dialog v-model="assignVisible" title="管理员指派" width="600px" @closed="assignSearchResult=[]">
+      <div style="margin-bottom:12px;display:flex;gap:10px">
         <el-tree-select v-model="assignDeptId" :data="deptTreeAll" :props="{label:'dwmc',value:'id',children:'children'}" placeholder="选择目标部门" clearable filterable check-strictly style="flex:1" @change="onAssignDeptChange" />
         <el-select v-model="assignUserId" placeholder="搜索人员姓名" clearable filterable remote :remote-method="searchUsers" :loading="userSearching" style="width:200px" @change="onAssignUserChange">
           <el-option v-for="u in userOptions" :key="u.id" :label="`${u.name||u.username} - ${u.gh||''} (${u.department_name||''})`" :value="u.id" />
         </el-select>
       </div>
-      <el-table :data="assignSearchResult" stripe size="small" style="margin-top:12px" max-height="300" @selection-change="onAssignSelect">
-        <el-table-column type="selection" width="40" />
-        <el-table-column prop="name" label="名称" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="ip_address" label="IP" width="140" />
+      <el-table :data="assignSearchResult" stripe size="small" max-height="300">
+        <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="ip_address" label="IP" width="150" />
         <el-table-column prop="vm_folder" label="文件夹" min-width="160" />
       </el-table>
+      <div style="margin-top:8px;color:#909399;font-size:12px">已选 {{ assignSearchResult.length }} 项</div>
       <template #footer>
         <el-button @click="assignVisible = false">取消</el-button>
-        <el-button type="primary" :loading="assignSubmitting" :disabled="assignSelected.length === 0 || (!assignDeptId && !assignUserId)" @click="handleAssignSubmit">
-          指派 {{ assignSelected.length }} 项
+        <el-button type="primary" :loading="assignSubmitting" :disabled="assignSearchResult.length === 0 || (!assignDeptId && !assignUserId)" @click="handleAssignSubmit">
+          确认指派
         </el-button>
       </template>
     </el-dialog>
@@ -668,6 +665,15 @@ function onVMSort({prop, order}) {
   })
 }
 
+function onDomainSort({prop, order}) {
+  if (!order) { loadDomains(); return }
+  domainList.value.sort((a,b) => {
+    const va = a[prop] ?? ''; const vb = b[prop] ?? ''
+    if (typeof va === 'number') return order === 'ascending' ? va - vb : vb - va
+    return order === 'ascending' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
+  })
+}
+
 async function handleClaim() {
   const ids = selectedVMs.value.map(v => v.id).filter(Boolean)
   if (ids.length === 0) return ElMessage.warning('请选择 VM')
@@ -691,10 +697,7 @@ async function handleRevoke() {
 }
 
 const assignVisible = ref(false)
-const assignKeyword = ref('')
-const assignSearching = ref(false)
 const assignSearchResult = ref([])
-const assignSelected = ref([])
 const assignSubmitting = ref(false)
 const assignDeptId = ref(null)
 const assignUserId = ref(null)
@@ -1000,19 +1003,15 @@ async function handleClaimSubmit() {
 }
 
 async function showAssignDialog(preSelected = []) {
-  assignKeyword.value = ''
   assignSearchResult.value = []
-  assignSelected.value = []
   assignDeptId.value = null
   assignUserId.value = null
-  // 如果从表格选中带入，预填搜索结果
   if (preSelected.length > 0) {
     assignSearchResult.value = preSelected.map(v => ({
       asset_type: 'vm', id: v.id, name: v.vm_name,
       ip_address: v.ip_address, vm_folder: v.vm_folder,
     }))
   }
-  // 加载部门和用户选项
   try {
     deptTreeAll.value = await getDepartmentTree(true)
     userOptions.value = []
@@ -1020,21 +1019,11 @@ async function showAssignDialog(preSelected = []) {
   assignVisible.value = true
 }
 
-async function handleAssignSearch() {
-  if (!assignKeyword.value.trim()) return
-  assignSearching.value = true
-  try {
-    const res = await searchAssets(assignKeyword.value)
-    assignSearchResult.value = res.items.filter(i => i.asset_type === 'vm')
-  } catch { assignSearchResult.value = [] } finally { assignSearching.value = false }
-}
-
-function onAssignSelect(val) { assignSelected.value = val }
-
 async function handleAssignSubmit() {
-  const vmIds = assignSelected.value.filter(i => i.asset_type === 'vm' && i.id).map(i => i.id)
-  const domainNames = assignSelected.value.filter(i => i.asset_type === 'domain').map(i => i.name)
-  if (vmIds.length === 0 && domainNames.length === 0) { ElMessage.warning('请选择资产'); return }
+  const items = assignSearchResult.value
+  const vmIds = items.filter(i => i.asset_type === 'vm' && i.id).map(i => i.id)
+  const domainNames = items.filter(i => i.asset_type === 'domain').map(i => i.name)
+  if (vmIds.length === 0 && domainNames.length === 0) { ElMessage.warning('没有可指派的资产'); return }
   assignSubmitting.value = true
   try {
     if (vmIds.length > 0) {
@@ -1060,7 +1049,6 @@ async function handleAssignSubmit() {
 }
 
 function assignDomains() {
-  // 用选中的域名打开指派对话框
   const items = selectedDomains.value.map(d => ({
     asset_type: 'domain', id: null, name: d.domain_name,
     ip_address: d.ip_address, vm_folder: '',
@@ -1068,7 +1056,6 @@ function assignDomains() {
   assignSearchResult.value = items
   assignDeptId.value = null
   assignUserId.value = null
-  assignSelected.value = []
   userOptions.value = []
   try { getDepartmentTree(true).then(t => { deptTreeAll.value = t }) } catch { /* */ }
   assignVisible.value = true

@@ -366,13 +366,17 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
         db.execute(text(
             "UPDATE domain_inventory SET claim_status='auto' WHERE (claim_status IS NULL OR claim_status='') AND source='ZDNS'"
         ))
-        # 2. 更新 ip_address（ZDNS 扫描可能变化，但保留 owner/department）
+        # 2. 清理脏数据：owner_user_id 为空时清空残留的 owner_name
+        db.execute(text(
+            "UPDATE domain_inventory SET owner_name=NULL WHERE owner_user_id IS NULL AND owner_name IS NOT NULL AND owner_name != ''"
+        ))
+        # 3. 更新 ip_address（ZDNS 扫描可能变化，但保留 owner/department）
         db.execute(text(
             "UPDATE domain_inventory d JOIN zdns_domain_map z ON d.domain_name=z.domain_name "
             "SET d.ip_address=z.ip_address, d.record_type=z.record_type"
         ))
         db.commit()
-        # 3. VM 关联：IP→VM→owner→回写 domain_inventory（仅填写空的 owner）
+        # 4. VM 关联：IP→VM→owner→回写 domain_inventory（仅填写空的 owner）
         db.execute(text(
             "UPDATE domain_inventory d JOIN ("
             "SELECT DISTINCT z.domain_name, a.owner_user_id, u.name as owner_name, a.department_id "
@@ -384,7 +388,7 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
             "SET d.owner_user_id=t.owner_user_id, d.owner_name=t.owner_name, d.department_id=t.department_id, d.vm_name='', d.source_type='vm'"
         )).rowcount
         db.commit()
-        # 4. IS 关联：IS.domain→ZDNS→回写 domain_inventory（填写空的 owner 和 dept）
+        # 5. IS 关联：IS.domain→ZDNS→回写 domain_inventory（填写空的 owner 和 dept）
         import re
         is_rows = db.query(InfoSystem).filter(
             InfoSystem.domain.isnot(None), InfoSystem.domain != "",
@@ -405,7 +409,7 @@ def sync_assets(db: Session = Depends(get_db), _=Depends(require_admin)):
                     "WHERE domain_name=:dn AND (owner_user_id IS NULL OR department_id IS NULL)"
                 ), {"o": s.manager_name or "", "d": s.dept_id, "v": s.system_name, "dn": dom})
         db.commit()
-        # 5. 清理域名：不在 ZDNS 中的旧域名
+        # 6. 清理域名：不在 ZDNS 中的旧域名
         db.execute(text(
             "DELETE FROM domain_inventory WHERE source='ZDNS' AND domain_name NOT IN (SELECT domain_name FROM zdns_domain_map)"
         ))
@@ -1059,10 +1063,11 @@ def _supplement_is_domains(db, results, dept_id):
             zdns = di_map.get(x)
             if not zdns: continue
             if dept_id == 0 and (zdns.owner_user_id or zdns.department_id): continue
-            # 优先使用 domain_inventory 的认领字段（认领后由 claim API 写入）
-            owner_name = zdns.owner_name or s.manager_name or ""
+            # 只使用 domain_inventory 的认领字段（认领后由 claim API 写入）
+            # 不再回退到 IS 的 manager_name，避免未认领域名显示他人姓名
+            owner_name = zdns.owner_name or ""
             owner_user_id = zdns.owner_user_id
-            department_id = zdns.department_id
+            department_id = zdns.department_id or s.dept_id
             results.append({
                 "domain_name": zdns.domain_name, "record_type": zdns.record_type,
                 "ip_address": zdns.ip_address, "source": "ZDNS",
@@ -1145,9 +1150,9 @@ def get_dept_domains(
                 vi = vm_by_ip[ip]
                 d["vm_name"] = vi[0]
                 d["vm_id"] = vi[1]
-                # 优先使用物理认领字段，其次用 VM 的 owner
-                if not d.get("owner_name") or not d.get("department_id"):
-                    d["owner_name"] = vi[2]
+                # 仅当 domain_inventory 无部门时，从 VM 补充部门名
+                # owner_name 只取 domain_inventory 的认领值，不取 VM owner 误导
+                if not d.get("department_id"):
                     d["dept_name"] = vi[3] or ""
                 d["source_type"] = "vm"
                 results.append(d)
@@ -1185,11 +1190,14 @@ def get_dept_domains(
     if record_type:
         results = [d for d in results if (d.get("record_type") or "") == record_type]
     if claimed == "yes":
-        results = [d for d in results if d.get("owner_name")]
+        results = [d for d in results if d.get("owner_user_id")]
     elif claimed == "no":
-        results = [d for d in results if not d.get("owner_name")]
+        results = [d for d in results if not d.get("owner_user_id")]
     if status:
         results = [d for d in results if (d.get("claim_status") or "") == status]
+    # 普通用户只能看到本人认领的域名和未认领域名
+    if not _is_admin_user(current_user):
+        results = [d for d in results if not d.get("owner_user_id") or d.get("owner_user_id") == current_user.id]
 
     results.sort(key=lambda x: (x.get("domain_name") or "").lower())
     total = len(results)
