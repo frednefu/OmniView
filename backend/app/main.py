@@ -26,6 +26,8 @@ from sqlalchemy import inspect, text
 
 from app.database import engine, Base
 from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory, SharedLink, OperationLog
+from app.models.subnet_subscription import SubnetSubscription
+from app.models.subnet_hidden import SubnetHidden
 from app.api.router import api_router
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 from app.version import get_version
@@ -153,6 +155,16 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     _migrate_columns("domain_inventory", [("claim_status", "VARCHAR(16) DEFAULT ''")])
+    # 地址段订阅表
+    try:
+        Base.metadata.create_all(bind=engine, tables=[SubnetSubscription.__table__])
+    except Exception:
+        pass
+    try:
+        Base.metadata.create_all(bind=engine, tables=[SubnetHidden.__table__])
+    except Exception:
+        pass
+    _migrate_columns("subnet_subscriptions", [("show_in_dashboard", "BOOLEAN DEFAULT TRUE")])
     # 去掉 subnet_cidr 全局唯一约束，改为 (cidr+created_by) 组合
     try:
         with engine.connect() as conn:

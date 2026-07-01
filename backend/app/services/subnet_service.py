@@ -34,11 +34,22 @@ def get_subnet_utilization(db: Session, user_id: int = None, admin: bool = False
     from app.models.subnet import Subnet
 
     q = db.query(Subnet)
-    if user_id:
-        if admin:
-            q = q.filter((Subnet.created_by == user_id) | (Subnet.created_by == None))
-        else:
-            q = q.filter(Subnet.created_by == user_id)
+    hidden_subnet_ids = set()
+    if user_id and not admin:
+        # 本人 + 订阅用户
+        from app.models.subnet_subscription import SubnetSubscription
+        visible_ids = {user_id}
+        subs = db.query(SubnetSubscription.target_user_id).filter(
+            SubnetSubscription.subscriber_id == user_id,
+        ).all()
+        visible_ids.update(s.target_user_id for s in subs)
+        q = q.filter(Subnet.created_by.in_(visible_ids))
+        # 排除用户手动隐藏的地址段
+        from app.models.subnet_hidden import SubnetHidden
+        hidden_rows = db.query(SubnetHidden.subnet_id).filter(
+            SubnetHidden.user_id == user_id
+        ).all()
+        hidden_subnet_ids = {r[0] for r in hidden_rows}
     subnets = q.all()
     if not subnets:
         return []
@@ -54,6 +65,8 @@ def get_subnet_utilization(db: Session, user_id: int = None, admin: bool = False
 
     result = []
     for sn in subnets:
+        if sn.id in hidden_subnet_ids:
+            continue
         try:
             net = ipaddress.IPv4Network(sn.subnet_cidr, strict=False)
         except ValueError:

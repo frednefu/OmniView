@@ -2,7 +2,10 @@
   <div class="page">
     <div class="page-header">
       <h2>地址段管理</h2>
-      <el-button type="primary" @click="openDialog()"><el-icon><Plus /></el-icon>添加地址段</el-button>
+      <div style="display:flex;gap:8px">
+        <el-button v-if="!authStore.isAdmin" @click="openSubDialog">订阅管理</el-button>
+        <el-button type="primary" @click="openDialog()"><el-icon><Plus /></el-icon>添加地址段</el-button>
+      </div>
     </div>
     <div class="filter-bar">
       <el-input v-model="search" placeholder="搜索名称/CIDR/网关" clearable style="width:220px" @keyup.enter="fetchSubnets" @clear="fetchSubnets">
@@ -26,8 +29,13 @@
           <el-tag :type="row.is_managed ? 'success' : 'info'" size="small">{{ row.is_managed ? '是' : '否' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="authStore.isAdmin" prop="created_by_name" label="维护账号" width="100" />
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column prop="created_by_name" label="维护账号" width="110">
+        <template #default="{ row }">
+          <span>{{ row.created_by_name }}</span>
+          <el-tag v-if="!authStore.isAdmin && row.created_by !== authStore.user?.id" size="small" type="warning" style="margin-left:4px">订阅</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id || row.created_by == null">
             <el-button size="small" @click="openDialog(row)">编辑</el-button>
@@ -35,7 +43,13 @@
               <template #reference><el-button size="small" type="danger">删除</el-button></template>
             </el-popconfirm>
           </template>
-          <span v-else style="color:#c0c4cc;font-size:12px">-</span>
+          <template v-else-if="!authStore.isAdmin">
+            <el-tooltip :content="row.hidden ? '仪表盘隐藏中，点击展示' : '仪表盘可见，点击隐藏'">
+              <el-button size="small" @click="toggleSubShow(row)">
+                {{ row.hidden ? '— 隐藏' : '👁 展示' }}
+              </el-button>
+            </el-tooltip>
+          </template>
         </template>
       </el-table-column>
     </el-table>
@@ -68,6 +82,30 @@
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 订阅管理对话框 -->
+    <el-dialog v-model="subVisible" title="订阅管理" width="550px">
+      <div style="margin-bottom:12px;display:flex;gap:8px">
+        <el-input v-model="subSearch" placeholder="搜索用户姓名或工号" clearable style="flex:1" @keyup.enter="searchSubUser" />
+        <el-button type="primary" :loading="subSearching" @click="searchSubUser">搜索</el-button>
+      </div>
+      <el-table :data="subSearchResults" stripe size="small" max-height="250" v-loading="subSearching">
+        <el-table-column prop="name" label="姓名" width="100" />
+        <el-table-column prop="gh" label="工号" width="120" />
+        <el-table-column prop="department_name" label="部门" min-width="140" show-overflow-tooltip />
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button v-if="!subMap[row.id]" type="success" size="small" @click="doSubscribe(row)">订阅</el-button>
+            <el-button v-else type="danger" size="small" plain @click="doUnsubscribe(row)">取消</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="subList.length > 0" style="margin-top:16px">
+        <div style="font-size:13px;color:#606266;margin-bottom:8px">已订阅用户：</div>
+        <el-tag v-for="s in subList" :key="s.id" closable style="margin:2px 4px" @close="doUnsubscribe(s)">{{ s.target_name }}</el-tag>
+      </div>
+      <div v-else style="margin-top:16px;color:#c0c4cc;font-size:13px">暂未订阅任何用户</div>
     </el-dialog>
   </div>
 </template>
@@ -149,6 +187,58 @@ async function handleSubmit() {
 
 async function handleDelete(id) {
   try { await api.delete(`/subnets/${id}`); ElMessage.success('已删除'); fetchSubnets() } catch {}
+}
+
+// ── 订阅管理 ──
+const subVisible = ref(false), subSearch = ref(''), subSearching = ref(false)
+const subSearchResults = ref([]), subList = ref([]), subMap = ref({})
+
+async function openSubDialog() {
+  subVisible.value = true; subSearch.value = ''; subSearchResults.value = []
+  await loadSubscriptions()
+}
+async function loadSubscriptions() {
+  try {
+    const { data } = await api.get('/subnets/subscriptions')
+    subList.value = data.items || []
+    subMap.value = {}
+    subList.value.forEach(s => { subMap.value[s.target_user_id] = true })
+  } catch { subList.value = []; subMap.value = {} }
+}
+async function searchSubUser() {
+  const q = subSearch.value.trim()
+  if (!q) return
+  subSearching.value = true
+  try {
+    const { data } = await api.get('/info-systems/staff-search', { params: { q } })
+    subSearchResults.value = (data.items || []).filter(u => u.id !== authStore.user?.id)
+  } catch { subSearchResults.value = [] } finally { subSearching.value = false }
+}
+async function doSubscribe(row) {
+  try {
+    await api.post(`/subnets/subscribe/${row.id}`)
+    ElMessage.success(`已订阅 ${row.name}`)
+    subMap.value[row.id] = true
+    subList.value.push({ id: Date.now(), target_user_id: row.id, target_name: row.name })
+    fetchSubnets()
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '订阅失败') }
+}
+async function doUnsubscribe(row) {
+  try {
+    await api.delete(`/subnets/subscribe/${row.target_user_id || row.id}`)
+    ElMessage.success('已取消订阅')
+    const uid = row.target_user_id || row.id
+    delete subMap.value[uid]
+    subList.value = subList.value.filter(s => s.target_user_id !== uid)
+    fetchSubnets()
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '取消失败') }
+}
+async function toggleSubShow(row) {
+  try {
+    const { data } = await api.put(`/subnets/hidden/${row.id}`)
+    row.hidden = data.hidden
+    ElMessage.success(data.hidden ? '已在仪表盘隐藏' : '已在仪表盘展示')
+  } catch { /* ignore */ }
 }
 
 onMounted(()=>{fetchSubnets();if(authStore.isAdmin)loadUsers()})
