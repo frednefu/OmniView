@@ -25,7 +25,7 @@
       <el-input v-model="filterManager" placeholder="管理员" clearable style="width:100px" @keyup.enter="fetchList" @clear="fetchList"/>
       <el-input v-model="filterOwner" placeholder="负责人" clearable style="width:100px" @keyup.enter="fetchList" @clear="fetchList"/>
       <el-select v-model="filterFillType" placeholder="填报状态" clearable style="width:110px" @change="fetchList">
-        <el-option v-for="t in ['导入','手动','自动','注销','离线','失效']" :key="t" :label="t" :value="t"/>
+        <el-option v-for="t in ['导入','手动','自动','注销','申请注销','离线','失效']" :key="t" :label="t" :value="t"/>
       </el-select>
       <el-select v-model="filterUrlStatus" placeholder="验证状态" clearable style="width:110px" @change="fetchList">
         <el-option v-for="t in ['在线','离线']" :key="t" :label="t" :value="t"/>
@@ -34,6 +34,8 @@
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
       <el-button v-if="selectedIds.length>0" type="success" size="small" @click="handleBatchClaim">批量认领 ({{selectedIds.length}})</el-button>
       <el-button v-if="selectedIds.length>0" type="warning" size="small" @click="handleBatchRevoke">批量撤销 ({{selectedIds.length}})</el-button>
+      <el-button v-if="selectedIds.length>0" type="danger" size="small" @click="handleBatchCancel">申请注销 ({{selectedIds.length}})</el-button>
+      <el-button v-if="selectedIds.length>0" size="small" @click="handleBatchUncancel">撤销注销 ({{selectedIds.length}})</el-button>
     </div>
     <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @sort-change="onSort" :default-sort="{prop:'id',order:'descending'}">
       <el-table-column type="selection" width="40" />
@@ -49,7 +51,7 @@
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip sortable/>
       <el-table-column prop="fill_type" label="填报状态" width="90" sortable>
         <template #default="{row}">
-          <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'info':''" size="small">{{row.fill_type||'手动'}}</el-tag>
+          <el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'||row.fill_type==='申请注销'?'danger':row.fill_type==='离线'?'warning':row.fill_type==='失效'?'info':''" size="small">{{row.fill_type||'手动'}}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="url_status" label="验证状态" width="90" sortable>
@@ -88,7 +90,7 @@
               <el-col :span="16"><el-form-item label="系统名称" required><el-input v-model="form.system_name" placeholder="信息系统的完整名称"/></el-form-item></el-col>
               <el-col :span="8"><el-form-item label="资产类型"><el-select v-model="form.system_type" style="width:100%"><el-option v-for="t in sysTypes" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
               <el-col :span="8"><el-form-item label="信息系统类型"><el-select v-model="form.sub_type" filterable style="width:100%" clearable><el-option v-for="t in subTypes" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
-              <el-col :span="8"><el-form-item label="填报类型"><el-select v-model="form.fill_type" style="width:100%"><el-option v-for="t in ['导入','手动','自动','注销','离线','失效']" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
+              <el-col :span="8"><el-form-item label="填报类型"><el-select v-model="form.fill_type" style="width:100%"><el-option v-for="t in ['导入','手动','自动','注销','申请注销','离线','失效']" :key="t" :label="t" :value="t"/></el-select></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="IP地址"><el-input v-model="form.ip_address" placeholder="多个IP用逗号分隔"/></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="域名"><el-input v-model="form.domain" placeholder="多个域名逗号分隔，不含http"/></el-form-item></el-col>
               <el-col :span="12"><el-form-item label="入口地址"><el-input v-model="form.entry_url" placeholder="https://xxx.nefu.edu.cn"/></el-form-item></el-col>
@@ -584,6 +586,24 @@ async function handleBatchRevoke(){
     selectedIds.value=[]
     fetchList()
   }catch(e){ElMessage.error(e.response?.data?.detail || '撤销失败，可能是权限不足')}
+}
+async function handleBatchCancel(){
+  if(!selectedIds.value.length) return
+  try{
+    await api.post('/assets/batch-cancel',{ids:selectedIds.value,type:'info_system'})
+    ElMessage.success('已申请注销')
+    selectedIds.value=[]
+    fetchList()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'申请注销失败')}
+}
+async function handleBatchUncancel(){
+  if(!selectedIds.value.length) return
+  try{
+    await api.post('/assets/batch-uncancel',{ids:selectedIds.value,type:'info_system'})
+    ElMessage.success('已撤销注销')
+    selectedIds.value=[]
+    fetchList()
+  }catch(e){ElMessage.error(e.response?.data?.detail||'撤销注销失败')}
 }
 async function handleDelete(r){
   try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'})}catch{return}

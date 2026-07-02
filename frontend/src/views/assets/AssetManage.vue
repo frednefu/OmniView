@@ -271,7 +271,7 @@
                 <el-button size="small" :disabled="selectedSys.length===0" @click="handleSysUncancel">撤销注销</el-button>
               </div>
               <div class="total-info">共 {{ sysTotal }} 条</div>
-              <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onSysSelect">
+              <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onSysSelect" @sort-change="onSysSort" :default-sort="{prop:'system_name',order:'ascending'}">
                 <el-table-column type="selection" width="35" />
                 <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="system_type" label="资产类型" width="120" sortable="custom" />
@@ -282,7 +282,7 @@
                 <el-table-column prop="manager_name" label="管理员" width="80" sortable="custom" />
                 <el-table-column prop="owner_name" label="负责人" width="80" sortable="custom" />
                 <el-table-column prop="fill_type" label="填报状态" width="90">
-                  <template #default="{row}"><el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'?'danger':''" size="small">{{ row.fill_type||'手动' }}</el-tag></template>
+                  <template #default="{row}"><el-tag :type="row.fill_type==='自动'?'success':row.fill_type==='注销'||row.fill_type==='申请注销'?'danger':''" size="small">{{ row.fill_type||'手动' }}</el-tag></template>
                 </el-table-column>
                 <el-table-column prop="djdj_status" label="等保状态" width="90" />
               </el-table>
@@ -668,6 +668,15 @@ function onVMSort({prop, order}) {
 function onDomainSort({prop, order}) {
   if (!order) { loadDomains(); return }
   domainList.value.sort((a,b) => {
+    const va = a[prop] ?? ''; const vb = b[prop] ?? ''
+    if (typeof va === 'number') return order === 'ascending' ? va - vb : vb - va
+    return order === 'ascending' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
+  })
+}
+
+function onSysSort({prop, order}) {
+  if (!order) { loadSystems(); return }
+  sysList.value.sort((a,b) => {
     const va = a[prop] ?? ''; const vb = b[prop] ?? ''
     if (typeof va === 'number') return order === 'ascending' ? va - vb : vb - va
     return order === 'ascending' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
