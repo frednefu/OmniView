@@ -21,22 +21,21 @@
     <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect">
       <el-table-column type="selection" width="40" />
       <el-table-column prop="record_no" label="备案编号" width="200" />
-      <el-table-column prop="system_name" label="系统名称" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="system_name" label="系统名称" min-width="180" show-overflow-tooltip>
+        <template #default="{row}">
+          <span>{{ row.system_name }}</span>
+          <el-tag v-if="row.is_mine" type="success" size="small" style="margin-left:4px">我的</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="org_name" label="备案单位" min-width="160" />
       <el-table-column prop="eval_org" label="测评单位" min-width="160" />
       <el-table-column prop="level" label="等级" width="80" />
       <el-table-column prop="record_date" label="备案日期" width="120" />
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column label="操作" width="100" fixed="right">
         <template #default="{row}">
           <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id">
             <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
             <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
-          </template>
-          <template v-else-if="!row.claimed_by">
-            <el-tooltip content="认领"><el-button link type="success" size="small" @click="handleClaim(row,'djdj')">认领</el-button></el-tooltip>
-          </template>
-          <template v-else-if="row.claimed_by === authStore.user?.id">
-            <el-tooltip content="撤销认领"><el-button link type="warning" size="small" @click="handleRevoke(row,'djdj')">撤销</el-button></el-tooltip>
           </template>
           <span v-else style="color:#c0c4cc;font-size:12px">-</span>
         </template>

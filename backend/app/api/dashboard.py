@@ -499,28 +499,103 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
 
 @router.get("/personal")
 def personal_dashboard(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """普通用户仪表盘：个人资产统计 + 子网利用率。"""
+    """普通用户仪表盘：个人资产统计 + 饼图分解 + 子网利用率。"""
     uid = current_user.id
     user_gh = str(current_user.gh or uid)
-    # 认领的 VM 数
+
+    # ── 我的虚拟机 ──
     my_vms = db.execute(text(
-        "SELECT COUNT(*) FROM asset_inventory WHERE owner_user_id=:u"
+        "SELECT COUNT(*) FROM asset_inventory WHERE owner_user_id=:u AND claim_status != 'unlinked'"
     ), {"u": uid}).scalar() or 0
-    # 关联域名数
-    my_domains = db.execute(text(
-        "SELECT COUNT(DISTINCT z.domain_name) FROM zdns_domain_map z "
-        "JOIN vm_inventory v ON (v.ip_address LIKE CONCAT('%,',z.ip_address) "
-        "OR v.ip_address LIKE CONCAT(z.ip_address,',%') OR v.ip_address=z.ip_address) "
-        "JOIN asset_inventory a ON v.vm_name=a.vm_name WHERE a.owner_user_id=:u"
-    ), {"u": uid}).scalar() or 0
-    # 管理的信息系统
+    # VM 开关机分解
+    vm_power = db.execute(text(
+        "SELECT v.power_state, COUNT(*) as cnt FROM vm_inventory v "
+        "JOIN asset_inventory a ON v.vm_name=a.vm_name "
+        "WHERE a.owner_user_id=:u AND a.claim_status != 'unlinked' "
+        "GROUP BY v.power_state"
+    ), {"u": uid}).fetchall()
+    _POWER_MAP = {"poweredOn": "开机", "poweredOff": "关机", "suspended": "挂起"}
+    vm_power_data = [{"name": _POWER_MAP.get(r.power_state, r.power_state or "未知"), "value": r.cnt} for r in vm_power]
+    # VM 网络分解
+    vm_net = db.execute(text(
+        "SELECT v.network_name, COUNT(*) as cnt FROM vm_inventory v "
+        "JOIN asset_inventory a ON v.vm_name=a.vm_name "
+        "WHERE a.owner_user_id=:u AND a.claim_status != 'unlinked' AND v.network_name IS NOT NULL AND v.network_name != '' "
+        "GROUP BY v.network_name"
+    ), {"u": uid}).fetchall()
+    vm_net_data = [{"name": r.network_name, "value": r.cnt} for r in vm_net]
+    # VM 备份分解
+    vm_backup = db.execute(text(
+        "SELECT CASE WHEN d.id IS NOT NULL THEN '已备份' ELSE '未备份' END as status, COUNT(DISTINCT v.id) as cnt "
+        "FROM vm_inventory v JOIN asset_inventory a ON v.vm_name=a.vm_name "
+        "LEFT JOIN dingjia_backup_records d ON v.vm_name=d.vm_name "
+        "WHERE a.owner_user_id=:u AND a.claim_status != 'unlinked' GROUP BY status"
+    ), {"u": uid}).fetchall()
+    vm_backup_data = [{"name": r.status, "value": r.cnt} for r in vm_backup]
+    # VM 椒图分解
+    vm_qax = db.execute(text(
+        "SELECT CASE WHEN q.id IS NOT NULL THEN '已安装' ELSE '未安装' END as status, COUNT(DISTINCT v.id) as cnt "
+        "FROM vm_inventory v JOIN asset_inventory a ON v.vm_name=a.vm_name "
+        "LEFT JOIN qax_servers q ON v.ip_address LIKE CONCAT('%',q.ipv4,'%') OR v.ip_address=q.ipv4 "
+        "OR v.ip_address LIKE CONCAT('%',q.intranet_ip,'%') OR v.ip_address=q.intranet_ip "
+        "WHERE a.owner_user_id=:u AND a.claim_status != 'unlinked' GROUP BY status"
+    ), {"u": uid}).fetchall()
+    vm_qax_data = [{"name": r.status, "value": r.cnt} for r in vm_qax]
+
+    # ── 我的域名 ──
+    from app.models.domain_inventory import DomainInventory
+    my_domains = db.query(DomainInventory).filter(
+        DomainInventory.owner_user_id == uid,
+        DomainInventory.claim_status != 'unlinked'
+    ).count()
+    # 域名记录类型分解
+    domain_rtype = db.execute(text(
+        "SELECT record_type, COUNT(*) as cnt FROM domain_inventory "
+        "WHERE owner_user_id=:u AND (claim_status IS NULL OR claim_status != 'unlinked') "
+        "AND record_type IS NOT NULL AND record_type != '' GROUP BY record_type"
+    ), {"u": uid}).fetchall()
+    domain_rtype_data = [{"name": r.record_type, "value": r.cnt} for r in domain_rtype]
+    # 域名注销状态分解
+    domain_status = db.execute(text(
+        "SELECT COALESCE(NULLIF(claim_status,''),'manual') as status, COUNT(*) as cnt "
+        "FROM domain_inventory WHERE owner_user_id=:u "
+        "AND (claim_status IS NULL OR claim_status != 'unlinked') GROUP BY status"
+    ), {"u": uid}).fetchall()
+    _STATUS_MAP = {"manual": "手动", "auto": "自动", "unlinked": "未分组", "申请注销": "申请注销"}
+    domain_status_data = [{"name": _STATUS_MAP.get(r.status, r.status), "value": r.cnt} for r in domain_status]
+
+    # ── 我的信息系统 ──
+    from app.models.info_system import InfoSystem
     my_systems = db.query(InfoSystem).filter(InfoSystem.manager_gh == user_gh).count()
-    # 个人子网
+    # 信息系统填报状态分解
+    sys_fill = db.execute(text(
+        "SELECT COALESCE(NULLIF(fill_type,''),'手动') as status, COUNT(*) as cnt FROM info_systems "
+        "WHERE manager_gh=:gh GROUP BY status"
+    ), {"gh": user_gh}).fetchall()
+    sys_fill_data = [{"name": r.status, "value": r.cnt} for r in sys_fill]
+
+    # ── 等保 / 供应链 ──
+    my_djdj = db.execute(text(
+        "SELECT COUNT(DISTINCT d.id) FROM djdj_records d "
+        "JOIN info_systems s ON d.system_name=s.djdj_sys_name WHERE s.manager_gh=:gh"
+    ), {"gh": user_gh}).scalar() or 0
+    my_supply_chain = db.execute(text(
+        "SELECT COUNT(DISTINCT sc.id) FROM supply_chains sc "
+        "JOIN info_systems s ON sc.company_name=s.vendor_name "
+        "WHERE s.manager_gh=:gh AND s.vendor_name IS NOT NULL AND s.vendor_name != ''"
+    ), {"gh": user_gh}).scalar() or 0
+
+    # ── 个人子网 ──
     my_subnets = db.query(Subnet).filter(Subnet.created_by == uid).count()
-    # 子网利用率
+
     return {
         "my_vms": my_vms, "my_domains": my_domains, "my_systems": my_systems,
+        "my_djdj": my_djdj, "my_supply_chain": my_supply_chain,
         "my_subnets": my_subnets,
+        "vm_power": vm_power_data, "vm_network": vm_net_data,
+        "vm_backup": vm_backup_data, "vm_qax": vm_qax_data,
+        "domain_rtype": domain_rtype_data, "domain_status": domain_status_data,
+        "sys_fill": sys_fill_data,
         "subnet_utilization": [SubnetUtilization(**item) for item in get_subnet_utilization(db, uid, False)]
     }
 

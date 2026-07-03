@@ -16,19 +16,37 @@
         <template #append><el-button :icon="Search" @click="fetchList" /></template>
       </el-input>
       <span style="color:#909399;font-size:13px;line-height:32px">共 {{total}} 条</span>
+      <el-button v-if="selectedIds.length>0" type="success" size="small" @click="handleBatchClaim">认领 ({{selectedIds.length}})</el-button>
+      <el-button v-if="selectedIds.length>0" type="warning" size="small" @click="handleBatchRevoke">撤销认领 ({{selectedIds.length}})</el-button>
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
     </div>
-    <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect">
+    <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @sort-change="onSort" :default-sort="{prop:'id',order:'descending'}">
       <el-table-column type="selection" width="40" />
-      <el-table-column prop="company_name" label="单位名称" min-width="200" show-overflow-tooltip/>
-      <el-table-column prop="credit_code" label="信用代码" width="180"/>
-      <el-table-column prop="company_type" label="类型" width="100"/>
-      <el-table-column prop="importance" label="重要程度" width="80"/>
-      <el-table-column prop="security_contact" label="联系人" width="80"/>
-      <el-table-column prop="security_phone" label="电话" width="120"/>
+      <el-table-column prop="company_name" label="单位名称" min-width="200" show-overflow-tooltip sortable="custom">
+        <template #default="{row}">
+          <span>{{ row.company_name }}</span>
+          <el-tag v-if="row.is_mine" type="success" size="small" style="margin-left:4px">我的</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="关联信息系统" width="120">
+        <template #default="{row}">
+          <el-button v-if="row.ref_count>0" link type="primary" size="small" @click="showRefs(row)">{{ row.ref_count }} 个系统</el-button>
+          <span v-else style="color:#c0c4cc">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="credit_code" label="信用代码" width="180" sortable="custom"/>
+      <el-table-column prop="company_type" label="类型" width="100" sortable="custom"/>
+      <el-table-column prop="importance" label="重要程度" width="80" sortable="custom"/>
+      <el-table-column prop="security_contact" label="联系人" width="80" sortable="custom"/>
+      <el-table-column prop="security_phone" label="电话" width="120" sortable="custom"/>
+      <el-table-column prop="created_by_name" label="数据添加者" width="90" />
+      <el-table-column prop="claimed_by_name" label="认领人" width="80" />
+      <el-table-column prop="created_at" label="维护时间" width="110" sortable="custom">
+        <template #default="{row}">{{ row.created_at ? new Date(row.created_at).toLocaleDateString('zh-CN') : '' }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{row}">
-          <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id">
+          <template v-if="authStore.isAdmin || row.created_by === authStore.user?.id || row.claimed_by === authStore.user?.id">
             <el-tooltip content="编辑"><el-button link type="primary" :icon="Edit" size="small" @click="openEdit(row)"/></el-tooltip>
             <el-tooltip content="删除"><el-button link type="danger" :icon="Delete" size="small" @click="handleDelete(row)"/></el-tooltip>
           </template>
@@ -37,6 +55,15 @@
       </el-table-column>
     </el-table>
     <el-pagination v-if="total>0" v-model:current-page="page" v-model:page-size="size" :page-sizes="[10,20,50,100]" :total="total" layout="total,sizes,prev,pager,next" @current-change="fetchList" @size-change="fetchList" style="justify-content:center;margin-top:16px"/>
+
+    <!-- 关联信息系统弹窗 -->
+    <el-dialog v-model="refsVisible" :title="'关联信息系统 - '+refsCompany" width="600px">
+      <el-table :data="refsList" v-loading="refsLoading" stripe size="small" max-height="350">
+        <el-table-column prop="system_name" label="系统名称" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="manager_name" label="管理员" width="100" />
+      </el-table>
+      <div v-if="!refsLoading && refsList.length===0" style="text-align:center;color:#c0c4cc;padding:20px">暂无信息系统引用此单位</div>
+    </el-dialog>
 
     <!-- 编辑/添加对话框 -->
     <el-dialog v-model="dlg" :title="isEdit?'编辑供应链单位':'添加供应链单位'" width="960px" class="sc-dialog" destroy-on-close>
@@ -276,7 +303,9 @@ import { addressOptions } from '@/data/addressOptions.js'
 const authStore=useAuthStore()
 const origin = window.location.origin
 const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
+const sortField=ref(''),sortOrder=ref('desc')
 const selectedIds=ref([]),dlg=ref(false),isEdit=ref(false),editId=ref(null),saving=ref(false)
+const refsVisible=ref(false),refsCompany=ref(''),refsList=ref([]),refsLoading=ref(false)
 const addressArr=ref([])  // 级联地址选择器
 const fileInput=ref(null)
 
@@ -299,7 +328,9 @@ const form=reactive({
 function resetForm(){Object.assign(form,{company_name:'',credit_code:'',address:'',security_dept:'',security_contact:'',security_phone:'',company_type:'',has_foreign_capital:'',industry:'',service_type:'',importance:'',url_ip_range:'',data_level:'',data_location:'',data_storage:'',db_type:'',remark:'',industryArr:[],serviceTypeArr:[],dataLocationArr:[],dataStorageArr:[],dbTypeArr:[]});addressArr.value=[]}
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
 
-async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems/supply-chain',{params:{page:page.value,size:size.value,search:search.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
+function onSort({prop,order}){sortField.value=prop||'';sortOrder.value=order==='ascending'?'asc':'desc';fetchList()}
+async function fetchList(){loading.value=true;try{const params={page:page.value,size:size.value,search:search.value};if(sortField.value){params.sort_field=sortField.value;params.sort_order=sortOrder.value}const r=await api.get('/info-systems/supply-chain',{params});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
+async function showRefs(row){refsCompany.value=row.company_name;refsVisible.value=true;refsList.value=[];refsLoading.value=true;try{const {data}=await api.get('/info-systems/supply-chain-refs/'+row.id);refsList.value=data.items||[]}catch{refsList.value=[]}finally{refsLoading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
 function resolveAddress(raw) {
   // 解析地址字符串为级联数组 [省份, 城市]
@@ -329,9 +360,28 @@ async function handleSave(){
   }catch(e){ElMessage.error(e.response?.data?.detail||'保存失败')}
   finally{saving.value=false}
 }
+async function handleBatchClaim(){
+  if(!selectedIds.value.length) return
+  try{await api.post('/info-systems/batch-claim',{model:'supply_chain',ids:selectedIds.value});ElMessage.success('认领成功');selectedIds.value=[];fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'认领失败')}
+}
+async function handleBatchRevoke(){
+  if(!selectedIds.value.length) return
+  try{await ElMessageBox.confirm('确定撤销选中的认领？','确认',{type:'warning'})}catch{return}
+  try{await api.post('/info-systems/batch-revoke',{model:'supply_chain',ids:selectedIds.value});ElMessage.success('已撤销');selectedIds.value=[];fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'撤销失败')}
+}
 async function handleDelete(r){
-  try{await ElMessageBox.confirm('确定删除?','确认',{type:'warning'})}catch{return}
-  try{await api.delete('/info-systems/supply-chain/'+r.id);ElMessage.success('已删除');fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'删除失败，可能是权限不足')}
+  try{await ElMessageBox.confirm('确定删除 '+r.company_name+'?','确认删除',{type:'warning'})}catch{return}
+  // 检查引用
+  try{
+    const {data} = await api.get('/info-systems/supply-chain-refs/'+r.id)
+    if(data.items && data.items.length>0){
+      const names = data.items.map(i=>i.system_name+'('+(i.manager_name||'无')+')').join('<br>')
+      await ElMessageBox.alert('<b>该供应链单位被以下信息系统引用，无法删除：</b><br><br>'+names,
+        '无法删除 ('+data.items.length+'个引用)',{dangerouslyUseHTMLString:true,type:'warning',confirmButtonText:'知道了'})
+      return
+    }
+  }catch{}
+  try{await api.delete('/info-systems/supply-chain/'+r.id);ElMessage.success('已删除');fetchList()}catch(e){ElMessage.error(e.response?.data?.detail||'删除失败')}
 }
 async function handleBatchDelete(){
   try{await ElMessageBox.confirm('确定删除选中的 '+selectedIds.value.length+' 条记录?','批量删除',{type:'error'})}catch{return}

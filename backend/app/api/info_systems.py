@@ -1228,9 +1228,19 @@ def list_djdj(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
     else:
         q = q.order_by(DjDjRecord.id.desc())
     items = q.offset((page - 1) * size).limit(size).all()
+    # 获取当前用户管理的等保系统名称集合（通过 djdj_sys_name 匹配）
+    user_gh = str(user.gh or user.id)
+    my_djdj_names = set()
+    if not _is_admin(user):
+        my_djdj = db.query(InfoSystem.djdj_sys_name).filter(
+            InfoSystem.manager_gh == user_gh,
+            InfoSystem.djdj_sys_name.isnot(None), InfoSystem.djdj_sys_name != ""
+        ).all()
+        my_djdj_names = {s[0] for s in my_djdj}
     result = []
     for r in items:
         d = {c.name: getattr(r, c.name) for c in r.__table__.columns}
+        d["is_mine"] = r.system_name in my_djdj_names if not _is_admin(user) else False
         result.append(d)
     return {"items": result, "total": total}
 
@@ -1459,7 +1469,7 @@ def search_djdj(q: str = Query(""), db: Session = Depends(get_db), _=Depends(get
 
 # ── 供应链 CRUD ──
 
-_SC_SORTABLE = {"company_name","credit_code","company_type","importance","security_contact","security_phone"}
+_SC_SORTABLE = {"company_name","credit_code","company_type","importance","security_contact","security_phone","created_at"}
 
 @router.get("/supply-chain")
 def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
@@ -1477,7 +1487,39 @@ def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le
     else:
         q = q.order_by(SupplyChain.id.desc())
     items = q.offset((page - 1) * size).limit(size).all()
-    return {"items": [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in items], "total": total}
+    # 批量查询创建人/认领人姓名
+    user_ids = set()
+    for r in items:
+        if r.created_by: user_ids.add(r.created_by)
+        if r.claimed_by: user_ids.add(r.claimed_by)
+    user_map = {}
+    if user_ids:
+        users = db.query(User).filter(User.id.in_(user_ids)).all()
+        user_map = {u.id: u.name or u.username for u in users}
+    # 批量查询引用计数
+    company_names = [r.company_name for r in items if r.company_name]
+    ref_counts = {}
+    if company_names:
+        ref_rows = db.execute(text(
+            "SELECT vendor_name, COUNT(*) as cnt FROM info_systems "
+            "WHERE vendor_name IN :names AND vendor_name IS NOT NULL AND vendor_name != '' "
+            "GROUP BY vendor_name"
+        ), {"names": tuple(company_names)}).fetchall()
+        ref_counts = {r[0]: r[1] for r in ref_rows}
+    user_gh = str(user.gh or user.id)
+    my_vendor_names = set()
+    if not _is_admin(user):
+        my_vendors = db.query(InfoSystem.vendor_name).filter(
+            InfoSystem.manager_gh == user_gh,
+            InfoSystem.vendor_name.isnot(None), InfoSystem.vendor_name != ""
+        ).all()
+        my_vendor_names = {v[0] for v in my_vendors}
+    return {"items": [{**{c.name: getattr(r, c.name) for c in r.__table__.columns},
+                       "created_by_name": user_map.get(r.created_by, ""),
+                       "claimed_by_name": user_map.get(r.claimed_by, ""),
+                       "ref_count": ref_counts.get(r.company_name, 0),
+                       "is_mine": r.company_name in my_vendor_names if not _is_admin(user) else False}
+            for r in items], "total": total}
 
 @router.post("/supply-chain")
 def create_supply_chain(body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
@@ -1609,12 +1651,23 @@ def batch_delete_supply_chain(body: dict, db: Session = Depends(get_db), _=Depen
     return {"message": f"已删除 {len(ids)} 条"}
 
 
+@router.get("/supply-chain-refs/{rec_id}")
+def check_supply_chain_refs(rec_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """检查供应链记录被哪些信息系统引用。"""
+    rec = db.query(SupplyChain).get(rec_id)
+    if not rec: raise HTTPException(404, "不存在")
+    refs = db.query(InfoSystem.system_name, InfoSystem.manager_name).filter(
+        InfoSystem.vendor_name == rec.company_name
+    ).all()
+    return {"items": [{"system_name": r[0], "manager_name": r[1] or ""} for r in refs]}
+
+
 @router.put("/supply-chain/{rec_id}")
 def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), user=Depends(get_current_user)):
     rec = db.query(SupplyChain).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
-    if not _is_admin(user) and rec.created_by != user.id:
-        raise HTTPException(403, "只能编辑自己创建的数据")
+    if not _is_admin(user) and rec.created_by != user.id and rec.claimed_by != user.id:
+        raise HTTPException(403, "只能编辑自己创建或认领的数据")
     try:
         for k, v in body.items():
             if hasattr(rec, k) and k != "id" and k not in _READONLY_COLS:
@@ -1629,8 +1682,16 @@ def update_supply_chain(rec_id: int, body: dict, db: Session = Depends(get_db), 
 def delete_supply_chain(rec_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     rec = db.query(SupplyChain).get(rec_id)
     if not rec: raise HTTPException(404, "不存在")
-    if not _is_admin(user) and rec.created_by != user.id:
-        raise HTTPException(403, "只能删除自己创建的数据")
+    if not _is_admin(user) and rec.created_by != user.id and rec.claimed_by != user.id:
+        raise HTTPException(403, "只能删除自己创建或认领的数据")
+    # 检查是否有信息系统引用
+    refs = db.query(InfoSystem.system_name).filter(
+        InfoSystem.vendor_name == rec.company_name
+    ).all()
+    if refs:
+        names = "、".join(r[0] for r in refs[:5])
+        more = f" 等{len(refs)}个" if len(refs) > 5 else ""
+        raise HTTPException(400, f"该供应链单位被 {len(refs)} 个信息系统引用（{names}{more}），无法删除。请先在信息系统中解除关联。")
     db.delete(rec); db.commit()
     return {"message": "已删除"}
 

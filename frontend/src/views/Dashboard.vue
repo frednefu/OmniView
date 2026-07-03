@@ -32,10 +32,59 @@
           </div>
         </el-col>
         <el-col :span="6">
+          <div class="stat-card" @click="go('/sys/djdj')">
+            <div class="stat-icon" style="background:linear-gradient(135deg,#06b6d4,#22d3ee)"><el-icon :size="22"><CircleCheck /></el-icon></div>
+            <div class="stat-info"><div class="stat-value">{{ personal.my_djdj }}</div><div class="stat-title">我的等保</div></div>
+          </div>
+        </el-col>
+      </el-row>
+      <el-row :gutter="16" class="stat-row" style="margin-top:16px">
+        <el-col :span="6">
+          <div class="stat-card" @click="go('/sys/supply-chain')">
+            <div class="stat-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)"><el-icon :size="22"><OfficeBuilding /></el-icon></div>
+            <div class="stat-info"><div class="stat-value">{{ personal.my_supply_chain }}</div><div class="stat-title">我的供应链</div></div>
+          </div>
+        </el-col>
+        <el-col :span="6">
           <div class="stat-card" @click="go('/subnets')">
             <div class="stat-icon" style="background:linear-gradient(135deg,#ef4444,#f87171)"><el-icon :size="22"><Grid /></el-icon></div>
             <div class="stat-info"><div class="stat-value">{{ personal.my_subnets }}</div><div class="stat-title">我的地址段</div></div>
           </div>
+        </el-col>
+      </el-row>
+      <!-- 饼图：VM/域名/信息系统分解 -->
+      <el-row :gutter="16" style="margin-top:16px">
+        <el-col :span="8">
+          <el-card shadow="hover"><template #header>虚拟机 — 开关机</template>
+            <div ref="vmPowerRef" class="chart-container" style="height:220px"></div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover"><template #header>虚拟机 — 所属网络</template>
+            <div ref="vmNetRef" class="chart-container" style="height:220px"></div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover"><template #header>虚拟机 — 备份/椒图</template>
+            <div ref="vmExtraRef" class="chart-container" style="height:220px"></div>
+          </el-card>
+        </el-col>
+      </el-row>
+      <el-row :gutter="16" style="margin-top:16px">
+        <el-col :span="8">
+          <el-card shadow="hover"><template #header>域名 — 记录类型</template>
+            <div ref="domainRtypeRef" class="chart-container" style="height:220px"></div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover"><template #header>域名 — 填报状态</template>
+            <div ref="domainStatusRef" class="chart-container" style="height:220px"></div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover"><template #header>信息系统 — 填报状态</template>
+            <div ref="sysFillRef" class="chart-container" style="height:220px"></div>
+          </el-card>
         </el-col>
       </el-row>
       <!-- 个人子网 IP 利用率 -->
@@ -494,6 +543,9 @@ const stats = reactive({
 })
 const personal = reactive({ my_vms: 0, my_domains: 0, my_systems: 0, my_subnets: 0, subnet_utilization: [] })
 const personalBarRef = ref(null)
+const vmPowerRef = ref(null), vmNetRef = ref(null), vmExtraRef = ref(null)
+const domainRtypeRef = ref(null), domainStatusRef = ref(null), sysFillRef = ref(null)
+let personalCharts = []
 const personalOccupiedVisible = ref(false), personalOccupiedLoading = ref(false)
 const personalOccupiedCidr = ref(''), personalOccupiedData = ref([])
 const personalOccupiedTotal = ref(0), personalOccupiedPage = ref(1)
@@ -689,10 +741,16 @@ async function fetchIpMacList() {
 async function fetchPersonal() {
   try {
     const { data } = await api.get('/dashboard/personal')
-    personal.my_vms = data.my_vms; personal.my_domains = data.my_domains
-    personal.my_systems = data.my_systems; personal.my_subnets = data.my_subnets
-    personal.subnet_utilization = data.subnet_utilization || []
-    nextTick(() => renderPersonalBar())
+    Object.assign(personal, data)
+    nextTick(() => {
+      renderPersonalBar()
+      renderPieChart(vmPowerRef, data.vm_power, 'VM 开关机')
+      renderPieChart(vmNetRef, data.vm_network, 'VM 网络')
+      renderBackupQaxChart(vmExtraRef, data.vm_backup, data.vm_qax)
+      renderPieChart(domainRtypeRef, data.domain_rtype, '记录类型')
+      renderPieChart(domainStatusRef, data.domain_status, '域名状态')
+      renderPieChart(sysFillRef, data.sys_fill, '填报状态')
+    })
   } catch {}
 }
 function renderPersonalBar() {
@@ -731,6 +789,42 @@ function renderPersonalBar() {
       { name: '可用', type: 'bar', stack: 'total', data: free, barWidth: 28, itemStyle: { borderRadius: [6,6,0,0], color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#34d399'},{offset:1,color:'#10b981'}]) } },
     ]
   }, { notMerge: true })
+}
+const pieColorMap = { '开机': '#10b981', '关机': '#ef4444', '挂起': '#f59e0b', '已备份': '#3b82f6', '未备份': '#94a3b8', '已安装': '#8b5cf6', '未安装': '#94a3b8', '手动': '#6366f1', '自动': '#10b981', '注销': '#ef4444', '申请注销': '#f97316', '未分组': '#94a3b8', A: '#3b82f6', AAAA: '#10b981', CNAME: '#f59e0b' }
+function renderPieChart(elRef, data, title) {
+  const el = elRef.value; if (!el) return
+  if (!data || data.length === 0) return
+  let chart = echarts.getInstanceByDom(el) || echarts.init(el)
+  chart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { orient: 'vertical', right: 5, top: 'center', itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 11, color: '#64748b' } },
+    series: [{
+      type: 'pie', radius: ['45%', '72%'], center: ['38%', '50%'],
+      data: data.map(d => ({ name: d.name, value: d.value, itemStyle: { color: pieColorMap[d.name] || undefined } })),
+      label: { show: true, formatter: '{b}\n{d}%', fontSize: 10 },
+      emphasis: { label: { fontSize: 14, fontWeight: 'bold' } }
+    }]
+  }, { notMerge: true })
+}
+function renderBackupQaxChart(elRef, backupData, qaxData) {
+  const el = elRef.value; if (!el) return
+  let chart = echarts.getInstanceByDom(el) || echarts.init(el)
+  const series = []
+  if (backupData && backupData.length) {
+    series.push({
+      type: 'pie', radius: ['0%', '40%'], center: ['25%', '50%'],
+      data: backupData.map(d => ({ name: d.name, value: d.value, itemStyle: { color: pieColorMap[d.name] || undefined } })),
+      label: { show: true, position: 'center', formatter: '备份\n{b}', fontSize: 10, lineHeight: 16 }
+    })
+  }
+  if (qaxData && qaxData.length) {
+    series.push({
+      type: 'pie', radius: ['0%', '40%'], center: ['75%', '50%'],
+      data: qaxData.map(d => ({ name: d.name, value: d.value, itemStyle: { color: pieColorMap[d.name] || undefined } })),
+      label: { show: true, position: 'center', formatter: '椒图\n{b}', fontSize: 10, lineHeight: 16 }
+    })
+  }
+  chart.setOption({ tooltip: { trigger: 'item', formatter: '{b}: {c}' }, series }, { notMerge: true })
 }
 async function fetchPersonalOccupiedIps() {
   personalOccupiedLoading.value = true
@@ -1058,6 +1152,9 @@ function disposeCharts() {
   vcMemChart?.dispose()
   esxiCpuChart?.dispose()
   dsStorageChart?.dispose()
+  ;[vmPowerRef, vmNetRef, vmExtraRef, domainRtypeRef, domainStatusRef, sysFillRef].forEach(r => {
+    if (r.value) { const c = echarts.getInstanceByDom(r.value); c?.dispose() }
+  })
 }
 
 onMounted(() => {
