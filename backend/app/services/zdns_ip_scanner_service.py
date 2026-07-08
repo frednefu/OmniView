@@ -250,30 +250,64 @@ async def _run_zdns_ip_scan_async(zdns_device_id: int, scan_log_id: int | None =
                 v6_online = sum(1 for ip in ipv6_ips if ping_results.get(ip) is True)
                 append_log(scan_log_id, f"IPv6 Ping 完成: 在线 {v6_online}, 离线 {len(ipv6_ips) - v6_online}")
 
-        # 应用 ping 结果
+        # 应用 ping 结果（使用原生 SQL 批量更新，避免 ORM StaleDataError）
         pending_count = 0
+        from sqlalchemy import text as sa_text
+        online_ips = []
+        offline_ips = []
+        pending_ips = []
         for r in rows:
             if r.ip_address in ping_results:
                 total_checked += 1
                 result = ping_results[r.ip_address]
                 if result is True:
-                    r.ip_status = "online"
+                    online_ips.append(r.ip_address)
                     online_count += 1
                 elif result is None:
-                    r.ip_status = "pending"
+                    pending_ips.append(r.ip_address)
                     pending_count += 1
                 else:
-                        r.ip_status = "offline"
-                        offline_count += 1
+                    offline_ips.append(r.ip_address)
+                    offline_count += 1
 
-            if scan_log_id and step1_id:
-                finish_step(step1_id, "success", len(ips_to_ping), len(ips_to_ping))
-                parts = [f"在线 {online_count}", f"离线 {offline_count}"]
-                if pending_count: parts.append(f"待定 {pending_count}")
-                append_log(scan_log_id, f"Ping 完成: {', '.join(parts)} (总已知在线 {len(known_online) + online_count})")
-                update_progress(scan_log_id, 90, "Ping 探测完成")
+        # 批量原生 SQL UPDATE（不依赖 ORM session 状态，避免并发冲突）
+        try:
+            if online_ips:
+                db.execute(sa_text(
+                    "UPDATE zdns_domain_map SET ip_status='online' WHERE ip_address IN :ips"
+                ), {"ips": tuple(online_ips)})
+            if offline_ips:
+                db.execute(sa_text(
+                    "UPDATE zdns_domain_map SET ip_status='offline' WHERE ip_address IN :ips"
+                ), {"ips": tuple(offline_ips)})
+            if pending_ips:
+                db.execute(sa_text(
+                    "UPDATE zdns_domain_map SET ip_status='pending' WHERE ip_address IN :ips"
+                ), {"ips": tuple(pending_ips)})
+            db.commit()
+        except Exception:
+            db.rollback()
+            # 回退到 ORM 逐条更新
+            for r in rows:
+                if r.ip_address in ping_results:
+                    result = ping_results[r.ip_address]
+                    try:
+                        if result is True:
+                            r.ip_status = "online"
+                        elif result is None:
+                            r.ip_status = "pending"
+                        else:
+                            r.ip_status = "offline"
+                        db.flush()
+                    except Exception:
+                        db.rollback()
 
-        db.commit()
+        if scan_log_id and step1_id:
+            finish_step(step1_id, "success", len(ips_to_ping), len(ips_to_ping))
+            parts = [f"在线 {online_count}", f"离线 {offline_count}"]
+            if pending_count: parts.append(f"待定 {pending_count}")
+            append_log(scan_log_id, f"Ping 完成: {', '.join(parts)} (总已知在线 {len(known_online) + online_count})")
+            update_progress(scan_log_id, 90, "Ping 探测完成")
 
         duration = round((dt.now() - start_time).total_seconds(), 1)
         device.last_ip_scan_status = "success"
