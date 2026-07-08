@@ -9,16 +9,7 @@
 
     <div class="login-card">
       <div class="login-header">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-          <rect width="24" height="24" rx="6" fill="url(#login-logo-grad)"/>
-          <text x="12" y="17" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">OV</text>
-          <defs>
-            <linearGradient id="login-logo-grad" x1="0" y1="0" x2="24" y2="24">
-              <stop stop-color="#6366f1"/>
-              <stop offset="1" stop-color="#8b5cf6"/>
-            </linearGradient>
-          </defs>
-        </svg>
+        <img src="/img/ov-logo-big.png" width="72" height="72" alt="OmniView" class="login-logo" />
         <h1>OmniView</h1>
         <p>全维 IT 资产发现与治理平台</p>
       </div>
@@ -162,6 +153,11 @@ onMounted(() => {
 .login-header {
   text-align: center;
   margin-bottom: 36px;
+}
+
+.login-logo {
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25);
 }
 
 .login-header h1 {
