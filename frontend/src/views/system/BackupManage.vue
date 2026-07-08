@@ -374,7 +374,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'v
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, VideoPlay, Download, CircleCheckFilled, CircleCheck, Document, Loading, Refresh, Edit, Delete } from '@element-plus/icons-vue'
 import {
-  getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
+  getBackupJobs, getBackupJob, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
   testFtpConnection, getDownloadUrl, getBackupLog,
 } from '@/api/backup'
