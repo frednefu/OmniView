@@ -29,3 +29,19 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role != UserRole.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
     return current_user
+
+
+def is_admin_or_dept(user) -> bool:
+    """判断是否为管理员或部门管理员。"""
+    if hasattr(user, "role"):
+        r = user.role
+        v = r.value if hasattr(r, "value") else r
+        return v in ("admin", "dept_admin")
+    return False
+
+
+def require_admin_or_dept(current_user: User = Depends(get_current_user)) -> User:
+    """需要管理员或部门管理员权限。"""
+    if not is_admin_or_dept(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员或部门管理员权限")
+    return current_user

@@ -57,8 +57,8 @@
       <el-table-column prop="mobile" label="移动电话" width="130" />
       <el-table-column prop="role" label="角色" width="80">
         <template #default="{ row }">
-          <el-tag :type="row.role === 'admin' ? 'danger' : 'primary'" size="small">
-            {{ row.role === 'admin' ? '管理员' : '用户' }}
+          <el-tag :type="row.role === 'admin' ? 'danger' : row.role === 'dept_admin' ? 'warning' : 'primary'" size="small">
+            {{ row.role === 'admin' ? '管理员' : row.role === 'dept_admin' ? '部门管理员' : '用户' }}
           </el-tag>
         </template>
       </el-table-column>
@@ -221,8 +221,9 @@
           <el-input v-model="form.mobile" placeholder="选填" />
         </el-form-item>
         <el-form-item label="角色" prop="role">
-          <el-select v-model="form.role" style="width: 140px">
+          <el-select v-model="form.role" style="width: 160px">
             <el-option label="普通用户" value="user" />
+            <el-option label="部门管理员" value="dept_admin" />
             <el-option label="管理员" value="admin" />
           </el-select>
         </el-form-item>

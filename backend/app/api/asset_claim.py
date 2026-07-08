@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 from app.database import get_db
 from app.models.user import User
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_admin, require_admin_or_dept
 from app.schemas.asset import ClaimRequest, AssignRequest
 
 router = APIRouter(prefix="/assets", tags=["资产认领"])
@@ -54,9 +54,9 @@ def claim_assets(
 def assign_assets(
     body: AssignRequest,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_admin_or_dept),
 ):
-    """管理员指派资产到部门或具体用户。"""
+    """管理员或部门管理员指派资产到部门或具体用户。"""
     if not body.vm_ids:
         raise HTTPException(status_code=400, detail="请选择资产")
 

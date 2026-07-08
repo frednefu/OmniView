@@ -12,7 +12,7 @@ from app.models.info_system import InfoSystem, DjDjRecord, IcpRecord, SupplyChai
 from app.models.user import User
 from app.models.department import Department
 from app.utils.security import hash_password
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_admin, require_admin_or_dept
 
 router = APIRouter(prefix="/info-systems", tags=["信息系统"])
 
@@ -24,6 +24,16 @@ def _is_admin(user) -> bool:
         if hasattr(role, "value"):
             role = role.value
         return role == "admin"
+    return False
+
+
+def _is_dept_admin_or_admin(user) -> bool:
+    """管理员或部门管理员。"""
+    if hasattr(user, "role"):
+        role = user.role
+        if hasattr(role, "value"):
+            role = role.value
+        return role in ("admin", "dept_admin")
     return False
 
 
@@ -256,11 +266,12 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
     q = db.query(InfoSystem)
     # 非管理员：本单位 + (自己是管理员 或 未分配管理员)
     if not _is_admin(user):
-        uid = str(user.gh or user.id)
         dept_id = getattr(user, 'department_id', None)
         if dept_id:
             q = q.filter((InfoSystem.dept_id == dept_id) | (InfoSystem.dept_id == None))
-        q = q.filter((InfoSystem.manager_gh == uid) | (InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
+        if not _is_dept_admin_or_admin(user):
+            uid = str(user.gh or user.id)
+            q = q.filter((InfoSystem.manager_gh == uid) | (InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
     if search:
         kw = f"%{search}%"
         q = q.filter(InfoSystem.system_name.like(kw) | InfoSystem.ip_address.like(kw) | InfoSystem.domain.like(kw) | InfoSystem.manager_name.like(kw) | InfoSystem.owner_name.like(kw))
@@ -1444,6 +1455,31 @@ def delete_icp(rec_id: int, db: Session = Depends(get_db), user=Depends(get_curr
     return {"message": "已删除"}
 
 
+# ── 指派 ──
+
+@router.post("/assign")
+def assign_info_system(body: dict, db: Session = Depends(get_db), _=Depends(require_admin_or_dept)):
+    """管理员/部门管理员指派信息系统：设置管理员和部门。"""
+    ids = body.get("ids", [])
+    dept_id = body.get("department_id")
+    user_id = body.get("user_id")
+    user_name = body.get("user_name", "")
+    user_gh = body.get("user_gh", "")
+    if not ids: raise HTTPException(400, "请选择记录")
+    count = 0
+    for rid in ids:
+        rec = db.query(InfoSystem).get(rid)
+        if not rec: continue
+        if dept_id:
+            rec.dept_id = dept_id
+        if user_id:
+            rec.manager_gh = user_gh
+            rec.manager_name = user_name
+        count += 1
+    db.commit()
+    return {"message": f"已指派 {count} 条信息系统", "count": count}
+
+
 # ── 数据同步 ──
 
 @router.post("/sync-from-platform")
@@ -1477,7 +1513,8 @@ def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le
                       db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(SupplyChain)
     if not _is_admin(user):
-        q = q.filter((SupplyChain.claimed_by == user.id) | (SupplyChain.claimed_by == None))
+        if not _is_dept_admin_or_admin(user):
+            q = q.filter((SupplyChain.claimed_by == user.id) | (SupplyChain.claimed_by == None))
     if search:
         q = q.filter(SupplyChain.company_name.contains(search))
     total = q.count()

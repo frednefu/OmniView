@@ -140,7 +140,7 @@ def get_department_tree(
 def get_department_users(
     dept_id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
     """获取指定部门下的用户列表。"""
     dept = db.query(Department).filter(Department.id == dept_id).first()

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.database import get_db
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_admin, require_admin_or_dept
 from app.models.user import User
 from app.models.department import Department
 
@@ -14,7 +14,17 @@ router = APIRouter(prefix="/assets", tags=["信息资产管理"])
 def _is_admin_user(u) -> bool:
     if hasattr(u, "role"):
         r = u.role
-        return (r.value if hasattr(r, "value") else r) == "admin"
+        v = r.value if hasattr(r, "value") else r
+        return v == "admin"
+    return False
+
+
+def _is_dept_admin_or_admin(u) -> bool:
+    """管理员或部门管理员。"""
+    if hasattr(u, "role"):
+        r = u.role
+        v = r.value if hasattr(r, "value") else r
+        return v in ("admin", "dept_admin")
     return False
 
 
@@ -510,8 +520,8 @@ def batch_cancel(body: dict, db: Session = Depends(get_db), user=Depends(get_cur
 
 
 @router.post("/domain-assign")
-def assign_domains_api(body: dict, db: Session = Depends(get_db), _=Depends(require_admin)):
-    """管理员指领域名 — 直接写物理认领字段。"""
+def assign_domains_api(body: dict, db: Session = Depends(get_db), _=Depends(require_admin_or_dept)):
+    """管理员/部门管理员指领域名 — 直接写物理认领字段。"""
     names = body.get("domain_names", [])
     dept_id = body.get("department_id")
     user_id = body.get("user_id")
@@ -962,7 +972,10 @@ def get_dept_vms(
     # 非管理员只能看到自己认领的 + 未认领的
     owner_filter = ""
     if not _is_admin_user(current_user):
-        owner_filter = f"AND (a.owner_user_id = {current_user.id} OR a.owner_user_id IS NULL)"
+        if _is_dept_admin_or_admin(current_user):
+            owner_filter = ""  # 部门管理员可见本部门及未认领
+        else:
+            owner_filter = f"AND (a.owner_user_id = {current_user.id} OR a.owner_user_id IS NULL)"
     if dept_id == 0:
         q = db.execute(text(
             f"SELECT v.*, a.department_id, a.owner_user_id, a.claim_status, a.claimed_by, a.claimed_at, "
@@ -1195,9 +1208,10 @@ def get_dept_domains(
         results = [d for d in results if not d.get("owner_user_id")]
     if status:
         results = [d for d in results if (d.get("claim_status") or "") == status]
-    # 普通用户只能看到本人认领的域名和未认领域名
+    # 普通用户只能看到本人认领+未认领；部门管理员可见部门内全部+未认领
     if not _is_admin_user(current_user):
-        results = [d for d in results if not d.get("owner_user_id") or d.get("owner_user_id") == current_user.id]
+        if not _is_dept_admin_or_admin(current_user):
+            results = [d for d in results if not d.get("owner_user_id") or d.get("owner_user_id") == current_user.id]
 
     results.sort(key=lambda x: (x.get("domain_name") or "").lower())
     total = len(results)
@@ -1214,13 +1228,18 @@ def get_dept_systems(
     """按部门获取信息系统列表。dept_id=0 返回未关联部门的系统。"""
     from app.models.info_system import InfoSystem
     q = db.query(InfoSystem)
-    # 非管理员：本单位 + (自己是管理员 或 未分配)
+    # 普通用户：本单位 + (自己是管理员 或 未分配)；部门管理员：本处级单位全部
     if not _is_admin_user(current_user):
-        dept = getattr(current_user, 'department_id', None)
-        if dept:
-            q = q.filter((InfoSystem.dept_id == dept) | (InfoSystem.dept_id == None))
-        uid = str(current_user.gh or current_user.id)
-        q = q.filter((InfoSystem.manager_gh == uid) | (InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
+        visible = _get_visible_dept_ids(db, current_user)
+        if visible is not None:
+            q = q.filter(InfoSystem.dept_id.in_(visible))
+        else:
+            dept = getattr(current_user, 'department_id', None)
+            if dept:
+                q = q.filter((InfoSystem.dept_id == dept) | (InfoSystem.dept_id == None))
+        if not _is_dept_admin_or_admin(current_user):
+            uid = str(current_user.gh or current_user.id)
+            q = q.filter((InfoSystem.manager_gh == uid) | (InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
     if dept_id == 0:
         q = q.filter((InfoSystem.dept_id == None) | (InfoSystem.dept_id == 0))
     elif dept_id > 0:

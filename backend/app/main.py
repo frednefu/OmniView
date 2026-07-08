@@ -165,6 +165,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     _migrate_columns("subnet_subscriptions", [("show_in_dashboard", "BOOLEAN DEFAULT TRUE")])
+    # users 表 role 列扩展 dept_admin
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users MODIFY COLUMN role ENUM('admin','dept_admin','user') NOT NULL DEFAULT 'user'"))
+            conn.commit()
+    except Exception:
+        pass
     # 去掉 subnet_cidr 全局唯一约束，改为 (cidr+created_by) 组合
     try:
         with engine.connect() as conn:

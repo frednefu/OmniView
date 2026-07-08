@@ -16,7 +16,16 @@ router = APIRouter(prefix="/subnets", tags=["地址段"])
 def _is_admin(u):
     if hasattr(u, "role"):
         r = u.role
-        return (r.value if hasattr(r, "value") else r) == "admin"
+        v = r.value if hasattr(r, "value") else r
+        return v == "admin"
+    return False
+
+
+def _is_dept_admin_or_admin(u):
+    if hasattr(u, "role"):
+        r = u.role
+        v = r.value if hasattr(r, "value") else r
+        return v in ("admin", "dept_admin")
     return False
 
 

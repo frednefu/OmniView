@@ -10,7 +10,7 @@ from app.models.department import Department
 from app.models.staff_info import StaffInfo
 from app.schemas.user import UserCreate, UserUpdate, UserOut, PasswordChange
 from app.utils.security import hash_password
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_admin_or_dept
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
 
@@ -47,7 +47,7 @@ def list_users(
     search: str = Query("", max_length=128),
     department_id: int = Query(None, description="按部门筛选"),
     db: Session = Depends(get_db),
-    admin=Depends(require_admin),
+    admin=Depends(require_admin_or_dept),
 ):
     q = db.query(User)
     if search:
@@ -114,7 +114,7 @@ def create_user(body: UserCreate, db: Session = Depends(get_db), admin=Depends(r
 
 
 @router.get("/{user_id}", response_model=UserOut)
-def get_user(user_id: int, db: Session = Depends(get_db), admin=Depends(require_admin)):
+def get_user(user_id: int, db: Session = Depends(get_db), admin=Depends(require_admin_or_dept)):
     user = db.query(User).get(user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")

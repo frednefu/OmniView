@@ -113,7 +113,7 @@
                 <el-button type="warning" size="small" :disabled="selectedVMs.length===0" @click="handleRevoke">撤销认领</el-button>
                 <el-button type="danger" size="small" :disabled="selectedVMs.length===0" @click="handleCancelClaim">申请注销</el-button>
                 <el-button size="small" :disabled="selectedVMs.length===0" @click="handleUncancelClaim">撤销注销</el-button>
-                <el-button v-if="authStore.isAdmin" type="primary" size="small" :disabled="selectedVMs.length===0" @click="showAssignDialog(selectedVMs)">指派选中</el-button>
+                <el-button v-if="authStore.isDeptAdmin" type="primary" size="small" :disabled="selectedVMs.length===0" @click="showAssignDialog(selectedVMs)">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
               <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}" :row-class-name="rowClass">
@@ -210,7 +210,7 @@
                 <el-button type="warning" size="small" :disabled="selectedDomains.length===0" @click="handleDomainRevoke">撤销认领</el-button>
                 <el-button type="danger" size="small" :disabled="selectedDomains.length===0" @click="handleDomainCancel">申请注销</el-button>
                 <el-button size="small" :disabled="selectedDomains.length===0" @click="handleDomainUncancel">撤销注销</el-button>
-                <el-button v-if="authStore.isAdmin" type="primary" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">指派选中</el-button>
+                <el-button v-if="authStore.isDeptAdmin" type="primary" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ domainTotal }} 条，已选 {{ selectedDomains.length }} 条</div>
               <el-table :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect" @sort-change="onDomainSort" :default-sort="{prop:'domain_name',order:'ascending'}">
@@ -269,6 +269,7 @@
                 <el-button type="warning" size="small" :disabled="selectedSys.length===0" @click="handleSysRevoke">撤销认领</el-button>
                 <el-button type="danger" size="small" :disabled="selectedSys.length===0" @click="handleSysCancel">申请注销</el-button>
                 <el-button size="small" :disabled="selectedSys.length===0" @click="handleSysUncancel">撤销注销</el-button>
+                <el-button v-if="authStore.isDeptAdmin" type="primary" size="small" :disabled="selectedSys.length===0" @click="handleSysAssign">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ sysTotal }} 条</div>
               <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onSysSelect" @sort-change="onSysSort" :default-sort="{prop:'system_name',order:'ascending'}">
@@ -592,6 +593,17 @@ async function handleSysClaim(){if(!selectedSys.value.length)return;try{await ap
 async function handleSysRevoke(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-revoke',{model:'info_system',ids:selectedSys.value});ElMessage.success('已撤销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
 async function handleSysCancel(){if(!selectedSys.value.length)return;try{await api.post('/info-systems/batch-cancel',{model:'info_system',ids:selectedSys.value});ElMessage.success('已申请注销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
 async function handleSysUncancel(){if(!selectedSys.value.length)return;try{await api.post('/assets/batch-uncancel',{ids:selectedSys.value,type:'info_system'});ElMessage.success('已撤销注销');selectedSys.value=[];loadSystems()}catch(e){ElMessage.error(e.response?.data?.detail||'失败')}}
+function handleSysAssign(){
+  if(!selectedSys.value.length)return
+  const selectedRows = sysList.value.filter(s => selectedSys.value.includes(s.id))
+  assignSearchResult.value = selectedRows.map(s => ({
+    asset_type: 'info_system', id: s.id, name: s.system_name,
+    ip_address: s.ip_address || '', vm_folder: s.dept_name || '',
+  }))
+  assignDeptId.value = null; assignUserId.value = null; userOptions.value = []
+  try { getDepartmentTree(true).then(t => { deptTreeAll.value = t }) } catch { /* */ }
+  assignVisible.value = true
+}
 
 const claimVisible = ref(false)
 const claimKeyword = ref('')
@@ -1032,7 +1044,8 @@ async function handleAssignSubmit() {
   const items = assignSearchResult.value
   const vmIds = items.filter(i => i.asset_type === 'vm' && i.id).map(i => i.id)
   const domainNames = items.filter(i => i.asset_type === 'domain').map(i => i.name)
-  if (vmIds.length === 0 && domainNames.length === 0) { ElMessage.warning('没有可指派的资产'); return }
+  const sysIds = items.filter(i => i.asset_type === 'info_system' && i.id).map(i => i.id)
+  if (vmIds.length === 0 && domainNames.length === 0 && sysIds.length === 0) { ElMessage.warning('没有可指派的资产'); return }
   assignSubmitting.value = true
   try {
     if (vmIds.length > 0) {
@@ -1051,9 +1064,22 @@ async function handleAssignSubmit() {
       })
       ElMessage.success(res.data.message)
     }
+    if (sysIds.length > 0) {
+      const userRes = assignUserId.value
+        ? await api.get(`/users/${assignUserId.value}`).then(r => r.data).catch(() => null)
+        : null
+      const res = await api.post('/info-systems/assign', {
+        ids: sysIds,
+        department_id: assignDeptId.value || null,
+        user_id: assignUserId.value || null,
+        user_name: userRes?.name || '',
+        user_gh: userRes?.gh || ''
+      })
+      ElMessage.success(res.data.message)
+    }
     assignVisible.value = false
     await loadTree()
-    if (selectedNode.value) { await loadVMs(); await loadDomains() }
+    if (selectedNode.value) { await loadVMs(); await loadDomains(); loadSystems() }
   } catch (e) { ElMessage.error(e.response?.data?.detail || '指派失败') } finally { assignSubmitting.value = false }
 }
 
