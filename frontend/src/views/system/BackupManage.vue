@@ -126,7 +126,7 @@
               {{ formatSize(row.file_size) }}
             </template>
           </el-table-column>
-          <el-table-column label="存储位置" width="75" align="center">
+          <el-table-column label="存储位置" width="90" align="center">
             <template #default="{ row }">
               <el-tag :type="row.storage_location === 'ftp' ? 'warning' : 'success'" size="small">
                 {{ row.storage_location === 'ftp' ? 'FTP' : '本地' }}

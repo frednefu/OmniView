@@ -520,8 +520,13 @@ def test_ftp_connection(host: str, port: int, user: str, password: str) -> dict:
         return {"success": False, "message": f"FTP 连接失败：{e}"}
 
 
-def verify_backup(history_id: int) -> dict:
-    """验证备份文件完整性（只读，不影响生产环境）。返回详细验证日志。"""
+def verify_backup(history_id: int, local_path: str = None) -> dict:
+    """验证备份文件完整性（只读，不影响生产环境）。返回详细验证日志。
+
+    Args:
+        history_id: 备份历史记录 ID
+        local_path: 可选，FTP 文件先下载到本地的路径（验证完成后不会删除）
+    """
     from app.database import SessionLocal
     from app.models.backup_history import BackupHistory
 
@@ -538,9 +543,13 @@ def verify_backup(history_id: int) -> dict:
         log.write(f"存储位置：{history.storage_location}")
         log.write(f"内容摘要：{history.content_summary}")
 
-        archive_path = history.file_path
+        # 优先使用传入的本地路径（FTP 已下载），否则使用记录中的路径
+        archive_path = local_path or history.file_path
+        if archive_path and history.storage_location == "ftp" and not local_path:
+            log.write("正在从 FTP 下载备份文件...")
+
         if not archive_path or not os.path.exists(archive_path):
-            if history.storage_location == "ftp":
+            if history.storage_location == "ftp" and not local_path:
                 log.write("验证失败：FTP 远程文件需先下载到本地再验证")
                 return {"success": False, "message": "FTP 远程文件需先下载到本地再验证", "log_output": log.getvalue()}
             log.write(f"验证失败：备份文件不存在 ({archive_path})")

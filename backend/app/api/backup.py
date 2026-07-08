@@ -202,57 +202,75 @@ def list_backup_history(
     }
 
 
+def _get_ftp_file(history, db) -> str:
+    """从 FTP 下载备份文件到临时目录，返回本地路径。调用方负责清理。"""
+    import tempfile
+    from app.models.backup_job import BackupJob
+    from app.services.backup_service import LogCapture
+
+    log = LogCapture()
+    job = db.query(BackupJob).get(history.job_id) if history.job_id else None
+    if not job:
+        raise HTTPException(400, "关联的备份任务已不存在，无法获取 FTP 连接信息")
+
+    remote_file = history.file_name
+    if not remote_file:
+        # 从 file_path 提取文件名
+        remote_file = os.path.basename(history.file_path or "backup.tar.gz")
+
+    tmp_path = os.path.join(tempfile.gettempdir(), f"ftp_download_{history.id}_{remote_file}")
+    if os.path.exists(tmp_path):
+        os.remove(tmp_path)  # 避免重复下载时 ftplib 报错
+
+    import ftplib
+    ftp = ftplib.FTP()
+    try:
+        ftp.connect(job.ftp_host, job.ftp_port, timeout=30)
+        ftp.login(job.ftp_user, job.ftp_password)
+        ftp.set_pasv(True)
+        file_size = ftp.size(remote_file) if remote_file else 0
+        log.write(f"FTP 连接成功，文件大小：{file_size / (1024 * 1024):.1f} MB" if file_size else "FTP 连接成功，开始下载...")
+        with open(tmp_path, "wb") as f:
+            ftp.retrbinary(f"RETR {remote_file}", f.write)
+        log.write("FTP 下载完成")
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+    return tmp_path
+
+
 @router.get("/history/{history_id}/download")
 def download_backup(
     history_id: int,
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """下载备份文件。"""
+    """下载备份文件（本地直接返回，FTP 先下载再返回）。"""
     history = db.query(BackupHistory).get(history_id)
     if not history:
         raise HTTPException(404, "备份记录不存在")
 
-    file_path = history.file_path
-    if not file_path:
-        raise HTTPException(404, "备份文件路径缺失")
+    filename = history.file_name or "backup.tar.gz"
 
     # 本地文件直接返回
-    if os.path.isfile(file_path):
+    if history.file_path and os.path.isfile(history.file_path):
         return FileResponse(
-            file_path,
-            filename=history.file_name or os.path.basename(file_path),
+            history.file_path,
+            filename=filename,
             media_type="application/gzip",
         )
 
-    # FTP 远程文件：先下载到临时目录再返回
+    # FTP 远程文件：下载到临时目录后返回
     if history.storage_location == "ftp" and history.job_id:
-        import tempfile
-        from app.models.backup_job import BackupJob
-        job = db.query(BackupJob).get(history.job_id)
-        if not job:
-            raise HTTPException(400, "关联的备份任务已不存在，无法获取 FTP 连接信息")
-
-        import ftplib
-        tmp_path = os.path.join(tempfile.gettempdir(), history.file_name or "backup_download.tar.gz")
-        ftp = ftplib.FTP()
-        try:
-            ftp.connect(job.ftp_host, job.ftp_port, timeout=30)
-            ftp.login(job.ftp_user, job.ftp_password)
-            ftp.set_pasv(True)
-            remote_file = history.file_name or os.path.basename(file_path)
-            with open(tmp_path, "wb") as f:
-                ftp.retrbinary(f"RETR {remote_file}", f.write)
-        finally:
-            try:
-                ftp.quit()
-            except Exception:
-                pass
-
+        tmp_path = _get_ftp_file(history, db)
+        from starlette.background import BackgroundTask
         return FileResponse(
             tmp_path,
-            filename=history.file_name or "backup.tar.gz",
+            filename=filename,
             media_type="application/gzip",
+            background=BackgroundTask(lambda p: os.path.exists(p) and os.remove(p), tmp_path),
         )
 
     raise HTTPException(404, "备份文件不存在")
@@ -264,12 +282,37 @@ def verify_backup_api(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """验证备份文件完整性（只读，不影响生产环境）。"""
+    """验证备份文件完整性（只读，不影响生产环境）。FTP 文件自动下载后验证。"""
     history = db.query(BackupHistory).get(history_id)
     if not history:
         raise HTTPException(404, "备份记录不存在")
 
-    result = verify_backup(history_id)
+    local_path = history.file_path
+    tmp_path = None
+
+    # FTP 文件先下载到本地
+    if history.storage_location == "ftp":
+        if not history.job_id:
+            return {"success": False, "message": "关联的备份任务已不存在，无法获取 FTP 连接信息"}
+        try:
+            tmp_path = _get_ftp_file(history, db)
+            local_path = tmp_path
+        except Exception as e:
+            return {"success": False, "message": f"FTP 下载失败：{e}"}
+
+    if not local_path or not os.path.isfile(local_path):
+        return {"success": False, "message": "备份文件不存在"}
+
+    # 验证（传入本地路径）
+    result = verify_backup(history_id, local_path=local_path)
+
+    # 验证完成后清理 FTP 临时下载文件和解压残留
+    if tmp_path and os.path.exists(tmp_path):
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
     return result
 
 
