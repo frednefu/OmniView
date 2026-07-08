@@ -26,7 +26,7 @@ class BackupJob(Base):
                              comment="备份内容: database,configs,images,uploads")
 
     # 调度配置（6 段 cron：秒 分 时 日 月 周）
-    cron_expression = Column(String(64), nullable=False, default="0 2 * * *",
+    cron_expression = Column(String(64), nullable=False, default="0 0 2 * * *",
                              comment="Cron表达式(6段: 秒 分 时 日 月 周)")
 
     # 保留策略

@@ -440,7 +440,7 @@ const defaultForm = () => ({
   ftp_password: '',
   ftp_remote_path: '',
   contentList: ['database', 'configs', 'images', 'uploads'],
-  cron_expression: '0 2 * * *',
+  cron_expression: '0 0 2 * * *',
   retention_days: 30,
 })
 const form = reactive(defaultForm())
@@ -696,14 +696,26 @@ const cronPreview = computed(() => {
 })
 
 function parseCronExpression(expr) {
-  const parts = (expr || '0 2 * * *').trim().split(/\s+/)
+  // 兼容 5 段 cron（分 时 日 月 周）自动补全为 6 段（秒 分 时 日 月 周）
+  let fixedExpr = expr || '0 0 2 * * *'
+  const rawParts = fixedExpr.trim().split(/\s+/)
+  if (rawParts.length === 5) {
+    // 5 段 → 6 段：在开头补 "0" 作为秒
+    rawParts.unshift('0')
+  }
+  const parts = rawParts
   cronFields.value = [
     parts[0] || '0', parts[1] || '*', parts[2] || '*',
     parts[3] || '*', parts[4] || '*', parts[5] || '*',
   ]
 
   // 智能检测预设模式
-  const [s, m, h, d, mo, w] = parts
+  const s = parts[0] || '0'
+  const m = parts[1] || '0'
+  const h = parts[2] || '*'
+  const d = parts[3] || '*'
+  const mo = parts[4] || '*'
+  const w = parts[5] || '*'
   if (h && m && d === '*' && mo === '*' && w === '*') {
     // 可能是每天
     if (s === '0') {
@@ -712,7 +724,7 @@ function parseCronExpression(expr) {
       return
     }
   }
-  if (h && m && d === '*' && mo === '*' && w !== '*' && w !== '?') {
+  if (h && m && d === '*' && mo === '*' && w && w !== '*' && w !== '?') {
     // 可能是每周
     cronPreset.value = 'weekly'
     cronTime.value = new Date(2024, 0, 1, parseInt(h) || 0, parseInt(m) || 0)

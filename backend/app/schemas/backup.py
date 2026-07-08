@@ -17,7 +17,7 @@ class BackupJobCreate(BaseModel):
     ftp_password: Optional[str] = Field(None, max_length=256, description="FTP密码")
     ftp_remote_path: Optional[str] = Field(None, max_length=512, description="FTP远程目录")
     backup_contents: str = Field("database,configs,images,uploads", description="备份内容（逗号分隔）")
-    cron_expression: str = Field("0 2 * * *", max_length=64, description="Cron表达式(6段: 秒 分 时 日 月 周)")
+    cron_expression: str = Field("0 0 2 * * *", max_length=64, description="Cron表达式(6段: 秒 分 时 日 月 周)")
     retention_days: int = Field(30, ge=0, description="保留天数(0=永久)")
 
 
