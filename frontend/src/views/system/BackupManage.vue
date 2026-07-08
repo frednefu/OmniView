@@ -486,8 +486,9 @@ async function openEdit(row) {
     // 解析 cron 到 UI 状态
     parseCronExpression(job.cron_expression || '0 2 * * *')
     dialogVisible.value = true
-  } catch {
-    ElMessage.error('获取任务详情失败，请刷新页面重试')
+  } catch (e) {
+    const detail = e?.response?.data?.detail || e?.message || String(e)
+    ElMessage.error('获取任务详情失败：' + detail)
   }
 }
 
