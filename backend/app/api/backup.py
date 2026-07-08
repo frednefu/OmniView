@@ -1,8 +1,9 @@
 """系统备份 API — 备份任务 CRUD、手动执行、历史查询、下载、验证、FTP 测试"""
 import os
+import queue
 import threading
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -202,22 +203,32 @@ def list_backup_history(
     }
 
 
-def _get_ftp_file(history, db, log_func=None) -> str:
-    """从 FTP 下载备份文件到临时目录，返回本地路径。调用方负责清理。"""
-    import tempfile
+def _get_ftp_job(history, db):
+    """获取 FTP 连接配置，验证有效后返回 job。"""
     from app.models.backup_job import BackupJob
-
     job = db.query(BackupJob).get(history.job_id) if history.job_id else None
     if not job:
-        raise HTTPException(400, "关联的备份任务已不存在，无法获取 FTP 连接信息")
+        raise HTTPException(400, "关联的备份任务已不存在")
     if not job.ftp_host:
         raise HTTPException(400, "FTP 服务器地址未配置")
+    return job
 
-    remote_file = history.file_name
-    if not remote_file:
-        remote_file = os.path.basename(history.file_path or "backup.tar.gz")
 
-    tmp_path = os.path.join(tempfile.gettempdir(), f"ftp_download_{history.id}_{remote_file}")
+def _ftp_file_name(history) -> str:
+    """从历史记录中提取 FTP 远程文件名。"""
+    name = history.file_name
+    if name:
+        return name
+    return os.path.basename(history.file_path or "backup.tar.gz")
+
+
+def _ftp_download_to_local(history, db, log_func=None) -> str:
+    """从 FTP 下载备份文件到临时目录（用于验证），返回本地路径。调用方负责清理。"""
+    import tempfile
+
+    job = _get_ftp_job(history, db)
+    remote_file = _ftp_file_name(history)
+    tmp_path = os.path.join(tempfile.gettempdir(), f"ftp_verify_{history.id}_{remote_file}")
 
     import ftplib
     ftp = ftplib.FTP()
@@ -228,7 +239,6 @@ def _get_ftp_file(history, db, log_func=None) -> str:
         ftp.login(job.ftp_user, job.ftp_password)
         ftp.set_pasv(True)
 
-        # 获取文件大小（部分 FTP 服务器不支持 SIZE 命令）
         file_size = 0
         try:
             file_size = ftp.size(remote_file) or 0
@@ -237,16 +247,32 @@ def _get_ftp_file(history, db, log_func=None) -> str:
 
         if log_func:
             if file_size:
-                log_func(f"FTP 连接成功，文件大小：{file_size / (1024 * 1024):.1f} MB")
+                log_func(f"文件大小：{file_size / (1024 * 1024):.1f} MB，开始下载...")
             else:
-                log_func("FTP 连接成功，开始下载...")
+                log_func("开始下载（大小未知）...")
 
-        with open(tmp_path, "wb") as f:
-            ftp.retrbinary(f"RETR {remote_file}", f.write)
+        bytes_done = [0]
+        last_pct = [0]
+
+        def progress_writer(data):
+            with open(tmp_path, "ab") as f:
+                f.write(data)
+            bytes_done[0] += len(data)
+            if file_size and log_func:
+                pct = int(bytes_done[0] * 100 / file_size)
+                if pct >= last_pct[0] + 10:  # 每10%汇报一次
+                    last_pct[0] = pct
+                    log_func(f"下载进度：{pct}% ({bytes_done[0] / (1024 * 1024):.0f} MB)")
+
+        # 先清空临时文件
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+        ftp.retrbinary(f"RETR {remote_file}", progress_writer, blocksize=1024 * 1024)
 
         actual_size = os.path.getsize(tmp_path)
         if log_func:
-            log_func(f"FTP 下载完成，本地文件大小：{actual_size / (1024 * 1024):.1f} MB")
+            log_func(f"下载完成：{actual_size / (1024 * 1024):.1f} MB")
     except ftplib.error_perm as e:
         raise HTTPException(400, f"FTP 权限错误：{e}")
     except ftplib.error_temp as e:
@@ -267,7 +293,7 @@ def download_backup(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """下载备份文件（本地直接返回，FTP 先下载再返回）。"""
+    """下载备份文件。本地文件直接返回；FTP 文件流式传输（不落盘）。"""
     history = db.query(BackupHistory).get(history_id)
     if not history:
         raise HTTPException(404, "备份记录不存在")
@@ -282,29 +308,51 @@ def download_backup(
             media_type="application/gzip",
         )
 
-    # FTP 远程文件：下载到临时目录后返回
+    # FTP 远程文件：流式传输（FTP → HTTP，不落盘）
     if history.storage_location == "ftp" and history.job_id:
-        try:
-            tmp_path = _get_ftp_file(history, db)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(500, f"FTP 下载失败：{e}")
+        job = _get_ftp_job(history, db)
+        remote_file = _ftp_file_name(history)
 
-        from starlette.background import BackgroundTask
+        import ftplib
+        ftp = ftplib.FTP()
+        ftp.connect(job.ftp_host, job.ftp_port, timeout=30)
+        ftp.login(job.ftp_user, job.ftp_password)
+        ftp.set_pasv(True)
 
-        def cleanup(path):
+        q = queue.Queue(maxsize=50)
+        download_error = [None]
+
+        def ftp_callback(data):
+            q.put(data)
+
+        def ftp_worker():
             try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                pass
+                ftp.retrbinary(f"RETR {remote_file}", ftp_callback, blocksize=1024 * 1024)
+            except Exception as e:
+                download_error[0] = e
+            finally:
+                q.put(None)  # sentinel 标记结束
+                try:
+                    ftp.quit()
+                except Exception:
+                    pass
 
-        return FileResponse(
-            tmp_path,
-            filename=filename,
+        t = threading.Thread(target=ftp_worker, daemon=True)
+        t.start()
+
+        def stream_generator():
+            while True:
+                chunk = q.get()
+                if chunk is None:  # sentinel
+                    break
+                if download_error[0]:
+                    raise download_error[0]
+                yield chunk
+
+        return StreamingResponse(
+            stream_generator(),
             media_type="application/gzip",
-            background=BackgroundTask(cleanup, tmp_path),
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
     raise HTTPException(404, "备份文件不存在")
@@ -316,43 +364,113 @@ def verify_backup_api(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """验证备份文件完整性（只读，不影响生产环境）。FTP 文件自动下载后验证。"""
+    """启动备份验证（后台线程执行，立即返回）。"""
     history = db.query(BackupHistory).get(history_id)
     if not history:
         raise HTTPException(404, "备份记录不存在")
 
-    local_path = history.file_path
-    tmp_path = None
+    # 重置验证状态
+    history.verified = False
+    history.verify_log = "正在准备验证...\n"
+    db.commit()
 
-    # FTP 文件先下载到本地
-    if history.storage_location == "ftp":
-        if not history.job_id:
-            return {"success": False, "message": "关联的备份任务已不存在，无法获取 FTP 连接信息", "log_output": ""}
-        if not history.file_name:
-            return {"success": False, "message": "备份文件名缺失", "log_output": ""}
+    def _verify_thread():
+        from app.database import SessionLocal
+        from app.models.backup_history import BackupHistory
+        from app.services.backup_service import verify_backup
+
+        vdb = SessionLocal()
         try:
-            tmp_path = _get_ftp_file(history, db)
-            local_path = tmp_path
-        except HTTPException as e:
-            return {"success": False, "message": e.detail, "log_output": f"FTP 下载失败：{e.detail}"}
-        except Exception as e:
-            return {"success": False, "message": f"FTP 下载失败：{e}", "log_output": ""}
+            h = vdb.query(BackupHistory).get(history_id)
+            if not h:
+                return
 
-    if not local_path or not os.path.isfile(local_path):
-        return {"success": False, "message": "备份文件不存在", "log_output": ""}
+            def log_progress(msg):
+                try:
+                    ldb = SessionLocal()
+                    h2 = ldb.query(BackupHistory).get(history_id)
+                    if h2:
+                        h2.verify_log = (h2.verify_log or "") + msg + "\n"
+                        ldb.commit()
+                    ldb.close()
+                except Exception:
+                    pass
 
-    # 验证（传入本地路径）
-    try:
-        result = verify_backup(history_id, local_path=local_path)
-    finally:
-        # 验证完成后清理 FTP 临时下载文件
-        if tmp_path and os.path.exists(tmp_path):
+            local_path = h.file_path
+            tmp_path = None
+
+            # FTP 文件先下载
+            if h.storage_location == "ftp":
+                if not h.job_id or not h.file_name:
+                    log_progress("验证失败：FTP 配置不完整")
+                    h.verify_log = (h.verify_log or "") + "验证失败：FTP 配置不完整\n"
+                    vdb.commit()
+                    return
+
+                log_progress(f"开始从 FTP 下载备份文件：{h.file_name}")
+                try:
+                    tmp_path = _ftp_download_to_local(h, vdb, log_func=log_progress)
+                    local_path = tmp_path
+                except HTTPException as e:
+                    log_progress(f"FTP 下载失败：{e.detail}")
+                    h.verify_log = (h.verify_log or "") + f"FTP 下载失败：{e.detail}\n"
+                    vdb.commit()
+                    return
+                except Exception as e:
+                    log_progress(f"FTP 下载失败：{e}")
+                    h.verify_log = (h.verify_log or "") + f"FTP 下载失败：{e}\n"
+                    vdb.commit()
+                    return
+
+            if not local_path or not os.path.isfile(local_path):
+                log_progress("验证失败：备份文件不存在")
+                return
+
+            # 验证
+            log_progress("开始验证备份文件完整性...")
             try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+                result = verify_backup(history_id, local_path=local_path)
+                log_progress(result.get("message", "验证完成"))
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                    log_progress("已清理临时下载文件")
 
-    return result
+        except Exception as e:
+            try:
+                ldb = SessionLocal()
+                h2 = ldb.query(BackupHistory).get(history_id)
+                if h2:
+                    h2.verify_log = (h2.verify_log or "") + f"验证异常：{e}\n"
+                    ldb.commit()
+                ldb.close()
+            except Exception:
+                pass
+        finally:
+            vdb.close()
+
+    t = threading.Thread(target=_verify_thread, daemon=True)
+    t.start()
+
+    return {"message": "验证任务已提交", "history_id": history_id}
+
+
+@router.get("/history/{history_id}/verify-progress")
+def get_verify_progress(
+    history_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """获取验证进度（含实时日志）。"""
+    history = db.query(BackupHistory).get(history_id)
+    if not history:
+        raise HTTPException(404, "备份记录不存在")
+    return {
+        "id": history.id,
+        "verified": history.verified,
+        "verify_log": history.verify_log or "",
+        "verified_at": str(history.verified_at) if history.verified_at else None,
+    }
 
 
 @router.get("/history/{history_id}/log")

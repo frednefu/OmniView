@@ -327,20 +327,26 @@
     </el-dialog>
 
     <!-- ═══════════ 验证结果对话框 ═══════════ -->
-    <el-dialog v-model="verifyDialogVisible" title="备份验证" width="750px" destroy-on-close>
-      <div v-if="verifyingId" style="text-align: center; padding: 40px;">
+    <el-dialog v-model="verifyDialogVisible" title="备份验证" width="750px" destroy-on-close @closed="stopVerifyPolling">
+      <div v-if="verifyResult" class="log-container">
+        <div class="log-header">
+          <span>验证进度</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span v-if="verifyingId" style="color: #f59e0b; font-size: 12px;">
+              <el-icon class="is-loading" :size="14"><Loading /></el-icon> 验证中...
+            </span>
+            <el-tag
+              v-if="!verifyingId"
+              :type="verifyResult.success ? 'success' : 'danger'"
+              size="small"
+            >{{ verifyResult.success ? '✅ 验证通过' : '⚠️ 发现问题' }}</el-tag>
+          </div>
+        </div>
+        <pre class="log-output verify-log-output">{{ verifyResult.log_output || '（无日志输出）' }}</pre>
+      </div>
+      <div v-else style="text-align: center; padding: 40px;">
         <el-icon class="is-loading" :size="32"><Loading /></el-icon>
         <p style="margin-top: 12px; color: var(--color-text-secondary);">正在验证备份文件...</p>
-      </div>
-      <div v-else-if="verifyResult" class="log-container">
-        <div class="log-header">
-          <span>验证结果</span>
-          <el-tag
-            :type="verifyResult.success ? 'success' : 'danger'"
-            size="small"
-          >{{ verifyResult.success ? '✅ 验证通过' : '⚠️ 发现问题' }}</el-tag>
-        </div>
-        <pre class="log-output">{{ verifyResult.log_output || verifyResult.message || '（无日志输出）' }}</pre>
       </div>
     </el-dialog>
 
@@ -378,7 +384,7 @@ import api from '@/api'
 import {
   getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
-  testFtpConnection, getBackupLog,
+  testFtpConnection, getBackupLog, getVerifyProgress,
 } from '@/api/backup'
 
 // ── 标签页 ────────────────────────────────────────────────
@@ -598,17 +604,49 @@ async function downloadBackup(id) {
 const verifyingId = ref(null)
 const verifyDialogVisible = ref(false)
 const verifyResult = ref(null)
+const verifyPollTimer = ref(null)
+
+function stopVerifyPolling() {
+  if (verifyPollTimer.value) {
+    clearInterval(verifyPollTimer.value)
+    verifyPollTimer.value = null
+  }
+}
 
 async function verifyBackup(row) {
   verifyingId.value = row.id
   verifyDialogVisible.value = true
-  verifyResult.value = null
+  verifyResult.value = { log_output: '正在提交验证任务...\n' }
+  stopVerifyPolling()
+
   try {
-    const res = await verifyBackupApi(row.id)
-    verifyResult.value = res
-    if (res.success) fetchHistory()
-  } catch { /* */ }
-  finally { verifyingId.value = null }
+    // 启动验证（立即返回）
+    await verifyBackupApi(row.id)
+
+    // 轮询验证进度（每2秒）
+    verifyPollTimer.value = setInterval(async () => {
+      try {
+        const progress = await getVerifyProgress(row.id)
+        verifyResult.value = {
+          success: progress.verified,
+          message: progress.verified ? '验证完成' : '验证进行中...',
+          log_output: progress.verify_log || '等待日志输出...',
+        }
+        // 验证完成则停止轮询
+        if (progress.verified || progress.verify_log?.includes('失败') || progress.verify_log?.includes('异常')) {
+          stopVerifyPolling()
+          verifyingId.value = null
+          fetchHistory()
+        }
+      } catch {
+        stopVerifyPolling()
+        verifyingId.value = null
+      }
+    }, 2000)
+  } catch {
+    verifyResult.value = { success: false, log_output: '提交验证任务失败' }
+    verifyingId.value = null
+  }
 }
 
 // ── 日志 ─────────────────────────────────────────────────
@@ -878,6 +916,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopLogPolling()
+  stopVerifyPolling()
 })
 </script>
 
