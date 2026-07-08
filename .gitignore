@@ -46,5 +46,8 @@ switchReader/*.xlsx
 switchReader/config.json
 switchReader/*_test.py
 
+# Uploaded files (user content)
+backend/uploads/
+
 # Test tools
 tools/

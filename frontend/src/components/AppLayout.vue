@@ -202,10 +202,12 @@
           </el-input>
           <el-dropdown trigger="click">
             <span class="user-info">
-              <el-avatar :size="34" class="user-avatar">
-                {{ authStore.user?.username?.charAt(0)?.toUpperCase() }}
-              </el-avatar>
-              <span class="username">{{ authStore.user?.username }}</span>
+              <span class="avatar-ring" :class="ringClass">
+                <el-avatar :size="34" class="user-avatar" :src="avatarSrc">
+                  {{ (authStore.user?.name || authStore.user?.username)?.charAt(0)?.toUpperCase() }}
+                </el-avatar>
+              </span>
+              <span class="username">{{ authStore.user?.name || authStore.user?.username }}({{ authStore.user?.gh || authStore.user?.username }})</span>
               <el-icon class="arrow-icon"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -242,6 +244,19 @@ import { getVersion } from '@/api/version'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const avatarSrc = computed(() => {
+  const url = authStore.user?.avatar_url
+  if (!url) return ''
+  const sep = url.includes('?') ? '&' : '?'
+  const ver = localStorage.getItem('avatarVer') || '0'
+  return url + sep + 'v=' + ver
+})
+const ringClass = computed(() => {
+  const role = authStore.user?.role
+  if (role === 'admin') return 'ring-admin'
+  if (role === 'dept_admin') return 'ring-dept'
+  return ''
+})
 const isCollapse = ref(false)
 const searchText = ref('')
 const appVersion = ref('1.0.0')
@@ -437,7 +452,27 @@ onMounted(async () => {
   background: var(--color-bg);
 }
 
+/* 头像色环 */
+.avatar-ring {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; padding: 3px; background: transparent;
+}
+.avatar-ring::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+}
+.ring-admin::before {
+  background: conic-gradient(#ff0080,#ff8c00,#ffee00,#00e600,#00bfff,#8b00ff,#ff0080);
+  animation: ring-spin 2s linear infinite;
+}
+.ring-dept::before {
+  background: linear-gradient(135deg, #6366f1, #06b6d4);
+}
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .user-avatar {
+  position: relative; z-index: 1;
   background: linear-gradient(135deg, var(--color-primary), #8b5cf6);
   color: #fff;
   font-weight: 600;

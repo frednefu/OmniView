@@ -46,6 +46,13 @@ class UserUpdate(BaseModel):
 class ProfileUpdate(BaseModel):
     avatar_url: Optional[str] = None
     email: Optional[str] = None
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    mobile: Optional[str] = None
+    gender: Optional[str] = None
+    company: Optional[str] = None
+    contact_person: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class PasswordChange(BaseModel):

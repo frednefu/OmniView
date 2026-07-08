@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import os, uuid
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -8,6 +9,8 @@ from app.utils.security import hash_password, verify_password, create_access_tok
 from app.api.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+UPLOAD_DIR = "uploads/avatars"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @router.post("/login", response_model=TokenOut)
@@ -36,9 +39,29 @@ def update_profile(body: ProfileUpdate, current_user: User = Depends(get_current
         current_user.email = body.email
     if body.avatar_url is not None:
         current_user.avatar_url = body.avatar_url
+    for field in ("name", "phone", "mobile", "gender", "company", "contact_person", "notes"):
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(current_user, field, val if val != "" else None)
     db.commit()
     db.refresh(current_user)
     return UserOut.model_validate(current_user)
+
+
+@router.post("/avatar")
+def upload_avatar(file: UploadFile, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """上传头像，返回 URL。"""
+    ext = os.path.splitext(file.filename or ".png")[1] or ".png"
+    if ext.lower() not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        raise HTTPException(400, "仅支持 png/jpg/jpeg/gif/webp 格式")
+    name = f"avatar_{current_user.id}_{uuid.uuid4().hex[:8]}{ext}"
+    filepath = os.path.join(UPLOAD_DIR, name)
+    with open(filepath, "wb") as f:
+        f.write(file.file.read())
+    url = f"/uploads/avatars/{name}"
+    current_user.avatar_url = url
+    db.commit()
+    return {"avatar_url": url, "message": "头像上传成功"}
 
 
 @router.put("/change-password")

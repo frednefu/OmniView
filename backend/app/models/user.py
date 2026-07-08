@@ -39,3 +39,7 @@ class User(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     department = relationship("Department", lazy="joined")
+
+    @property
+    def department_name(self):
+        return self.department.dwmc if self.department else None
