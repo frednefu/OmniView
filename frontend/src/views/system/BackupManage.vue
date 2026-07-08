@@ -373,8 +373,9 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, VideoPlay, Download, CircleCheckFilled, CircleCheck, Document, Loading, Refresh, Edit, Delete } from '@element-plus/icons-vue'
+import api from '@/api'
 import {
-  getBackupJobs, getBackupJob, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
+  getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
   testFtpConnection, getDownloadUrl, getBackupLog,
 } from '@/api/backup'
@@ -468,27 +469,26 @@ function openCreate() {
 
 async function openEdit(row) {
   try {
-    const job = await getBackupJob(row.id)
+    const res = await api.get('/backup/jobs/' + row.id)
+    const job = res.data
     if (!job || !job.id) {
       ElMessage.error('获取任务详情失败：数据为空')
       return
     }
     isEdit.value = true
     editId.value = row.id
-    form.name = job.name || ''
-    form.enabled = job.enabled !== false
-    form.mode = job.mode || 'local'
-    form.local_path = job.local_path || ''
-    form.ftp_host = job.ftp_host || ''
-    form.ftp_port = job.ftp_port || 21
-    form.ftp_user = job.ftp_user || ''
-    form.ftp_password = job.ftp_password || ''
-    form.ftp_remote_path = job.ftp_remote_path || ''
-    const contents = job.backup_contents || ''
-    form.contentList = contents ? contents.split(',').filter(Boolean) : ['database', 'configs', 'images', 'uploads']
-    form.cron_expression = job.cron_expression || '0 2 * * *'
-    form.retention_days = typeof job.retention_days === 'number' ? job.retention_days : 30
-    // 解析 cron 到 UI 状态
+    form.name = String(job.name ?? '')
+    form.enabled = Boolean(job.enabled)
+    form.mode = String(job.mode || 'local')
+    form.local_path = String(job.local_path ?? '')
+    form.ftp_host = String(job.ftp_host ?? '')
+    form.ftp_port = Number(job.ftp_port || 21)
+    form.ftp_user = String(job.ftp_user ?? '')
+    form.ftp_password = String(job.ftp_password ?? '')
+    form.ftp_remote_path = String(job.ftp_remote_path ?? '')
+    form.contentList = String(job.backup_contents || 'database,configs,images,uploads').split(',').filter(Boolean)
+    form.cron_expression = String(job.cron_expression || '0 2 * * *')
+    form.retention_days = Number(job.retention_days ?? 30)
     parseCronExpression(form.cron_expression)
     dialogVisible.value = true
   } catch (e) {
