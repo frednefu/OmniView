@@ -14,20 +14,20 @@
         </div>
 
         <el-table :data="jobList" v-loading="jobLoading" stripe>
-          <el-table-column prop="name" label="任务名称" min-width="140" />
-          <el-table-column label="备份模式" width="80">
+          <el-table-column prop="name" label="任务名称" min-width="120" />
+          <el-table-column label="备份模式" width="75" align="center">
             <template #default="{ row }">
               <el-tag :type="row.mode === 'ftp' ? 'warning' : 'success'" size="small">
                 {{ row.mode === 'ftp' ? 'FTP' : '本地' }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="调度" width="160">
+          <el-table-column label="调度" width="175">
             <template #default="{ row }">
               <span class="cron-text">{{ cronLabel(row.cron_expression) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="备份内容" width="200">
+          <el-table-column label="备份内容" width="230">
             <template #default="{ row }">
               <el-tag
                 v-for="c in contentTags(row.backup_contents)" :key="c.value"
@@ -36,12 +36,12 @@
               >{{ c.label }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="保留" width="80" align="center">
+          <el-table-column label="保留" width="75" align="center">
             <template #default="{ row }">
               {{ row.retention_days === 0 ? '永久' : row.retention_days + '天' }}
             </template>
           </el-table-column>
-          <el-table-column label="启用" width="70" align="center">
+          <el-table-column label="启用" width="65" align="center">
             <template #default="{ row }">
               <el-switch
                 :model-value="row.enabled"
@@ -50,19 +50,20 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="上次执行" width="160">
+          <el-table-column label="上次执行" width="195">
             <template #default="{ row }">
               <template v-if="row.last_run_at">
-                <div class="last-run">{{ formatTime(row.last_run_at) }}</div>
+                <span class="last-run-time">{{ formatTime(row.last_run_at) }}</span>
                 <el-tag
                   :type="row.last_status === 'success' ? 'success' : row.last_status === 'failed' ? 'danger' : 'info'"
                   size="small"
+                  style="margin-left: 6px;"
                 >{{ row.last_status === 'success' ? '成功' : row.last_status === 'failed' ? '失败' : '—' }}</el-tag>
               </template>
               <span v-else class="text-muted">未执行</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="130" fixed="right" align="center">
+          <el-table-column label="操作" width="155" fixed="right" align="center">
             <template #default="{ row }">
               <el-tooltip content="手动执行" placement="top">
                 <el-button link type="primary" class="action-icon-btn" @click="runJob(row)">
@@ -113,31 +114,26 @@
         </div>
 
         <el-table :data="historyList" v-loading="historyLoading" stripe>
-          <el-table-column label="时间" width="160">
+          <el-table-column label="时间" width="170">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
-          <el-table-column prop="job_name" label="任务名称" min-width="120" />
-          <el-table-column prop="content_summary" label="备份内容" min-width="160" />
-          <el-table-column label="文件大小" width="100" align="right">
+          <el-table-column prop="job_name" label="任务名称" min-width="100" show-overflow-tooltip />
+          <el-table-column prop="content_summary" label="备份内容" min-width="150" show-overflow-tooltip />
+          <el-table-column label="文件大小" width="105" align="right">
             <template #default="{ row }">
               {{ formatSize(row.file_size) }}
             </template>
           </el-table-column>
-          <el-table-column label="存储位置" width="80">
+          <el-table-column label="存储位置" width="75" align="center">
             <template #default="{ row }">
               <el-tag :type="row.storage_location === 'ftp' ? 'warning' : 'success'" size="small">
                 {{ row.storage_location === 'ftp' ? 'FTP' : '本地' }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="耗时" width="80" align="right">
-            <template #default="{ row }">
-              {{ formatDuration(row.duration_seconds) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="80">
+          <el-table-column label="状态" width="75" align="center">
             <template #default="{ row }">
               <el-tag
                 :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : 'warning'"
@@ -145,13 +141,18 @@
               >{{ row.status === 'success' ? '成功' : row.status === 'failed' ? '失败' : '运行中' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="已验证" width="70" align="center">
+          <el-table-column label="耗时" width="105" align="right">
+            <template #default="{ row }">
+              {{ formatDuration(row.duration_seconds) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="已验证" width="65" align="center">
             <template #default="{ row }">
               <el-icon v-if="row.verified" color="#10b981"><CircleCheckFilled /></el-icon>
               <span v-else class="text-muted">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="180" fixed="right" align="center">
+          <el-table-column label="操作" width="195" fixed="right" align="center">
             <template #default="{ row }">
               <el-tooltip content="下载备份文件" placement="top">
                 <el-button link type="primary" class="action-icon-btn" @click="downloadBackup(row.id)">
@@ -880,7 +881,7 @@ onBeforeUnmount(() => {
   margin-bottom: 2px;
 }
 
-.last-run {
+.last-run-time {
   font-size: 13px;
   color: var(--color-text-secondary);
 }
