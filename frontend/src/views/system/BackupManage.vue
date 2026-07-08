@@ -378,7 +378,7 @@ import api from '@/api'
 import {
   getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
-  testFtpConnection, getDownloadUrl, getBackupLog,
+  testFtpConnection, getBackupLog,
 } from '@/api/backup'
 
 // ── 标签页 ────────────────────────────────────────────────
@@ -562,8 +562,36 @@ async function toggleEnabled(row) {
 }
 
 // ── 下载 ─────────────────────────────────────────────────
-function downloadBackup(id) {
-  window.open(getDownloadUrl(id), '_blank')
+async function downloadBackup(id) {
+  try {
+    const token = localStorage.getItem('token')
+    const resp = await fetch('/api/backup/history/' + id + '/download', {
+      headers: { Authorization: 'Bearer ' + token },
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      ElMessage.error(err.detail || '下载失败')
+      return
+    }
+    const blob = await resp.blob()
+    const disposition = resp.headers.get('Content-Disposition') || ''
+    const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+    let filename = 'backup.tar.gz'
+    if (match) {
+      filename = match[1].replace(/['"]/g, '')
+    }
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success('下载已开始')
+  } catch (e) {
+    ElMessage.error('下载失败：' + (e.message || '网络错误'))
+  }
 }
 
 // ── 验证 ─────────────────────────────────────────────────
@@ -573,11 +601,11 @@ const verifyResult = ref(null)
 
 async function verifyBackup(row) {
   verifyingId.value = row.id
+  verifyDialogVisible.value = true
+  verifyResult.value = null
   try {
     const res = await verifyBackupApi(row.id)
     verifyResult.value = res
-    verifyDialogVisible.value = true
-    // 刷新历史列表以更新 verified 状态
     if (res.success) fetchHistory()
   } catch { /* */ }
   finally { verifyingId.value = null }
