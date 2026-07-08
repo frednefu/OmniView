@@ -9,7 +9,7 @@ export function deleteBackupJob(id) { return api.delete(`/backup/jobs/${id}`).th
 export function runBackupJob(id) { return api.post(`/backup/jobs/${id}/run`).then(r => r.data) }
 
 // 备份历史
-export function getBackupHistory(params) { return api.get('/backup/history', { params }).then(r => r.data) }
+export function getBackupHistory(params) { return api.get('/backup/history/', { params }).then(r => r.data) }
 export function deleteBackupHistory(id) { return api.delete(`/backup/history/${id}`).then(r => r.data) }
 export function verifyBackup(id) { return api.post(`/backup/history/${id}/verify`).then(r => r.data) }
 export function getVerifyProgress(id) { return api.get(`/backup/history/${id}/verify-progress`).then(r => r.data) }
