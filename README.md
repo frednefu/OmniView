@@ -462,6 +462,15 @@ npm run dev
 | GET | /api/info-systems/djdj-search | 等保系统名称搜索（信息系统自动补全） |
 | GET | /api/sys/scheduler | 定时任务状态查看 |
 | PUT | /api/sys/scheduler/{job_id} | 定时任务间隔修改 |
+| CRUD | /api/backup/jobs | 备份任务管理（本地/FTP模式，Cron调度） |
+| POST | /api/backup/jobs/{id}/run | 手动触发备份 |
+| GET | /api/backup/history | 备份历史（分页+筛选） |
+| GET | /api/backup/history/{id}/download | 下载备份文件（FTP流式传输） |
+| POST | /api/backup/history/{id}/verify | 验证备份完整性（后台执行+实时进度） |
+| GET | /api/backup/history/{id}/log | 备份执行日志 |
+| GET | /api/backup/history/{id}/verify-progress | 验证进度轮询 |
+| POST | /api/backup/test-ftp | 测试 FTP 连接 |
+| GET | /api/backup/local-files | 浏览本地目录 |
 
 ### 交换机配置
 
@@ -514,6 +523,7 @@ Web 后端复用 `switchReader/switchReader.py` 的所有 SNMP 采集函数，�
 | 组织机构管理 | 外部 API 同步院系所，树形展示（含上级），部门→用户关联，教职工验证 | ✅ |
 | 信息资产管理 | VM/域名/信息系统关联部门，自动匹配(vm_folder→部门编码)，管理员指派（选部门+选人员直接指派，VM/域名统一对话框），资产同步（新增标记unlinked+僵尸清理，域名默认填报状态"自动"），文件夹树（/分隔路径，隐藏空节点，随部门联动），默认排序（资源池→名称→电源），域名清单客户端排序，外链填报（加密token+可选密码+过期时间+独立认证+外部填报保存），普通用户权限开放（部门树/人员搜索/人员注册），删除/撤销失败明确提示原因，域名认领权限检查（非管理员不可覆盖他人认领），普通用户域名数据隔离（仅见本人+未认领），域名填报状态生命周期（自动→手动→申请注销→未分组），域名填报状态筛选 | ✅ |
 | 系统管理 | API 配置管理，菜单分组（资产管理/扫描分析/系统管理子菜单） | ✅ |
+| 系统备份 | 本地/FTP双模式备份（数据库+配置+镜像+上传文件），可视化Cron调度，保留策略清理，备份验证，大文件流式下载 | ✅ |
 | 定时调度 | APScheduler 按设备独立间隔自动触发，卡住自动重置，资产同步(30min)+信息系统同步(4h)+过期外链清理(10min) | ✅ |
 
 **待开发：治理与运维层**
