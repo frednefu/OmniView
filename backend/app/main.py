@@ -25,7 +25,7 @@ from fastapi.responses import Response
 from sqlalchemy import inspect, text
 
 from app.database import engine, Base
-from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory, SharedLink, OperationLog
+from app.models import User, Switch, ScanResult, RouteTable, ScanLog, Subnet, History, VCenter, VMInventory, EsxiHost, Datastore, Department, StaffInfo, ApiConfig, AssetInventory, SharedLink, OperationLog, BackupJob, BackupHistory
 from app.models.subnet_subscription import SubnetSubscription
 from app.models.subnet_hidden import SubnetHidden
 from app.api.router import api_router
@@ -165,6 +165,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     _migrate_columns("subnet_subscriptions", [("show_in_dashboard", "BOOLEAN DEFAULT TRUE")])
+    # 备份任务表
+    try:
+        Base.metadata.create_all(bind=engine, tables=[BackupJob.__table__])
+    except Exception:
+        pass
+    try:
+        Base.metadata.create_all(bind=engine, tables=[BackupHistory.__table__])
+    except Exception:
+        pass
     # users 表 role 列扩展 dept_admin
     try:
         with engine.connect() as conn:
@@ -357,6 +366,8 @@ _PATH_MAP = {
     "/api/info-systems/supply-chain": "信息资产管理-供应链信息维护",
     "/api/info-systems/batch-claim": "信息资产管理-批量认领",
     "/api/info-systems/batch-revoke": "信息资产管理-批量撤销认领",
+    # 系统备份
+    "/api/backup/": "系统管理-系统备份",
     # 外链
     "/api/shared-links": "系统管理-外链管理",
     "/api/shared-links/shared": "外链填报-保存",

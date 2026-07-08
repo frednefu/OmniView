@@ -206,6 +206,12 @@ const routes = [
         meta: { title: 'Worker 管理', admin: true },
       },
       {
+        path: 'sys/backup',
+        name: 'BackupManage',
+        component: () => import('@/views/system/BackupManage.vue'),
+        meta: { title: '系统备份', admin: true },
+      },
+      {
         path: 'sys/scheduler',
         name: 'SchedulerMonitor',
         component: () => import('@/views/system/SchedulerMonitor.vue'),

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from app.database import SessionLocal
 from app.models.switch import Switch
@@ -195,6 +196,12 @@ def start_scheduler():
             replace_existing=True,
             misfire_grace_time=60,
         )
+
+    # 注册备份任务（CronTrigger）
+    try:
+        register_all_backup_jobs()
+    except Exception:
+        logger.exception("注册备份任务失败")
 
     if not scheduler.running:
         scheduler.start()
@@ -606,6 +613,105 @@ def run_info_system_sync_manual() -> dict:
         db.close()
 
 
+# ── 备份任务调度 ──────────────────────────────────────────
+
+def _backup_execute_job(job_id: int):
+    """备份执行回调（在调度器线程中运行）。"""
+    db = SessionLocal()
+    try:
+        from app.models.backup_job import BackupJob
+        job = db.query(BackupJob).get(job_id)
+        if not job or not job.enabled:
+            return
+        db.close()
+        # 执行备份（run_backup 内部自己管理 DB 会话）
+        from app.services.backup_service import run_backup
+        run_backup(job_id, manual=False)
+    except Exception:
+        logger.exception("定时备份执行失败 job_id=%s", job_id)
+        db2 = SessionLocal()
+        try:
+            from app.models.backup_job import BackupJob
+            job2 = db2.query(BackupJob).get(job_id)
+            if job2:
+                job2.last_status = "failed"
+                db2.commit()
+        finally:
+            db2.close()
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+def _add_backup_job(job_id: int, cron_expression: str):
+    """添加 CronTrigger 备份任务。cron_expression 格式：秒 分 时 日 月 周"""
+    parts = cron_expression.strip().split()
+    if len(parts) != 6:
+        logger.error("无效的 cron 表达式 job_id=%s expr=%s", job_id, cron_expression)
+        return
+    try:
+        second, minute, hour, day, month, day_of_week = parts
+        scheduler.add_job(
+            _backup_execute_job,
+            trigger=CronTrigger(
+                second=second, minute=minute, hour=hour,
+                day=day, month=month, day_of_week=day_of_week,
+                timezone="Asia/Shanghai",
+            ),
+            id=f"backup_{job_id}",
+            args=[job_id],
+            replace_existing=True,
+            misfire_grace_time=3600,  # 1 小时容错
+        )
+        logger.info("备份任务已注册 job_id=%s cron=%s", job_id, cron_expression)
+    except Exception:
+        logger.exception("备份任务注册失败 job_id=%s", job_id)
+
+
+def refresh_backup_job(job_id: int):
+    """更新或移除备份调度任务。由 API 层在创建/更新/删除时调用。"""
+    jid = f"backup_{job_id}"
+    try:
+        if scheduler.get_job(jid):
+            scheduler.remove_job(jid)
+    except Exception:
+        pass
+
+    # 如果调度器未运行，跳过添加（会在 start_scheduler 中统一注册）
+    if not scheduler.running:
+        return
+
+    db = SessionLocal()
+    try:
+        from app.models.backup_job import BackupJob
+        job = db.query(BackupJob).get(job_id)
+        if job and job.enabled:
+            _add_backup_job(job_id, job.cron_expression)
+    finally:
+        db.close()
+
+
+def register_all_backup_jobs():
+    """启动时注册所有启用的备份任务（自建 DB 会话）。"""
+    db = SessionLocal()
+    try:
+        from app.models.backup_job import BackupJob
+        jobs = db.query(BackupJob).filter(BackupJob.enabled == True).all()
+        for job in jobs:
+            jid = f"backup_{job.id}"
+            if not scheduler.get_job(jid):
+                try:
+                    _add_backup_job(job.id, job.cron_expression)
+                except Exception:
+                    logger.exception("注册备份任务失败 job_id=%s", job.id)
+        if jobs:
+            logger.info("已注册 %d 个备份定时任务", len(jobs))
+    finally:
+        db.close()
+
+
 _JOB_NAMES = {
     "cleanup_stale_workers": "清理过期Worker",
     "asset_sync": "资产同步",
@@ -631,6 +737,18 @@ def _job_label(job_id: str) -> str:
         return f"椒图扫描-{job_id.split('_',1)[1]}"
     if job_id.startswith("dingjia_"):
         return f"鼎甲备份扫描-{job_id.split('_',1)[1]}"
+    if job_id.startswith("backup_"):
+        # 动态查询备份任务名称
+        bid = int(job_id.split("_", 1)[1])
+        try:
+            db = SessionLocal()
+            from app.models.backup_job import BackupJob
+            job = db.query(BackupJob).get(bid)
+            db.close()
+            if job:
+                return f"系统备份-{job.name}"
+        except Exception:
+            pass
     return job_id
 
 
@@ -675,13 +793,23 @@ def get_scheduler_status() -> dict:
     jobs = []
     for job in scheduler.get_jobs():
         secs = _job_interval_secs(job)
-        jobs.append({
+        entry = {
             "id": job.id,
             "name": _job_label(job.id),
             "next_run": str(job.next_run_time) if job.next_run_time else None,
             "interval_secs": secs,
             "interval": _format_interval(secs),
-        })
+        }
+        # CronTrigger 显示 cron 表达式
+        if hasattr(job.trigger, 'fields') and not secs:
+            from apscheduler.triggers.cron import CronTrigger
+            if isinstance(job.trigger, CronTrigger):
+                f = job.trigger.fields
+                expr_parts = [
+                    f[i].expressions[0] if f[i].expressions else '*' for i in range(7)
+                ]
+                entry["interval"] = "cron: " + " ".join(str(p) for p in expr_parts)
+        jobs.append(entry)
     return {
         "running": scheduler.running,
         "jobs": jobs,

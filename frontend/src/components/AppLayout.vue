@@ -159,6 +159,10 @@
               <el-icon><Cpu /></el-icon>
               <span>Worker 管理</span>
             </el-menu-item>
+            <el-menu-item index="/sys/backup">
+              <el-icon><FolderOpened /></el-icon>
+              <span>系统备份</span>
+            </el-menu-item>
             <el-menu-item index="/sys/scheduler">
               <el-icon><Timer /></el-icon>
               <span>定时任务监控</span>
@@ -293,6 +297,7 @@ const pageTitle = computed(() => {
     '/sys/departments': '组织机构管理',
     '/sys/accounts': '账号管理',
     '/sys/workers': 'Worker 管理',
+    '/sys/backup': '系统备份',
     '/sys/scheduler': '定时任务监控',
   }
   return titles[route.path] || ''
