@@ -570,8 +570,11 @@ function downloadBackup(id) {
     ElMessage.error('登录已过期，请重新登录')
     return
   }
-  // 直接浏览器跳转下载，支持大文件流式传输
-  window.open('/api/backup/history/' + id + '/download?token=' + encodeURIComponent(token), '_blank')
+  // 直接触发浏览器下载（流式传输，不等待缓冲）
+  const a = document.createElement('a')
+  a.href = '/api/backup/history/' + id + '/download?token=' + encodeURIComponent(token)
+  a.download = ''
+  a.click()
 }
 
 // ── 验证 ─────────────────────────────────────────────────

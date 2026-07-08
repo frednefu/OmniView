@@ -399,6 +399,7 @@ def download_backup(
 
         headers = {
             "Content-Disposition": f'attachment; filename="{_safe_filename(filename)}"',
+            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
         }
         if file_size:
             headers["Content-Length"] = str(file_size)
