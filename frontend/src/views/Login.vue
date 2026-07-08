@@ -9,7 +9,7 @@
 
     <div class="login-card">
       <div class="login-header">
-        <img src="/img/ov-logo-big.png" width="140" height="140" alt="OmniView" class="login-logo" />
+        <img src="/img/ov-logo-big.png" width="200" height="200" alt="OmniView" class="login-logo" />
         <h1>OmniView</h1>
         <p>全维 IT 资产发现与治理平台</p>
       </div>
