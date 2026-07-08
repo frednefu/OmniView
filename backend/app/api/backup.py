@@ -301,12 +301,15 @@ def download_backup(
     filename = history.file_name or "backup.tar.gz"
 
     # 本地文件直接返回
-    if history.file_path and os.path.isfile(history.file_path):
-        return FileResponse(
-            history.file_path,
-            filename=filename,
-            media_type="application/gzip",
-        )
+    if history.storage_location == "local":
+        if history.file_path and os.path.isfile(history.file_path):
+            return FileResponse(
+                history.file_path,
+                filename=filename,
+                media_type="application/gzip",
+            )
+        else:
+            raise HTTPException(404, "本地备份文件不存在（容器重建后临时目录中的文件会丢失，请将备份目录挂载为 Docker 卷）")
 
     # FTP 远程文件：流式传输（FTP → HTTP，不落盘）
     if history.storage_location == "ftp" and history.job_id:
@@ -314,13 +317,25 @@ def download_backup(
         remote_file = _ftp_file_name(history)
 
         import ftplib
-        ftp = ftplib.FTP()
-        ftp.connect(job.ftp_host, job.ftp_port, timeout=30)
-        ftp.login(job.ftp_user, job.ftp_password)
-        ftp.set_pasv(True)
+        try:
+            ftp = ftplib.FTP()
+            ftp.connect(job.ftp_host, job.ftp_port, timeout=30)
+            ftp.login(job.ftp_user, job.ftp_password)
+            ftp.set_pasv(True)
+        except ftplib.error_perm as e:
+            raise HTTPException(400, f"FTP 认证失败：{e}")
+        except Exception as e:
+            raise HTTPException(400, f"FTP 连接失败：{e}")
 
         q = queue.Queue(maxsize=50)
         download_error = [None]
+
+        # 获取文件大小用于 Content-Length
+        file_size = 0
+        try:
+            file_size = ftp.size(remote_file) or 0
+        except Exception:
+            pass
 
         def ftp_callback(data):
             q.put(data)
@@ -331,7 +346,7 @@ def download_backup(
             except Exception as e:
                 download_error[0] = e
             finally:
-                q.put(None)  # sentinel 标记结束
+                q.put(None)  # sentinel
                 try:
                     ftp.quit()
                 except Exception:
@@ -343,16 +358,21 @@ def download_backup(
         def stream_generator():
             while True:
                 chunk = q.get()
-                if chunk is None:  # sentinel
+                if chunk is None:
                     break
-                if download_error[0]:
-                    raise download_error[0]
                 yield chunk
+            # sentinel 之后检查错误（必须在 break 之后，否则错误被吞掉）
+            if download_error[0]:
+                raise download_error[0]
+
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        if file_size:
+            headers["Content-Length"] = str(file_size)
 
         return StreamingResponse(
             stream_generator(),
             media_type="application/gzip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers=headers,
         )
 
     raise HTTPException(404, "备份文件不存在")
