@@ -12,6 +12,7 @@ export function runBackupJob(id) { return api.post(`/backup/jobs/${id}/run`).the
 export function getBackupHistory(params) { return api.get('/backup/history', { params }).then(r => r.data) }
 export function deleteBackupHistory(id) { return api.delete(`/backup/history/${id}`).then(r => r.data) }
 export function verifyBackup(id) { return api.post(`/backup/history/${id}/verify`).then(r => r.data) }
+export function getBackupLog(id) { return api.get(`/backup/history/${id}/log`).then(r => r.data) }
 
 // FTP 测试
 export function testFtpConnection(data) { return api.post('/backup/test-ftp', data).then(r => r.data) }

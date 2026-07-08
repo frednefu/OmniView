@@ -76,6 +76,7 @@ class BackupHistoryOut(BaseModel):
     storage_location: Optional[str] = None
     content_summary: Optional[str] = None
     error_message: Optional[str] = None
+    log_output: Optional[str] = None
     verified: bool = False
     verified_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

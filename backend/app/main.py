@@ -174,6 +174,7 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine, tables=[BackupHistory.__table__])
     except Exception:
         pass
+    _migrate_columns("backup_history", [("log_output", "TEXT")])
     # users 表 role 列扩展 dept_admin
     try:
         with engine.connect() as conn:

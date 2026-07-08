@@ -141,13 +141,16 @@
               <span v-else class="text-muted">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="260" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" size="small" @click="downloadBackup(row.id)">
                 <el-icon><Download /></el-icon> 下载
               </el-button>
               <el-button link type="success" size="small" :loading="verifyingId === row.id" @click="verifyBackup(row)">
                 验证
+              </el-button>
+              <el-button link type="info" size="small" @click="showLog(row.id)">
+                <el-icon><Document /></el-icon> 日志
               </el-button>
               <el-popconfirm title="确定删除此备份记录及文件？" @confirm="deleteHistory(row.id)">
                 <template #reference>
@@ -314,17 +317,33 @@
         <div v-for="c in verifyResult.checks" :key="c" class="verify-check">{{ c }}</div>
       </div>
     </el-dialog>
+
+    <!-- ═══════════ 备份日志对话框 ═══════════ -->
+    <el-dialog v-model="logDialogVisible" title="备份过程日志" width="750px" destroy-on-close>
+      <div v-if="logLoading" style="text-align: center; padding: 40px;">
+        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+      </div>
+      <div v-else-if="logData" class="log-container">
+        <div class="log-header">
+          <span>任务：{{ logData.job_name }}</span>
+          <el-tag :type="logData.status === 'success' ? 'success' : logData.status === 'failed' ? 'danger' : 'warning'" size="small">
+            {{ logData.status === 'success' ? '成功' : logData.status === 'failed' ? '失败' : '运行中' }}
+          </el-tag>
+        </div>
+        <pre class="log-output">{{ logData.log_output || '（无日志输出）' }}</pre>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, VideoPlay, Download, CircleCheckFilled } from '@element-plus/icons-vue'
+import { Plus, VideoPlay, Download, CircleCheckFilled, Document, Loading } from '@element-plus/icons-vue'
 import {
   getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
-  testFtpConnection, getDownloadUrl
+  testFtpConnection, getDownloadUrl, getBackupLog,
 } from '@/api/backup'
 
 // ── 标签页 ────────────────────────────────────────────────
@@ -518,6 +537,21 @@ async function verifyBackup(row) {
     if (res.success) fetchHistory()
   } catch { /* */ }
   finally { verifyingId.value = null }
+}
+
+// ── 日志 ─────────────────────────────────────────────────
+const logDialogVisible = ref(false)
+const logLoading = ref(false)
+const logData = ref(null)
+
+async function showLog(id) {
+  logDialogVisible.value = true
+  logLoading.value = true
+  logData.value = null
+  try {
+    logData.value = await getBackupLog(id)
+  } catch { /* */ }
+  finally { logLoading.value = false }
 }
 
 // ── 删除历史 ─────────────────────────────────────────────
@@ -773,6 +807,51 @@ onMounted(() => {
   padding: 4px 0;
   font-size: 14px;
   color: var(--color-text);
+}
+
+.log-container {
+  background: #1e1e2e;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  color: #cdd6f4;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.log-output {
+  margin: 0;
+  padding: 16px;
+  background: #1e1e2e;
+  color: #a6e3a1;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.log-output::-webkit-scrollbar {
+  width: 6px;
+}
+
+.log-output::-webkit-scrollbar-track {
+  background: #181825;
+}
+
+.log-output::-webkit-scrollbar-thumb {
+  background: #45475a;
+  border-radius: 3px;
 }
 
 /* 隐藏 el-divider 的默认 margin */

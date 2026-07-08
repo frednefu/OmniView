@@ -273,6 +273,24 @@ def verify_backup_api(
     return result
 
 
+@router.get("/history/{history_id}/log")
+def get_backup_log(
+    history_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """获取备份执行过程的控制台日志。"""
+    history = db.query(BackupHistory).get(history_id)
+    if not history:
+        raise HTTPException(404, "备份记录不存在")
+    return {
+        "id": history.id,
+        "job_name": history.job_name,
+        "status": history.status,
+        "log_output": history.log_output or "",
+    }
+
+
 @router.delete("/history/{history_id}")
 def delete_backup_history(
     history_id: int,
