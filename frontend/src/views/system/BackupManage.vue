@@ -62,15 +62,25 @@
               <span v-else class="text-muted">未执行</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="180" fixed="right">
+          <el-table-column label="操作" width="130" fixed="right" align="center">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="runJob(row)">
-                <el-icon><VideoPlay /></el-icon>
-              </el-button>
-              <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+              <el-tooltip content="手动执行" placement="top">
+                <el-button link type="primary" class="action-icon-btn" @click="runJob(row)">
+                  <el-icon :size="20"><VideoPlay /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="编辑任务" placement="top">
+                <el-button link type="primary" class="action-icon-btn" @click="openEdit(row)">
+                  <el-icon :size="20"><Edit /></el-icon>
+                </el-button>
+              </el-tooltip>
               <el-popconfirm title="确定删除此备份任务？" @confirm="deleteJob(row.id)">
                 <template #reference>
-                  <el-button link type="danger" size="small">删除</el-button>
+                  <el-tooltip content="删除任务" placement="top">
+                    <el-button link type="danger" class="action-icon-btn">
+                      <el-icon :size="20"><Delete /></el-icon>
+                    </el-button>
+                  </el-tooltip>
                 </template>
               </el-popconfirm>
             </template>
@@ -141,20 +151,30 @@
               <span v-else class="text-muted">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="260" fixed="right">
+          <el-table-column label="操作" width="180" fixed="right" align="center">
             <template #default="{ row }">
-              <el-button link type="primary" size="small" @click="downloadBackup(row.id)">
-                <el-icon><Download /></el-icon> 下载
-              </el-button>
-              <el-button link type="success" size="small" :loading="verifyingId === row.id" @click="verifyBackup(row)">
-                验证
-              </el-button>
-              <el-button link type="info" size="small" @click="showLog(row.id)">
-                <el-icon><Document /></el-icon> 日志
-              </el-button>
+              <el-tooltip content="下载备份文件" placement="top">
+                <el-button link type="primary" class="action-icon-btn" @click="downloadBackup(row.id)">
+                  <el-icon :size="20"><Download /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="验证备份完整性" placement="top">
+                <el-button link type="success" class="action-icon-btn" :loading="verifyingId === row.id" @click="verifyBackup(row)">
+                  <el-icon :size="20"><CircleCheck /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="查看执行日志" placement="top">
+                <el-button link type="info" class="action-icon-btn" @click="showLog(row.id)">
+                  <el-icon :size="20"><Document /></el-icon>
+                </el-button>
+              </el-tooltip>
               <el-popconfirm title="确定删除此备份记录及文件？" @confirm="deleteHistory(row.id)">
                 <template #reference>
-                  <el-button link type="danger" size="small">删除</el-button>
+                  <el-tooltip content="删除记录及文件" placement="top">
+                    <el-button link type="danger" class="action-icon-btn">
+                      <el-icon :size="20"><Delete /></el-icon>
+                    </el-button>
+                  </el-tooltip>
                 </template>
               </el-popconfirm>
             </template>
@@ -352,7 +372,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, VideoPlay, Download, CircleCheckFilled, Document, Loading, Refresh } from '@element-plus/icons-vue'
+import { Plus, VideoPlay, Download, CircleCheckFilled, CircleCheck, Document, Loading, Refresh, Edit, Delete } from '@element-plus/icons-vue'
 import {
   getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
@@ -447,24 +467,28 @@ function openCreate() {
 }
 
 async function openEdit(row) {
-  isEdit.value = true
-  editId.value = row.id
-  const job = await getBackupJob(row.id)
-  form.name = job.name
-  form.enabled = job.enabled
-  form.mode = job.mode
-  form.local_path = job.local_path || ''
-  form.ftp_host = job.ftp_host || ''
-  form.ftp_port = job.ftp_port || 21
-  form.ftp_user = job.ftp_user || ''
-  form.ftp_password = job.ftp_password || ''
-  form.ftp_remote_path = job.ftp_remote_path || ''
-  form.contentList = (job.backup_contents || 'database,configs,images,uploads').split(',').filter(Boolean)
-  form.cron_expression = job.cron_expression || '0 2 * * *'
-  form.retention_days = job.retention_days ?? 30
-  // 解析 cron 到 UI 状态
-  parseCronExpression(job.cron_expression || '0 2 * * *')
-  dialogVisible.value = true
+  try {
+    const job = await getBackupJob(row.id)
+    isEdit.value = true
+    editId.value = row.id
+    form.name = job.name
+    form.enabled = job.enabled
+    form.mode = job.mode
+    form.local_path = job.local_path || ''
+    form.ftp_host = job.ftp_host || ''
+    form.ftp_port = job.ftp_port || 21
+    form.ftp_user = job.ftp_user || ''
+    form.ftp_password = job.ftp_password || ''
+    form.ftp_remote_path = job.ftp_remote_path || ''
+    form.contentList = (job.backup_contents || 'database,configs,images,uploads').split(',').filter(Boolean)
+    form.cron_expression = job.cron_expression || '0 2 * * *'
+    form.retention_days = job.retention_days ?? 30
+    // 解析 cron 到 UI 状态
+    parseCronExpression(job.cron_expression || '0 2 * * *')
+    dialogVisible.value = true
+  } catch {
+    ElMessage.error('获取任务详情失败，请刷新页面重试')
+  }
 }
 
 async function handleSubmit() {
@@ -852,6 +876,17 @@ onBeforeUnmount(() => {
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: 12px;
   color: var(--color-text-secondary);
+}
+
+.action-icon-btn {
+  padding: 4px 6px;
+  margin: 0 2px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.action-icon-btn:hover {
+  background: var(--color-bg);
 }
 
 .cron-fields {
