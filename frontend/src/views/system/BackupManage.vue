@@ -564,36 +564,14 @@ async function toggleEnabled(row) {
 }
 
 // ── 下载 ─────────────────────────────────────────────────
-async function downloadBackup(id) {
-  try {
-    const token = localStorage.getItem('token')
-    const resp = await fetch('/api/backup/history/' + id + '/download', {
-      headers: { Authorization: 'Bearer ' + token },
-    })
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}))
-      ElMessage.error(err.detail || '下载失败')
-      return
-    }
-    const blob = await resp.blob()
-    const disposition = resp.headers.get('Content-Disposition') || ''
-    const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
-    let filename = 'backup.tar.gz'
-    if (match) {
-      filename = match[1].replace(/['"]/g, '')
-    }
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    ElMessage.success('下载已开始')
-  } catch (e) {
-    ElMessage.error('下载失败：' + (e.message || '网络错误'))
+function downloadBackup(id) {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.error('登录已过期，请重新登录')
+    return
   }
+  // 直接浏览器跳转下载，支持大文件流式传输
+  window.open('/api/backup/history/' + id + '/download?token=' + encodeURIComponent(token), '_blank')
 }
 
 // ── 验证 ─────────────────────────────────────────────────

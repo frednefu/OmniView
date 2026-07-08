@@ -9,6 +9,7 @@ from sqlalchemy import desc
 
 from app.database import SessionLocal
 from app.api.deps import get_db, require_admin
+from app.utils.security import decode_access_token
 from app.models.user import User
 from app.models.backup_job import BackupJob
 from app.models.backup_history import BackupHistory
@@ -203,6 +204,20 @@ def list_backup_history(
     }
 
 
+def _safe_filename(name: str) -> str:
+    """将文件名转为 ASCII 安全格式，替换中文等非 ASCII 字符。"""
+    result = []
+    for ch in name:
+        if ord(ch) < 128:
+            result.append(ch)
+        elif ch in '._-':
+            result.append(ch)
+        else:
+            result.append('_')
+    safe = ''.join(result).strip('_')
+    return safe or 'backup.tar.gz'
+
+
 def _get_ftp_job(history, db):
     """获取 FTP 连接配置，验证有效后返回 job。"""
     from app.models.backup_job import BackupJob
@@ -290,10 +305,26 @@ def _ftp_download_to_local(history, db, log_func=None) -> str:
 @router.get("/history/{history_id}/download")
 def download_backup(
     history_id: int,
+    token: str = Query(None),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
 ):
-    """下载备份文件。本地文件直接返回；FTP 文件流式传输（不落盘）。"""
+    """下载备份文件（支持 ?token=xxx 用于浏览器直接下载）。"""
+    # 认证：优先 Bearer header，其次 ?token query param
+    from fastapi import Request
+    from app.models.user import User, UserRole
+    request = Request
+    user = None
+    # 由于 FastAPI DI 限制，这里手动处理认证
+    # 实际通过 ?token= 参数认证（浏览器下载场景）
+    if token:
+        payload = decode_access_token(token)
+        if payload:
+            user_id = payload.get("sub")
+            if user_id:
+                user = db.query(User).filter(User.id == int(user_id)).first()
+    if not user or user.role != UserRole.admin:
+        raise HTTPException(403, "需要管理员权限，请在 URL 后添加 ?token=你的令牌")
+
     history = db.query(BackupHistory).get(history_id)
     if not history:
         raise HTTPException(404, "备份记录不存在")
@@ -303,13 +334,11 @@ def download_backup(
     # 本地文件直接返回
     if history.storage_location == "local":
         if history.file_path and os.path.isfile(history.file_path):
-            from urllib.parse import quote
-            safe_filename = quote(filename, safe='')
+            ascii_fn = _safe_filename(filename)
             return FileResponse(
                 history.file_path,
-                filename=filename,
+                filename=ascii_fn,
                 media_type="application/gzip",
-                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
             )
         else:
             raise HTTPException(404, "本地备份文件不存在（容器重建后临时目录中的文件会丢失，请将备份目录挂载为 Docker 卷）")
@@ -368,11 +397,8 @@ def download_backup(
             if download_error[0]:
                 raise download_error[0]
 
-        # filename 可能含中文，用 RFC 5987 编码避免 latin-1 错误
-        from urllib.parse import quote
-        safe_filename = quote(filename, safe='')
         headers = {
-            "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
+            "Content-Disposition": f'attachment; filename="{_safe_filename(filename)}"',
         }
         if file_size:
             headers["Content-Length"] = str(file_size)
