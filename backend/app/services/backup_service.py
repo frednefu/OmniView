@@ -427,90 +427,179 @@ def test_ftp_connection(host: str, port: int, user: str, password: str) -> dict:
 
 
 def verify_backup(history_id: int) -> dict:
-    """验证备份文件完整性（只读，不影响生产环境）。"""
+    """验证备份文件完整性（只读，不影响生产环境）。返回详细验证日志。"""
     from app.database import SessionLocal
     from app.models.backup_history import BackupHistory
 
+    log = LogCapture()
     db = SessionLocal()
     try:
         history = db.query(BackupHistory).get(history_id)
         if not history:
-            return {"success": False, "message": "备份记录不存在"}
+            log.write("验证失败：备份记录不存在")
+            return {"success": False, "message": "备份记录不存在", "log_output": log.getvalue()}
+
+        log.write(f"开始验证备份：{history.job_name}")
+        log.write(f"备份文件：{history.file_name or '未知'}")
+        log.write(f"存储位置：{history.storage_location}")
+        log.write(f"内容摘要：{history.content_summary}")
 
         archive_path = history.file_path
         if not archive_path or not os.path.exists(archive_path):
             if history.storage_location == "ftp":
-                return {"success": False, "message": "FTP 远程文件需先下载到本地再验证"}
-            return {"success": False, "message": "备份文件不存在"}
+                log.write("验证失败：FTP 远程文件需先下载到本地再验证")
+                return {"success": False, "message": "FTP 远程文件需先下载到本地再验证", "log_output": log.getvalue()}
+            log.write(f"验证失败：备份文件不存在 ({archive_path})")
+            return {"success": False, "message": "备份文件不存在", "log_output": log.getvalue()}
 
+        # 检查文件基本信息
+        file_stat = os.stat(archive_path)
+        log.write(f"文件大小：{file_stat.st_size / (1024 * 1024):.1f} MB")
+        log.write(f"修改时间：{datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')}")
+
+        report = {"success": True, "checks": [], "message": "", "log_output": ""}
         tmp_dir = tempfile.mkdtemp(prefix="backup_verify_")
-        report = {"success": True, "checks": [], "message": ""}
 
         try:
-            with tarfile.open(archive_path, "r:gz") as tar:
-                tar.extractall(tmp_dir)
+            # 解压
+            log.write("── 解压备份文件 ──")
+            try:
+                with tarfile.open(archive_path, "r:gz") as tar:
+                    members = tar.getmembers()
+                    log.write(f"压缩包包含 {len(members)} 个条目：")
+                    for m in members:
+                        log.write(f"  - {m.name} ({m.size:,} 字节{' [目录]' if m.isdir() else ''})")
+                    tar.extractall(tmp_dir)
+                log.write("解压完成")
+            except Exception as e:
+                log.write(f"解压失败：{e}")
+                report["success"] = False
+                report["checks"].append(f"❌ 解压失败：{e}")
+                report["message"] = f"验证失败：解压异常 - {e}"
+                history.verify_log = log.getvalue()
+                db.commit()
+                return report
 
-            # 检查数据库 SQL 文件
+            # 1. 检查数据库 SQL 文件
+            log.write("── 检查数据库 SQL 文件 ──")
             sql_file = os.path.join(tmp_dir, "database.sql")
             if os.path.exists(sql_file):
+                sql_size = os.path.getsize(sql_file)
+                log.write(f"SQL 文件大小：{sql_size / (1024 * 1024):.1f} MB")
                 with open(sql_file, "r", encoding="utf-8", errors="ignore") as f:
                     head = f.read(5000)
-                has_create = "CREATE" in head.upper() or "INSERT" in head.upper()
-                size_mb = os.path.getsize(sql_file) / (1024 * 1024)
-                if has_create and os.path.getsize(sql_file) > 100:
-                    report["checks"].append(f"✅ 数据库 SQL 有效 ({size_mb:.1f} MB)")
-                else:
-                    report["checks"].append(f"⚠️ 数据库 SQL 可能不完整 ({size_mb:.1f} MB)")
+                has_create = "CREATE" in head.upper()
+                has_insert = "INSERT" in head.upper()
+                has_drop = "DROP" in head.upper()
+                line_count = head.count("\n") + 1
+                log.write(f"文件头 {line_count} 行：CREATE={has_create} INSERT={has_insert} DROP={has_drop}")
+                if has_create and sql_size > 100:
+                    log.write("✅ 数据库 SQL 文件有效")
+                    report["checks"].append(f"✅ 数据库 SQL 有效 ({sql_size / (1024 * 1024):.1f} MB)")
+                elif sql_size <= 100:
+                    log.write("⚠️ SQL 文件过小，可能不完整")
+                    report["checks"].append(f"⚠️ 数据库 SQL 文件仅 {sql_size} 字节，可能为空")
                     report["success"] = False
+                else:
+                    log.write("⚠️ SQL 文件缺少 CREATE/INSERT 语句")
+                    report["checks"].append(f"⚠️ 数据库 SQL ({sql_size / (1024 * 1024):.1f} MB) 缺少 CREATE/INSERT 语句")
+                    report["success"] = False
+            else:
+                log.write("ℹ️ 备份中无数据库 SQL 文件")
+                report["checks"].append("ℹ️ 无数据库文件（未选择此项）")
 
-            # 检查配置文件
+            # 2. 检查配置文件
+            log.write("── 检查配置文件 ──")
             configs_dir = os.path.join(tmp_dir, "configs")
             if os.path.isdir(configs_dir):
-                config_files = os.listdir(configs_dir)
+                config_files = sorted(os.listdir(configs_dir))
+                log.write(f"配置文件目录包含 {len(config_files)} 个文件：")
+                for cf in config_files:
+                    cf_path = os.path.join(configs_dir, cf)
+                    cf_size = os.path.getsize(cf_path) if os.path.isfile(cf_path) else 0
+                    log.write(f"  - {cf} ({cf_size:,} 字节)")
                 report["checks"].append(f"✅ 配置文件 {len(config_files)} 个")
             else:
-                report["checks"].append("ℹ️ 无配置文件")
+                log.write("ℹ️ 备份中无配置文件目录")
+                report["checks"].append("ℹ️ 无配置文件（未选择此项）")
 
-            # 检查 Docker 镜像
+            # 3. 检查 Docker 镜像
+            log.write("── 检查 Docker 镜像 ──")
             images_dir = os.path.join(tmp_dir, "images")
             if os.path.isdir(images_dir):
-                image_files = [f for f in os.listdir(images_dir) if f.endswith(".tar")]
+                image_files = sorted([f for f in os.listdir(images_dir) if f.endswith(".tar")])
                 if image_files:
-                    test_file = os.path.join(images_dir, image_files[0])
-                    try:
-                        subprocess.run(
-                            ["tar", "-tf", test_file],
-                            check=True, capture_output=True, timeout=30,
-                        )
-                        report["checks"].append(f"✅ Docker 镜像 {len(image_files)} 个（可读取）")
-                    except subprocess.CalledProcessError:
-                        report["checks"].append(f"⚠️ Docker 镜像 {len(image_files)} 个（读取失败）")
+                    log.write(f"Docker 镜像目录包含 {len(image_files)} 个 tar 文件：")
+                    all_valid = True
+                    for img in image_files:
+                        img_path = os.path.join(images_dir, img)
+                        img_size = os.path.getsize(img_path)
+                        log.write(f"  - {img} ({img_size / (1024 * 1024):.1f} MB)")
+                        try:
+                            result = subprocess.run(
+                                ["tar", "-tf", img_path],
+                                check=True, capture_output=True, text=True, timeout=30,
+                            )
+                            layer_count = len(result.stdout.strip().split("\n"))
+                            log.write(f"    包含 {layer_count} 层，tar 结构正常")
+                        except subprocess.CalledProcessError as e:
+                            log.write(f"    ⚠️ tar 结构损坏：{e.stderr[:200] if e.stderr else str(e)[:200]}")
+                            all_valid = False
+                    if all_valid:
+                        report["checks"].append(f"✅ Docker 镜像 {len(image_files)} 个（全部可读取）")
+                    else:
+                        report["checks"].append(f"⚠️ Docker 镜像 {len(image_files)} 个（部分损坏）")
                         report["success"] = False
                 else:
-                    report["checks"].append("ℹ️ 无 Docker 镜像")
+                    log.write("ℹ️ 镜像目录为空")
+                    report["checks"].append("ℹ️ 无 Docker 镜像（导出失败或未选择）")
             else:
-                report["checks"].append("ℹ️ 无 Docker 镜像")
+                log.write("ℹ️ 备份中无 Docker 镜像目录")
+                report["checks"].append("ℹ️ 无 Docker 镜像（未选择此项）")
 
-            # 检查上传文件
+            # 4. 检查上传文件
+            log.write("── 检查上传文件 ──")
             uploads_tar = os.path.join(tmp_dir, "uploads.tar.gz")
             if os.path.exists(uploads_tar):
-                with tarfile.open(uploads_tar, "r:gz") as ut:
-                    members = ut.getmembers()
-                    report["checks"].append(f"✅ 上传文件 {len(members)} 个条目")
+                uploads_size = os.path.getsize(uploads_tar)
+                log.write(f"上传文件包大小：{uploads_size / 1024:.0f} KB")
+                try:
+                    with tarfile.open(uploads_tar, "r:gz") as ut:
+                        ut_members = ut.getmembers()
+                    log.write(f"包含 {len(ut_members)} 个条目：")
+                    for um in ut_members[:20]:  # 最多显示20条
+                        log.write(f"  - {um.name} ({um.size:,} 字节)")
+                    if len(ut_members) > 20:
+                        log.write(f"  ... 还有 {len(ut_members) - 20} 个条目")
+                    report["checks"].append(f"✅ 上传文件 {len(ut_members)} 个条目")
+                except Exception as e:
+                    log.write(f"⚠️ 上传文件包损坏：{e}")
+                    report["checks"].append(f"⚠️ 上传文件包无法读取：{e}")
+                    report["success"] = False
             elif os.path.exists(os.path.join(tmp_dir, "uploads_empty.txt")):
-                report["checks"].append("ℹ️ 上传文件目录为空")
+                log.write("ℹ️ 上传文件目录在备份时为空")
+                report["checks"].append("ℹ️ 上传文件为空（备份时无文件）")
             else:
-                report["checks"].append("ℹ️ 无上传文件")
+                log.write("ℹ️ 备份中无上传文件包")
+                report["checks"].append("ℹ️ 无上传文件（未选择此项）")
 
+            # 汇总
+            log.write("── 验证汇总 ──")
             report["message"] = "验证完成：" + "；".join(report["checks"])
             if report["success"]:
+                log.write("✅ 验证通过：备份文件完整有效")
                 history.verified = True
                 history.verified_at = datetime.now()
-                db.commit()
+            else:
+                log.write("⚠️ 验证发现问题：备份文件可能不完整")
+            history.verify_log = log.getvalue()
+            db.commit()
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+            log.close()
 
+        report["log_output"] = log.getvalue()
         return report
 
     finally:

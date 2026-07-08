@@ -26,6 +26,7 @@ class BackupHistory(Base):
     content_summary = Column(String(256), nullable=True, comment="备份内容摘要（如：数据库,配置文件）")
     error_message = Column(Text, nullable=True, comment="错误信息")
     log_output = Column(Text, nullable=True, comment="备份过程日志输出")
+    verify_log = Column(Text, nullable=True, comment="验证过程日志输出")
 
     # 验证
     verified = Column(Boolean, default=False, comment="是否已验证")

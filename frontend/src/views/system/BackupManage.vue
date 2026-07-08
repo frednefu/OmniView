@@ -306,15 +306,20 @@
     </el-dialog>
 
     <!-- ═══════════ 验证结果对话框 ═══════════ -->
-    <el-dialog v-model="verifyDialogVisible" title="验证结果" width="500px">
-      <div v-if="verifyResult">
-        <el-alert
-          :type="verifyResult.success ? 'success' : 'warning'"
-          :title="verifyResult.success ? '验证通过' : '验证发现问题'"
-          :closable="false"
-          style="margin-bottom: 16px;"
-        />
-        <div v-for="c in verifyResult.checks" :key="c" class="verify-check">{{ c }}</div>
+    <el-dialog v-model="verifyDialogVisible" title="备份验证" width="750px" destroy-on-close>
+      <div v-if="verifyingId" style="text-align: center; padding: 40px;">
+        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+        <p style="margin-top: 12px; color: var(--color-text-secondary);">正在验证备份文件...</p>
+      </div>
+      <div v-else-if="verifyResult" class="log-container">
+        <div class="log-header">
+          <span>验证结果</span>
+          <el-tag
+            :type="verifyResult.success ? 'success' : 'danger'"
+            size="small"
+          >{{ verifyResult.success ? '✅ 验证通过' : '⚠️ 发现问题' }}</el-tag>
+        </div>
+        <pre class="log-output">{{ verifyResult.log_output || verifyResult.message || '（无日志输出）' }}</pre>
       </div>
     </el-dialog>
 
