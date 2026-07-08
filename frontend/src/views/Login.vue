@@ -9,7 +9,7 @@
 
     <div class="login-card">
       <div class="login-header">
-        <img src="/img/ov-logo-big.png" width="72" height="72" alt="OmniView" class="login-logo" />
+        <img src="/img/ov-logo-big.png" width="140" height="140" alt="OmniView" class="login-logo" />
         <h1>OmniView</h1>
         <p>全维 IT 资产发现与治理平台</p>
       </div>
@@ -156,8 +156,9 @@ onMounted(() => {
 }
 
 .login-logo {
-  border-radius: 14px;
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25);
+  border-radius: 20px;
+  box-shadow: 0 6px 24px rgba(99, 102, 241, 0.30);
+  margin-bottom: 8px;
 }
 
 .login-header h1 {
