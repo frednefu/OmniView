@@ -39,6 +39,23 @@ class LogCapture:
         self._buffer.close()
 
 
+def _flush_log(history_id: int, log: LogCapture):
+    """将当前日志实时写入数据库，方便前端轮询查看进度。"""
+    try:
+        from app.database import SessionLocal
+        from app.models.backup_history import BackupHistory
+        db = SessionLocal()
+        try:
+            h = db.query(BackupHistory).get(history_id)
+            if h:
+                h.log_output = log.getvalue()
+                db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass  # 日志刷新失败不应中断备份
+
+
 def run_backup(job_id: int, manual: bool = False) -> int:
     """执行一次备份，返回 BackupHistory.id。"""
     from app.database import SessionLocal
@@ -105,62 +122,79 @@ def run_backup(job_id: int, manual: bool = False) -> int:
             # 1. 数据库导出
             if "database" in contents:
                 log.write("── 开始导出数据库 ──")
+                _flush_log(history.id, log)
                 try:
                     _dump_database(work_dir, log)
                     log.write("数据库导出完成")
+                    _flush_log(history.id, log)
                 except Exception as e:
                     log.write(f"数据库导出失败：{e}")
+                    _flush_log(history.id, log)
                     raise
 
             # 2. 配置文件收集
             if "configs" in contents:
                 log.write("── 开始收集配置文件 ──")
+                _flush_log(history.id, log)
                 try:
                     n = _collect_configs(work_dir, log)
                     log.write(f"配置文件收集完成：{n} 个文件")
+                    _flush_log(history.id, log)
                 except Exception as e:
                     log.write(f"配置文件收集失败：{e}")
+                    _flush_log(history.id, log)
                     raise
 
             # 3. Docker 镜像导出
             if "images" in contents:
                 log.write("── 开始导出 Docker 镜像 ──")
+                _flush_log(history.id, log)
                 try:
                     n = _export_images(work_dir, log)
                     log.write(f"Docker 镜像导出：{n} 个")
+                    _flush_log(history.id, log)
                 except Exception as e:
                     log.write(f"Docker 镜像导出失败（已跳过）：{e}")
+                    _flush_log(history.id, log)
 
             # 4. 上传文件打包
             if "uploads" in contents:
                 log.write("── 开始打包上传文件 ──")
+                _flush_log(history.id, log)
                 try:
                     _archive_uploads(work_dir, log)
                     log.write("上传文件打包完成")
+                    _flush_log(history.id, log)
                 except Exception as e:
                     log.write(f"上传文件打包失败：{e}")
+                    _flush_log(history.id, log)
                     raise
 
             # 5. 创建最终压缩包
             log.write("── 创建压缩包 ──")
+            _flush_log(history.id, log)
             archive_name = f"{backup_dir_name}.tar.gz"
             archive_path = os.path.join(tempfile.gettempdir(), archive_name)
             _create_final_archive(work_dir, archive_path, log)
             archive_size = os.path.getsize(archive_path)
             log.write(f"压缩包创建完成：{archive_name} ({archive_size / (1024 * 1024):.1f} MB)")
+            _flush_log(history.id, log)
 
             # 6. FTP 上传（如需要）
             if job.mode == "ftp":
                 log.write(f"── 上传到 FTP：{job.ftp_host}:{job.ftp_port} ──")
+                _flush_log(history.id, log)
                 try:
                     _upload_ftp(archive_path, job, log)
                     log.write("FTP 上传成功")
                     os.remove(archive_path)
                     history.file_path = f"ftp://{job.ftp_host}:{job.ftp_port}{job.ftp_remote_path or '/'}{archive_name}"
+                    _flush_log(history.id, log)
                 except Exception as e:
                     log.write(f"FTP 上传失败：{e}，保留本地文件")
                     history.file_path = archive_path
                     history.storage_location = "local"
+                    _flush_log(history.id, log)
             else:
                 # 本地模式：移动到目标目录
                 dest_path = os.path.join(job.local_path, archive_name)
@@ -343,22 +377,52 @@ def _export_images(output_dir: str, log: LogCapture) -> int:
     all_images = sorted(image_set)
     log.write(f"共发现 {len(all_images)} 个镜像，开始导出...")
 
+    # 先查询各镜像大小，避免导出超大镜像时超时
+    img_sizes = {}
+    try:
+        result = subprocess.run(
+            ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}\t{{.Size}}"],
+            check=True, capture_output=True, text=True, timeout=15,
+        )
+        for line in result.stdout.strip().split("\n"):
+            if "\t" in line:
+                name, size = line.split("\t", 1)
+                img_sizes[name] = size
+    except Exception:
+        pass
+
     exported = 0
     skipped = 0
-    for img in all_images:
+    for idx, img in enumerate(all_images, 1):
         safe_name = img.replace(":", "_").replace("/", "_")
         tar_path = os.path.join(images_dir, f"{safe_name}.tar")
+        size_hint = img_sizes.get(img, "未知")
         try:
-            log.write(f"  导出：{img} ...")
-            subprocess.run(
+            log.write(f"  [{idx}/{len(all_images)}] 导出：{img} (镜像大小: {size_hint})")
+            # 每导出一个镜像前刷新日志
+            import sys
+            # 使用 Popen 以便在超时时终止子进程
+            proc = subprocess.Popen(
                 ["docker", "save", img, "-o", tar_path],
-                check=True, capture_output=True, timeout=600,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
-            tar_size = os.path.getsize(tar_path)
+            try:
+                stdout, stderr = proc.communicate(timeout=600)  # 每个镜像最多10分钟
+                if proc.returncode != 0:
+                    err = stderr.decode()[:300] if stderr else f"exit={proc.returncode}"
+                    raise subprocess.CalledProcessError(proc.returncode, proc.args, stderr)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                log.write(f"    超时（10分钟），已跳过")
+                skipped += 1
+                continue
+
+            tar_size = os.path.getsize(tar_path) if os.path.exists(tar_path) else 0
             log.write(f"    完成 ({tar_size / (1024 * 1024):.1f} MB)")
             exported += 1
         except subprocess.CalledProcessError as e:
-            err = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)[:200] if e.stderr else str(e)[:200]
+            err = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)[:300] if e.stderr else str(e)[:300]
             log.write(f"    失败：{err}")
             skipped += 1
         except Exception as e:

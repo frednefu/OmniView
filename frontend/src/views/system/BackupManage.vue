@@ -324,27 +324,35 @@
     </el-dialog>
 
     <!-- ═══════════ 备份日志对话框 ═══════════ -->
-    <el-dialog v-model="logDialogVisible" title="备份过程日志" width="750px" destroy-on-close>
-      <div v-if="logLoading" style="text-align: center; padding: 40px;">
+    <el-dialog v-model="logDialogVisible" title="备份过程日志" width="750px" destroy-on-close @closed="stopLogPolling">
+      <div v-if="logLoading && !logData" style="text-align: center; padding: 40px;">
         <el-icon class="is-loading" :size="32"><Loading /></el-icon>
       </div>
       <div v-else-if="logData" class="log-container">
         <div class="log-header">
           <span>任务：{{ logData.job_name }}</span>
-          <el-tag :type="logData.status === 'success' ? 'success' : logData.status === 'failed' ? 'danger' : 'warning'" size="small">
-            {{ logData.status === 'success' ? '成功' : logData.status === 'failed' ? '失败' : '运行中' }}
-          </el-tag>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span v-if="logPolling" style="color: #f59e0b; font-size: 12px;">
+              <el-icon class="is-loading" :size="14"><Loading /></el-icon> 自动刷新中...
+            </span>
+            <el-tag :type="logData.status === 'success' ? 'success' : logData.status === 'failed' ? 'danger' : 'warning'" size="small">
+              {{ logData.status === 'success' ? '成功' : logData.status === 'failed' ? '失败' : '运行中' }}
+            </el-tag>
+            <el-button size="small" text @click="refreshLog">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+          </div>
         </div>
-        <pre class="log-output">{{ logData.log_output || '（无日志输出）' }}</pre>
+        <pre class="log-output" ref="logOutputRef">{{ logData.log_output || '（无日志输出）' }}</pre>
       </div>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, VideoPlay, Download, CircleCheckFilled, Document, Loading } from '@element-plus/icons-vue'
+import { Plus, VideoPlay, Download, CircleCheckFilled, Document, Loading, Refresh } from '@element-plus/icons-vue'
 import {
   getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
@@ -548,15 +556,68 @@ async function verifyBackup(row) {
 const logDialogVisible = ref(false)
 const logLoading = ref(false)
 const logData = ref(null)
+const logPolling = ref(false)
+const logTimer = ref(null)
+const logOutputRef = ref(null)
+let logHistoryId = null
+
+function stopLogPolling() {
+  logPolling.value = false
+  if (logTimer.value) {
+    clearInterval(logTimer.value)
+    logTimer.value = null
+  }
+}
+
+async function fetchLog() {
+  if (!logHistoryId) return
+  try {
+    const data = await getBackupLog(logHistoryId)
+    logData.value = data
+    // 如果备份已结束，停止轮询
+    if (data.status !== 'running') {
+      stopLogPolling()
+      // 刷新历史列表
+      fetchHistory()
+    }
+    // 自动滚到底部
+    setTimeout(() => {
+      if (logOutputRef.value) {
+        logOutputRef.value.scrollTop = logOutputRef.value.scrollHeight
+      }
+    }, 100)
+  } catch { /* */ }
+}
 
 async function showLog(id) {
+  logHistoryId = id
   logDialogVisible.value = true
   logLoading.value = true
   logData.value = null
+  stopLogPolling()
   try {
-    logData.value = await getBackupLog(id)
+    const data = await getBackupLog(id)
+    logData.value = data
+    // 如果备份正在运行，启动自动轮询（每3秒）
+    if (data.status === 'running') {
+      logPolling.value = true
+      logTimer.value = setInterval(fetchLog, 3000)
+    }
   } catch { /* */ }
   finally { logLoading.value = false }
+  // 滚到底部
+  setTimeout(() => {
+    if (logOutputRef.value) {
+      logOutputRef.value.scrollTop = logOutputRef.value.scrollHeight
+    }
+  }, 200)
+}
+
+function refreshLog() {
+  if (logHistoryId) {
+    logLoading.value = true
+    fetchLog().finally(() => { logLoading.value = false })
+  }
 }
 
 // ── 删除历史 ─────────────────────────────────────────────
@@ -742,6 +803,10 @@ function onTabChange(tab) {
 
 onMounted(() => {
   fetchJobs()
+})
+
+onBeforeUnmount(() => {
+  stopLogPolling()
 })
 </script>
 
