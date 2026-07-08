@@ -292,50 +292,80 @@ def _collect_configs(output_dir: str, log: LogCapture) -> int:
 
 
 def _export_images(output_dir: str, log: LogCapture) -> int:
-    """导出 Docker 镜像为 tar 文件。需要 Docker 命令可用。"""
+    """导出 Docker 镜像为 tar 文件。通过挂载的 docker.sock 与宿主机 Docker 通信。"""
     images_dir = os.path.join(output_dir, "images")
     os.makedirs(images_dir, exist_ok=True)
 
     # 检查 Docker 是否可用
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["docker", "info"], check=True, capture_output=True, timeout=10,
         )
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        log.write("Docker 不可用（容器内无 Docker 命令），跳过镜像导出")
-        log.write("提示：如需备份镜像，请在宿主机上运行 docker save 命令")
+        log.write("Docker 不可用（容器内无 Docker 命令或 socket 未挂载），跳过镜像导出")
+        log.write("提示：请在 docker-compose.yml 中挂载 /var/run/docker.sock")
         return 0
 
-    # 发现 OmniView 相关镜像
+    # 方法1：从运行中的容器发现镜像（最可靠）
+    image_set = set()
     try:
         result = subprocess.run(
-            ["docker", "images", "--filter", "reference=omniview-*",
-             "--format", "{{.Repository}}:{{.Tag}}"],
-            check=True, capture_output=True, text=True, timeout=30,
+            ["docker", "ps", "-a", "--format", "{{.Image}}"],
+            check=True, capture_output=True, text=True, timeout=15,
         )
-        omniview_images = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
-    except subprocess.CalledProcessError:
-        omniview_images = []
+        for line in result.stdout.strip().split("\n"):
+            img = line.strip()
+            if img and ":" in img:  # 过滤掉 <none> 等无效值
+                image_set.add(img)
+        log.write(f"从容器发现 {len(image_set)} 个镜像")
+    except subprocess.CalledProcessError as e:
+        log.write(f"容器查询失败：{e.stderr[:200] if e.stderr else str(e)[:200]}")
 
-    # 基础镜像
-    base_images = ["mysql:8.0.40", "redis:alpine"]
-    all_images = base_images + omniview_images
+    # 方法2：补充发现本地构建的项目镜像
+    for pattern in ["omniview-*", "claudecode-*"]:
+        try:
+            result = subprocess.run(
+                ["docker", "images", "--filter", f"reference={pattern}",
+                 "--format", "{{.Repository}}:{{.Tag}}"],
+                check=True, capture_output=True, text=True, timeout=15,
+            )
+            for line in result.stdout.strip().split("\n"):
+                img = line.strip()
+                if img and ":" in img:
+                    image_set.add(img)
+        except subprocess.CalledProcessError:
+            pass
+
+    if not image_set:
+        log.write("未发现任何 Docker 镜像")
+        return 0
+
+    all_images = sorted(image_set)
+    log.write(f"共发现 {len(all_images)} 个镜像，开始导出...")
 
     exported = 0
+    skipped = 0
     for img in all_images:
+        safe_name = img.replace(":", "_").replace("/", "_")
+        tar_path = os.path.join(images_dir, f"{safe_name}.tar")
         try:
-            safe_name = img.replace(":", "_").replace("/", "_")
-            tar_path = os.path.join(images_dir, f"{safe_name}.tar")
+            log.write(f"  导出：{img} ...")
             subprocess.run(
                 ["docker", "save", img, "-o", tar_path],
                 check=True, capture_output=True, timeout=600,
             )
-            log.write(f"  导出镜像：{img}")
+            tar_size = os.path.getsize(tar_path)
+            log.write(f"    完成 ({tar_size / (1024 * 1024):.1f} MB)")
             exported += 1
         except subprocess.CalledProcessError as e:
-            log.write(f"  镜像导出失败 {img}：{e.stderr.decode() if e.stderr else str(e)[:200]}")
+            err = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)[:200] if e.stderr else str(e)[:200]
+            log.write(f"    失败：{err}")
+            skipped += 1
+        except Exception as e:
+            log.write(f"    失败：{e}")
+            skipped += 1
 
-    log.write(f"共导出 {exported}/{len(all_images)} 个镜像")
+    log.write(f"镜像导出完成：成功 {exported}，跳过 {skipped}，总计 {len(all_images)}")
     return exported
 
 

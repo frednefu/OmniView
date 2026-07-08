@@ -57,6 +57,7 @@ services:
     volumes:
       - ./backend:/app
       - ./switchReader:/app/switchReader
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   frontend:
     build:
