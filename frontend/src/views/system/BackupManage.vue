@@ -469,22 +469,27 @@ function openCreate() {
 async function openEdit(row) {
   try {
     const job = await getBackupJob(row.id)
+    if (!job || !job.id) {
+      ElMessage.error('获取任务详情失败：数据为空')
+      return
+    }
     isEdit.value = true
     editId.value = row.id
-    form.name = job.name
-    form.enabled = job.enabled
-    form.mode = job.mode
+    form.name = job.name || ''
+    form.enabled = job.enabled !== false
+    form.mode = job.mode || 'local'
     form.local_path = job.local_path || ''
     form.ftp_host = job.ftp_host || ''
     form.ftp_port = job.ftp_port || 21
     form.ftp_user = job.ftp_user || ''
     form.ftp_password = job.ftp_password || ''
     form.ftp_remote_path = job.ftp_remote_path || ''
-    form.contentList = (job.backup_contents || 'database,configs,images,uploads').split(',').filter(Boolean)
+    const contents = job.backup_contents || ''
+    form.contentList = contents ? contents.split(',').filter(Boolean) : ['database', 'configs', 'images', 'uploads']
     form.cron_expression = job.cron_expression || '0 2 * * *'
-    form.retention_days = job.retention_days ?? 30
+    form.retention_days = typeof job.retention_days === 'number' ? job.retention_days : 30
     // 解析 cron 到 UI 状态
-    parseCronExpression(job.cron_expression || '0 2 * * *')
+    parseCronExpression(form.cron_expression)
     dialogVisible.value = true
   } catch (e) {
     const detail = e?.response?.data?.detail || e?.message || String(e)
