@@ -77,11 +77,9 @@
               </el-tooltip>
               <el-popconfirm title="确定删除此备份任务？" @confirm="deleteJob(row.id)">
                 <template #reference>
-                  <el-tooltip content="删除任务" placement="top">
-                    <el-button link type="danger" class="action-icon-btn">
-                      <el-icon :size="20"><Delete /></el-icon>
-                    </el-button>
-                  </el-tooltip>
+                  <el-button link type="danger" class="action-icon-btn">
+                    <el-icon :size="20"><Delete /></el-icon>
+                  </el-button>
                 </template>
               </el-popconfirm>
             </template>
@@ -171,11 +169,9 @@
               </el-tooltip>
               <el-popconfirm title="确定删除此备份记录及文件？" @confirm="deleteHistory(row.id)">
                 <template #reference>
-                  <el-tooltip content="删除记录及文件" placement="top">
-                    <el-button link type="danger" class="action-icon-btn">
-                      <el-icon :size="20"><Delete /></el-icon>
-                    </el-button>
-                  </el-tooltip>
+                  <el-button link type="danger" class="action-icon-btn">
+                    <el-icon :size="20"><Delete /></el-icon>
+                  </el-button>
                 </template>
               </el-popconfirm>
             </template>

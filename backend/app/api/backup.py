@@ -303,10 +303,13 @@ def download_backup(
     # 本地文件直接返回
     if history.storage_location == "local":
         if history.file_path and os.path.isfile(history.file_path):
+            from urllib.parse import quote
+            safe_filename = quote(filename, safe='')
             return FileResponse(
                 history.file_path,
                 filename=filename,
                 media_type="application/gzip",
+                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
             )
         else:
             raise HTTPException(404, "本地备份文件不存在（容器重建后临时目录中的文件会丢失，请将备份目录挂载为 Docker 卷）")
@@ -365,7 +368,12 @@ def download_backup(
             if download_error[0]:
                 raise download_error[0]
 
-        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        # filename 可能含中文，用 RFC 5987 编码避免 latin-1 错误
+        from urllib.parse import quote
+        safe_filename = quote(filename, safe='')
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
+        }
         if file_size:
             headers["Content-Length"] = str(file_size)
 
