@@ -700,9 +700,9 @@ def verify_backup(history_id: int, local_path: str = None) -> dict:
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            log.close()
 
         report["log_output"] = log.getvalue()
+        log.close()
         return report
 
     finally:
