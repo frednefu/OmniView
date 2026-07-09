@@ -1155,9 +1155,9 @@ onMounted(async () => {
     selectedNode.value = { id: 0, label: '全部' }
   }
   // 加载当前选项卡数据
-  if (activeTab.value === 'domains') loadDomains()
-  else if (activeTab.value === 'systems') loadSystems()
-  else loadVMs()
+  if (activeTab.value === 'domains') await loadDomains()
+  else if (activeTab.value === 'systems') await loadSystems()
+  else await loadVMs()
 })
 </script>
 
