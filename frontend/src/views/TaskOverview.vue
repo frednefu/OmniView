@@ -49,19 +49,31 @@
       <template v-if="authStore.isDeptAdmin && !authStore.isAdmin && data && data.members">
         <h3 class="section-title">本部门人员清单</h3>
         <el-table :data="data.members" stripe size="small">
-          <el-table-column prop="name" label="姓名" width="120" />
-          <el-table-column prop="gh" label="工号" width="120" />
+          <el-table-column prop="name" label="姓名" width="100" />
+          <el-table-column prop="gh" label="工号" width="100" />
           <el-table-column label="虚拟机" width="80" align="center">
-            <template #default="{row}"><el-link type="primary" :underline="false">{{ row.vm }}</el-link></template>
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'vm')" v-if="row.vm">{{ row.vm }}</el-link>
+              <span v-else>0</span>
+            </template>
           </el-table-column>
           <el-table-column label="域名" width="80" align="center">
-            <template #default="{row}">{{ row.domain }}</template>
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'domains')" v-if="row.domain">{{ row.domain }}</el-link>
+              <span v-else>0</span>
+            </template>
           </el-table-column>
           <el-table-column label="信息系统" width="90" align="center">
-            <template #default="{row}">{{ row.is_count }}</template>
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'is')" v-if="row.is_count">{{ row.is_count }}</el-link>
+              <span v-else>0</span>
+            </template>
           </el-table-column>
           <el-table-column label="供应链" width="80" align="center">
-            <template #default="{row}">{{ row.sc }}</template>
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'sc')" v-if="row.sc">{{ row.sc }}</el-link>
+              <span v-else>0</span>
+            </template>
           </el-table-column>
         </el-table>
       </template>
@@ -186,10 +198,10 @@
         <!-- ═══════════ SC 数据完整性 ═══════════ -->
         <h3 class="section-title" style="margin-top:24px">供应链数据完整性</h3>
         <el-row :gutter="16" class="stat-row">
-          <el-col :span="8" v-for="item in scCompItems" :key="item.key">
+          <el-col :span="6" v-for="(item, key) in data.sc_completeness" :key="key">
             <div class="comp-card" @click="go('/sys/supply-chain')">
               <div class="comp-label">{{ item.label }}</div>
-              <el-progress :percentage="item.value" :color="item.color" :stroke-width="14" />
+              <el-progress :percentage="item.pct" :color="pctColor(item.pct)" :stroke-width="12" />
             </div>
           </el-col>
         </el-row>
@@ -234,17 +246,20 @@ const isCompItems = computed(() => {
   }))
 })
 
-const scCompItems = computed(() => {
-  if (!data.value?.sc_completeness) return []
-  const map = { company_name: '单位名称', security_contact: '联系人', security_phone: '联系电话' }
-  return Object.entries(data.value.sc_completeness).map(([k, v]) => ({
-    key: k, label: map[k] || k, value: v,
-    color: v >= 80 ? '#10b981' : v >= 50 ? '#f59e0b' : '#ef4444',
-  }))
-})
+function pctColor(v) {
+  return v >= 80 ? '#10b981' : v >= 50 ? '#f59e0b' : '#ef4444'
+}
 
 function go(path, query) {
   router.push({ path, ...(query ? { query } : {}) })
+}
+
+function goMemberAssets(row, type) {
+  const q = { search: row.name }
+  if (type === 'vm') go('/sys/assets', q)
+  else if (type === 'domains') go('/sys/assets', { ...q, tab: 'domains' })
+  else if (type === 'is') go('/sys/info-systems', q)
+  else if (type === 'sc') go('/sys/supply-chain', q)
 }
 
 function goDept(deptName, type) {

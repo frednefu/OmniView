@@ -1126,9 +1126,10 @@ onMounted(async () => {
   if (route.query.has_backup === 'yes') vmBackupFilter.value = 'yes'
   if (route.query.has_qax === 'yes') vmQaxFilter.value = 'yes'
   if (route.query.search) vmSearch.value = route.query.search
-  // 如果 query 中有预筛选参数，自动选中根节点触发加载
-  if (Object.keys(route.query).some(k => ['power_state','claimed','has_backup','has_qax','tab'].includes(k))) {
-    selectedNode.value = { id: -1, label: '全部' }
+  // 如果 query 中有预筛选参数，选中根节点并加载
+  const hasFilter = ['power_state','claimed','has_backup','has_qax','tab','search'].some(k => route.query[k])
+  if (hasFilter) {
+    selectedNode.value = { id: 0, label: '全部' }
     if (activeTab.value === 'domains') await loadDomains()
     else if (activeTab.value === 'systems') await loadSystems()
     else await loadVMs()
