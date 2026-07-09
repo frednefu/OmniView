@@ -1147,17 +1147,17 @@ onMounted(async () => {
     const myDeptId = authStore.user.department_id
     const node = findTreeNode(treeData.value, myDeptId)
     if (node) {
-      await handleNodeClick(node)
+      selectedNode.value = node
     } else {
       selectedNode.value = { id: myDeptId, label: '本单位' }
     }
   } else {
     selectedNode.value = { id: 0, label: '全部' }
   }
-  // 加载数据
-  if (activeTab.value === 'domains') await loadDomains()
-  else if (activeTab.value === 'systems') await loadSystems()
-  else await loadVMs()
+  // 加载当前选项卡数据
+  if (activeTab.value === 'domains') loadDomains()
+  else if (activeTab.value === 'systems') loadSystems()
+  else loadVMs()
 })
 </script>
 
