@@ -1142,29 +1142,22 @@ onMounted(async () => {
   if (route.query.has_backup === 'yes') vmBackupFilter.value = 'yes'
   if (route.query.has_qax === 'yes') vmQaxFilter.value = 'yes'
   if (route.query.search) vmSearch.value = route.query.search
-  // 如果 query 中有预筛选参数，自动选中部门并加载
-  const hasFilter = ['power_state','claimed','has_backup','has_qax','tab','search'].some(k => route.query[k])
-  if (hasFilter) {
-    // 非管理员自动选中本部门节点
-    if (!authStore.isAdmin && authStore.user?.department_id) {
-      const myDeptId = authStore.user.department_id
-      const node = findTreeNode(treeData.value, myDeptId)
-      if (node) {
-        await handleNodeClick(node)
-      } else {
-        selectedNode.value = { id: myDeptId, label: '本单位' }
-      }
+  // 默认自动选中部门节点
+  if (!authStore.isAdmin && authStore.user?.department_id) {
+    const myDeptId = authStore.user.department_id
+    const node = findTreeNode(treeData.value, myDeptId)
+    if (node) {
+      await handleNodeClick(node)
     } else {
-      selectedNode.value = { id: 0, label: '全部' }
+      selectedNode.value = { id: myDeptId, label: '本单位' }
     }
-    // 确保筛选条件已应用后加载数据
-    if (!selectedNode.value || selectedNode.value.id === undefined) {
-      selectedNode.value = { id: 0, label: '全部' }
-    }
-    if (activeTab.value === 'domains') await loadDomains()
-    else if (activeTab.value === 'systems') await loadSystems()
-    else await loadVMs()
+  } else {
+    selectedNode.value = { id: 0, label: '全部' }
   }
+  // 加载数据
+  if (activeTab.value === 'domains') await loadDomains()
+  else if (activeTab.value === 'systems') await loadSystems()
+  else await loadVMs()
 })
 </script>
 
