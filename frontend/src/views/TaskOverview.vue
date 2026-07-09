@@ -83,7 +83,7 @@
         <h3 class="section-title" style="margin-top:24px">虚拟机</h3>
         <el-row :gutter="16" class="stat-row">
           <el-col :span="4">
-            <div class="stat-card" @click="go('/sys/assets')">
+            <div class="stat-card" @click="go('/sys/assets', { tab: 'vm' })">
               <div class="stat-value">{{ data.vm.total }}</div>
               <div class="stat-label">总数</div>
             </div>

@@ -1133,8 +1133,12 @@ onMounted(async () => {
   // 支持 URL query 参数预筛选（来自待办任务页面跳转）
   if (route.query.tab) activeTab.value = route.query.tab
   if (route.query.power_state) vmPowerFilter.value = route.query.power_state
-  if (route.query.claimed === 'yes') vmClaimedFilter.value = 'claimed'
-  if (route.query.claimed === 'no') vmClaimedFilter.value = 'unclaimed'
+  if (route.query.claimed === 'yes') {
+    vmClaimedFilter.value = 'yes'; domainClaimedFilter.value = 'yes'; sysClaimedFilter.value = 'yes'
+  }
+  if (route.query.claimed === 'no') {
+    vmClaimedFilter.value = 'no'; domainClaimedFilter.value = 'no'; sysClaimedFilter.value = 'no'
+  }
   if (route.query.has_backup === 'yes') vmBackupFilter.value = 'yes'
   if (route.query.has_qax === 'yes') vmQaxFilter.value = 'yes'
   if (route.query.search) vmSearch.value = route.query.search
