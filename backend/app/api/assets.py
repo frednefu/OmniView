@@ -1010,6 +1010,8 @@ def get_dept_vms(
         all_items = [it for it in all_items
                      if kw in (it["vm_name"] or "").lower()
                      or kw in (it["ip_address"] or "").lower()
+                     or kw in (it["mac_address"] or "").lower()
+                     or kw in (it["os_name"] or "").lower()
                      or kw in (it["f5_domains"] or "").lower()]
     if claim_status:
         all_items = [it for it in all_items if (it.get("claim_status") or "unlinked") == claim_status]
@@ -1199,7 +1201,8 @@ def get_dept_domains(
 
     if search:
         kw = search.lower()
-        results = [d for d in results if kw in d["domain_name"].lower() or kw in (d["ip_address"] or "").lower()]
+        results = [d for d in results if kw in d["domain_name"].lower() or kw in (d["ip_address"] or "").lower()
+                   or kw in (d.get("record_type") or "").lower() or kw in (d.get("owner_name") or "").lower()]
     if record_type:
         results = [d for d in results if (d.get("record_type") or "") == record_type]
     if claimed == "yes":
@@ -1249,7 +1252,11 @@ def get_dept_systems(
         q = q.filter(
             InfoSystem.system_name.contains(search) |
             InfoSystem.ip_address.contains(search) |
-            InfoSystem.domain.contains(search)
+            InfoSystem.domain.contains(search) |
+            InfoSystem.manager_name.contains(search) |
+            InfoSystem.owner_name.contains(search) |
+            InfoSystem.vendor_name.contains(search) |
+            InfoSystem.sub_type.contains(search)
         )
     if fill_type:
         q = q.filter(InfoSystem.fill_type == fill_type)

@@ -83,7 +83,7 @@
                 <!-- VM 清单内右侧：表格 -->
                 <div class="vm-table-wrap">
               <div class="filter-bar">
-                <el-input v-model="vmSearch" placeholder="搜索名称、IP、MAC、OS..." clearable size="small" style="width:260px" @keyup.enter="vmPage=1;loadVMs()" @clear="vmPage=1;loadVMs()" />
+                <el-input v-model="vmSearch" placeholder="搜索名称、IP、MAC、OS、域名..." clearable size="small" style="width:260px" @keyup.enter="vmPage=1;loadVMs()" @clear="vmPage=1;loadVMs()" />
                 <el-select v-model="vmClaimFilter" placeholder="分组状态" clearable size="small" style="width:110px" @change="vmPage=1;loadVMs()">
                   <el-option label="未分组" value="unlinked" />
                   <el-option label="自动" value="auto" />
@@ -192,7 +192,7 @@
 
             <el-tab-pane label="域名清单" name="domains">
               <div class="filter-bar">
-                <el-input v-model="domainSearch" placeholder="搜索域名或 IP" clearable size="small" style="width:220px" @keyup.enter="domainPage=1;loadDomains()" @clear="domainPage=1;loadDomains()" />
+                <el-input v-model="domainSearch" placeholder="搜索域名、IP、记录类型、认领人..." clearable size="small" style="width:220px" @keyup.enter="domainPage=1;loadDomains()" @clear="domainPage=1;loadDomains()" />
                 <el-select v-model="domainTypeFilter" placeholder="记录类型" clearable size="small" style="width:100px" @change="domainPage=1;loadDomains()">
                   <el-option label="A" value="A" />
                   <el-option label="AAAA" value="AAAA" />
@@ -257,7 +257,7 @@
 
             <el-tab-pane label="信息系统" name="systems">
               <div class="filter-bar">
-                <el-input v-model="sysSearch" placeholder="搜索名称/IP/域名" clearable size="small" style="width:220px" @keyup.enter="sysPage=1;loadSystems()" @clear="sysPage=1;loadSystems()" />
+                <el-input v-model="sysSearch" placeholder="搜名称/IP/域名/负责人/厂商" clearable size="small" style="width:220px" @keyup.enter="sysPage=1;loadSystems()" @clear="sysPage=1;loadSystems()" />
                 <el-select v-model="sysFillTypeFilter" placeholder="填报状态" clearable size="small" style="width:110px" @change="sysPage=1;loadSystems()">
                   <el-option v-for="t in ['导入','手动','自动','注销','申请注销']" :key="t" :label="t" :value="t"/>
                 </el-select>
