@@ -1012,7 +1012,9 @@ def get_dept_vms(
                      or kw in (it["ip_address"] or "").lower()
                      or kw in (it["mac_address"] or "").lower()
                      or kw in (it["os_name"] or "").lower()
-                     or kw in (it["f5_domains"] or "").lower()]
+                     or kw in (it["f5_domains"] or "").lower()
+                     or kw in (it.get("owner_name") or "").lower()
+                     or kw in (it.get("department_name") or "").lower()]
     if claim_status:
         all_items = [it for it in all_items if (it.get("claim_status") or "unlinked") == claim_status]
     if claimed == "yes":

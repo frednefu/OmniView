@@ -83,7 +83,7 @@
                 <!-- VM 清单内右侧：表格 -->
                 <div class="vm-table-wrap">
               <div class="filter-bar">
-                <el-input v-model="vmSearch" placeholder="搜索名称、IP、MAC、OS、域名..." clearable size="small" style="width:260px" @keyup.enter="vmPage=1;loadVMs()" @clear="vmPage=1;loadVMs()" />
+                <el-input v-model="vmSearch" placeholder="搜索名称、IP、MAC、OS、管理员、域名..." clearable size="small" style="width:260px" @keyup.enter="vmPage=1;loadVMs()" @clear="vmPage=1;loadVMs()" />
                 <el-select v-model="vmClaimFilter" placeholder="分组状态" clearable size="small" style="width:110px" @change="vmPage=1;loadVMs()">
                   <el-option label="未分组" value="unlinked" />
                   <el-option label="自动" value="auto" />
