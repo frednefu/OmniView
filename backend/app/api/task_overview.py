@@ -37,7 +37,7 @@ def get_task_overview(
             vm_filter = f"WHERE v.department_id IN ({ids_str})"
             domain_filter = f"WHERE d.department_id IN ({ids_str})"
             is_filter = f"WHERE s.dept_id IN ({ids_str})"
-            user_dept_filter = f"WHERE department_id IN ({ids_str})"
+            user_dept_filter = f"WHERE u.department_id IN ({ids_str})"
         else:
             vm_filter = "WHERE 1=0"
             domain_filter = "WHERE 1=0"
