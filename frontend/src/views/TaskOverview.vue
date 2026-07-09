@@ -236,7 +236,7 @@ const isCompItems = computed(() => {
 
 const scCompItems = computed(() => {
   if (!data.value?.sc_completeness) return []
-  const map = { company_name: '单位名称', contact_person: '联系人', contact_phone: '联系电话' }
+  const map = { company_name: '单位名称', security_contact: '联系人', security_phone: '联系电话' }
   return Object.entries(data.value.sc_completeness).map(([k, v]) => ({
     key: k, label: map[k] || k, value: v,
     color: v >= 80 ? '#10b981' : v >= 50 ? '#f59e0b' : '#ef4444',

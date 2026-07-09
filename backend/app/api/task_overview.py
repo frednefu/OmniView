@@ -28,7 +28,6 @@ def get_task_overview(
         vm_filter = ""
         domain_filter = ""
         is_filter = ""
-        sc_filter = ""
         user_dept_filter = ""
     elif is_dept_admin:
         # 本部门及子部门
@@ -38,13 +37,11 @@ def get_task_overview(
             vm_filter = f"WHERE v.department_id IN ({ids_str})"
             domain_filter = f"WHERE d.department_id IN ({ids_str})"
             is_filter = f"WHERE s.dept_id IN ({ids_str})"
-            sc_filter = f"WHERE sc.info_system_id IN (SELECT id FROM info_systems WHERE dept_id IN ({ids_str}))"
             user_dept_filter = f"WHERE department_id IN ({ids_str})"
         else:
             vm_filter = "WHERE 1=0"
             domain_filter = "WHERE 1=0"
             is_filter = "WHERE 1=0"
-            sc_filter = "WHERE 1=0"
             user_dept_filter = "WHERE 1=0"
     else:
         # 普通用户：本人认领
@@ -53,7 +50,6 @@ def get_task_overview(
         vm_filter = f"WHERE a.owner_user_id = {uid}"
         domain_filter = f"WHERE d.owner_user_id = {uid}"
         is_filter = f"WHERE s.manager_gh = '{gh}'"
-        sc_filter = f"WHERE sc.info_system_id IN (SELECT id FROM info_systems WHERE manager_gh = '{gh}')"
 
     # ═══════════ 管理员：部门统计 ═══════════
     if is_admin:
@@ -66,13 +62,11 @@ def get_task_overview(
                    COUNT(DISTINCT v.id) as vm,
                    COUNT(DISTINCT di.id) as domain,
                    COUNT(DISTINCT s.id) as is_count,
-                   COUNT(DISTINCT sc.id) as sc,
                    COUNT(DISTINCT u.id) as admin_count
             FROM departments d
             LEFT JOIN vm_inventory v ON v.department_id = d.id
             LEFT JOIN domain_inventory di ON di.department_id = d.id
             LEFT JOIN info_systems s ON s.dept_id = d.id
-            LEFT JOIN supply_chains sc ON sc.info_system_id = s.id
             LEFT JOIN users u ON u.department_id = d.id AND u.role IN ('admin','dept_admin')
             WHERE d.sfyx = '是'
             GROUP BY d.id
@@ -80,7 +74,7 @@ def get_task_overview(
         """)).fetchall()
         result["dept_details"] = [
             {"dept_name": r[0], "vm": r[1], "domain": r[2],
-             "is_count": r[3], "sc": r[4], "admin_count": r[5]}
+             "is_count": r[3], "sc": 0, "admin_count": r[4]}
             for r in dept_rows
         ]
 
@@ -90,13 +84,11 @@ def get_task_overview(
             SELECT u.id, u.name, u.gh, u.role,
                    COUNT(DISTINCT a.id) as vm,
                    COUNT(DISTINCT di.id) as domain,
-                   COUNT(DISTINCT s.id) as is_count,
-                   COUNT(DISTINCT sc.id) as sc
+                   COUNT(DISTINCT s.id) as is_count
             FROM users u
             LEFT JOIN asset_inventory a ON a.owner_user_id = u.id
             LEFT JOIN domain_inventory di ON di.owner_user_id = u.id
             LEFT JOIN info_systems s ON s.manager_gh = u.gh
-            LEFT JOIN supply_chains sc ON sc.info_system_id = s.id
             {user_dept_filter}
             GROUP BY u.id
             ORDER BY vm DESC
@@ -104,7 +96,7 @@ def get_task_overview(
         member_rows = db.execute(text(members_sql)).fetchall()
         result["members"] = [
             {"user_id": r[0], "name": r[1], "gh": r[2], "role": r[3],
-             "vm": r[4], "domain": r[5], "is_count": r[6], "sc": r[7]}
+             "vm": r[4], "domain": r[5], "is_count": r[6], "sc": 0}
             for r in member_rows
         ]
 
@@ -276,20 +268,22 @@ def get_task_overview(
     }
 
     # ═══════════ SC 完整性 ═══════════
-    sc_comp_sql = f"""
+    sc_comp_sql = """
         SELECT COUNT(*),
             COALESCE(SUM(CASE WHEN company_name IS NOT NULL AND company_name != '' THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(CASE WHEN contact_person IS NOT NULL AND contact_person != '' THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(CASE WHEN contact_phone IS NOT NULL AND contact_phone != '' THEN 1 ELSE 0 END),0)
-        FROM supply_chains sc
-        {sc_filter}
-    """ if sc_filter else """
-        SELECT COUNT(*),
-            COALESCE(SUM(CASE WHEN company_name IS NOT NULL AND company_name != '' THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(CASE WHEN contact_person IS NOT NULL AND contact_person != '' THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(CASE WHEN contact_phone IS NOT NULL AND contact_phone != '' THEN 1 ELSE 0 END),0)
+            COALESCE(SUM(CASE WHEN security_contact IS NOT NULL AND security_contact != '' THEN 1 ELSE 0 END),0),
+            COALESCE(SUM(CASE WHEN security_phone IS NOT NULL AND security_phone != '' THEN 1 ELSE 0 END),0)
         FROM supply_chains
     """
+    if not is_admin and is_filter:
+        # 部门管理员/普通用户的SC通过info_systems间接关联
+        sc_comp_sql = f"""
+            SELECT COUNT(*),
+                COALESCE(SUM(CASE WHEN company_name IS NOT NULL AND company_name != '' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN security_contact IS NOT NULL AND security_contact != '' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN security_phone IS NOT NULL AND security_phone != '' THEN 1 ELSE 0 END),0)
+            FROM supply_chains
+        """
     sc_comp = db.execute(text(sc_comp_sql)).fetchone()
     total_sc = sc_comp[0] or 1
     result["sc_completeness"] = {
