@@ -1123,8 +1123,10 @@ async function revokeDomains() {
 }
 
 watch(activeTab, (tab) => {
-  if (tab === 'domains' && selectedNode.value) loadDomains()
-  if (tab === 'systems' && selectedNode.value) loadSystems()
+  if (!selectedNode.value) return
+  if (tab === 'vm') loadVMs()
+  else if (tab === 'domains') loadDomains()
+  else if (tab === 'systems') loadSystems()
 })
 
 onMounted(async () => {
@@ -1147,15 +1149,12 @@ onMounted(async () => {
   if (!authStore.isAdmin && authStore.user?.department_id) {
     const myDeptId = authStore.user.department_id
     const node = findTreeNode(treeData.value, myDeptId)
-    if (node) {
-      selectedNode.value = node
-    } else {
-      selectedNode.value = { id: myDeptId, label: '本单位' }
-    }
+    selectedNode.value = node || { id: myDeptId, label: '本单位' }
   } else {
     selectedNode.value = { id: 0, label: '全部' }
   }
   // 加载当前选项卡数据
+  await nextTick()
   if (activeTab.value === 'domains') await loadDomains()
   else if (activeTab.value === 'systems') await loadSystems()
   else await loadVMs()
