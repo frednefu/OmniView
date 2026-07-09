@@ -1510,28 +1510,20 @@ _SC_SORTABLE = {"company_name","credit_code","company_type","importance","securi
 @router.get("/supply-chain")
 def list_supply_chain(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
                       search: str = Query(""), sort_field: str = Query(""), sort_order: str = Query("desc"),
-                      created_by_name: str = Query(""), claimed_by_name: str = Query(""),
                       db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(SupplyChain)
     if not _is_admin(user):
         if not _is_dept_admin_or_admin(user):
             q = q.filter((SupplyChain.claimed_by == user.id) | (SupplyChain.claimed_by == None))
     if search:
-        q = q.filter(SupplyChain.company_name.contains(search))
-    # 按创建人姓名筛选
-    if created_by_name:
-        uids = [u[0] for u in db.query(User.id).filter(User.name.contains(created_by_name)).all()]
-        if uids:
-            q = q.filter(SupplyChain.created_by.in_(uids))
-        else:
-            q = q.filter(SupplyChain.created_by == -1)  # 无匹配
-    # 按认领人姓名筛选
-    if claimed_by_name:
-        uids = [u[0] for u in db.query(User.id).filter(User.name.contains(claimed_by_name)).all()]
-        if uids:
-            q = q.filter(SupplyChain.claimed_by.in_(uids))
-        else:
-            q = q.filter(SupplyChain.claimed_by == -1)
+        # 多条件搜索：单位名称 / 数据添加者 / 认领人
+        from sqlalchemy import or_
+        user_ids = [u[0] for u in db.query(User.id).filter(User.name.contains(search)).all()]
+        conditions = [SupplyChain.company_name.contains(search)]
+        if user_ids:
+            conditions.append(SupplyChain.created_by.in_(user_ids))
+            conditions.append(SupplyChain.claimed_by.in_(user_ids))
+        q = q.filter(or_(*conditions))
     total = q.count()
     if sort_field and sort_field in _SC_SORTABLE:
         col = getattr(SupplyChain, sort_field, None)

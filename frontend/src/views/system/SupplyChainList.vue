@@ -12,11 +12,9 @@
       </div>
     </div>
     <div class="filter-bar">
-      <el-input v-model="search" placeholder="搜索单位名称" clearable style="width:220px" @keyup.enter="fetchList" @clear="fetchList">
+      <el-input v-model="search" placeholder="搜索单位名称/数据添加者/认领人" clearable style="width:300px" @keyup.enter="fetchList" @clear="fetchList">
         <template #append><el-button :icon="Search" @click="fetchList" /></template>
       </el-input>
-      <el-input v-model="filterCreator" placeholder="数据添加者" clearable style="width:140px" @keyup.enter="fetchList" @clear="fetchList" />
-      <el-input v-model="filterClaimer" placeholder="认领人" clearable style="width:120px" @keyup.enter="fetchList" @clear="fetchList" />
       <span style="color:#909399;font-size:13px;line-height:32px">共 {{total}} 条</span>
       <el-button v-if="selectedIds.length>0" type="success" size="small" @click="handleBatchClaim">认领 ({{selectedIds.length}})</el-button>
       <el-button v-if="selectedIds.length>0" type="warning" size="small" @click="handleBatchRevoke">撤销认领 ({{selectedIds.length}})</el-button>
@@ -306,7 +304,6 @@ import { addressOptions } from '@/data/addressOptions.js'
 const authStore=useAuthStore()
 const origin = window.location.origin
 const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
-const filterCreator=ref(''),filterClaimer=ref('')
 const sortField=ref(''),sortOrder=ref('desc')
 const selectedIds=ref([]),dlg=ref(false),isEdit=ref(false),editId=ref(null),saving=ref(false)
 const refsVisible=ref(false),refsCompany=ref(''),refsList=ref([]),refsLoading=ref(false)
@@ -333,7 +330,7 @@ function resetForm(){Object.assign(form,{company_name:'',credit_code:'',address:
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
 
 function onSort({prop,order}){sortField.value=prop||'';sortOrder.value=order==='ascending'?'asc':'desc';fetchList()}
-async function fetchList(){loading.value=true;try{const params={page:page.value,size:size.value,search:search.value};if(filterCreator.value)params.created_by_name=filterCreator.value;if(filterClaimer.value)params.claimed_by_name=filterClaimer.value;if(sortField.value){params.sort_field=sortField.value;params.sort_order=sortOrder.value}const r=await api.get('/info-systems/supply-chain',{params});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
+async function fetchList(){loading.value=true;try{const params={page:page.value,size:size.value,search:search.value};if(sortField.value){params.sort_field=sortField.value;params.sort_order=sortOrder.value}const r=await api.get('/info-systems/supply-chain',{params});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
 async function showRefs(row){refsCompany.value=row.company_name;refsVisible.value=true;refsList.value=[];refsLoading.value=true;try{const {data}=await api.get('/info-systems/supply-chain-refs/'+row.id);refsList.value=data.items||[]}catch{refsList.value=[]}finally{refsLoading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
 function resolveAddress(raw) {
