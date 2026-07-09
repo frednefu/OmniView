@@ -26,6 +26,12 @@ const routes = [
         meta: { title: '仪表盘' },
       },
       {
+        path: 'task-overview',
+        name: 'TaskOverview',
+        component: () => import('@/views/TaskOverview.vue'),
+        meta: { title: '待办任务' },
+      },
+      {
         path: 'switches',
         name: 'Switches',
         component: () => import('@/views/SwitchList.vue'),

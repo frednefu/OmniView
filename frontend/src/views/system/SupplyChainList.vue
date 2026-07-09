@@ -294,6 +294,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, OfficeBuilding, User, Briefcase, Coin, EditPen, Edit, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
@@ -453,7 +454,11 @@ function copyLink(l) {
   navigator.clipboard.writeText(url).then(() => ElMessage.success('链接已复制')).catch(() => ElMessage.warning('复制失败，请手动复制'))
 }
 
-onMounted(fetchList)
+onMounted(() => {
+  const route = useRoute()
+  if (route.query.search) search.value = route.query.search
+  fetchList()
+})
 </script>
 
 <style scoped>

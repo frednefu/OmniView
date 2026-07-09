@@ -364,6 +364,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, WarningFilled, OfficeBuilding, Folder, FolderOpened } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
@@ -1114,8 +1115,24 @@ watch(activeTab, (tab) => {
 })
 
 onMounted(async () => {
+  const route = useRoute()
   await loadTree()
   await fetchFilterOptions()
+  // 支持 URL query 参数预筛选（来自待办任务页面跳转）
+  if (route.query.tab) activeTab.value = route.query.tab
+  if (route.query.power_state) vmPowerFilter.value = route.query.power_state
+  if (route.query.claimed === 'yes') vmClaimedFilter.value = 'claimed'
+  if (route.query.claimed === 'no') vmClaimedFilter.value = 'unclaimed'
+  if (route.query.has_backup === 'yes') vmBackupFilter.value = 'yes'
+  if (route.query.has_qax === 'yes') vmQaxFilter.value = 'yes'
+  if (route.query.search) vmSearch.value = route.query.search
+  // 如果 query 中有预筛选参数，自动选中根节点触发加载
+  if (Object.keys(route.query).some(k => ['power_state','claimed','has_backup','has_qax','tab'].includes(k))) {
+    selectedNode.value = { id: -1, label: '全部' }
+    if (activeTab.value === 'domains') await loadDomains()
+    else if (activeTab.value === 'systems') await loadSystems()
+    else await loadVMs()
+  }
 })
 </script>
 

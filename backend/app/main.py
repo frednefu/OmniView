@@ -369,6 +369,8 @@ _PATH_MAP = {
     "/api/info-systems/batch-revoke": "信息资产管理-批量撤销认领",
     # 系统备份
     "/api/backup/": "系统管理-系统备份",
+    # 待办任务
+    "/api/task-overview": "待办任务-概览",
     # 外链
     "/api/shared-links": "系统管理-外链管理",
     "/api/shared-links/shared": "外链填报-保存",

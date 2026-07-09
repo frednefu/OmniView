@@ -30,6 +30,10 @@
             <span>仪表盘</span>
           </el-menu-item>
         </template>
+        <el-menu-item index="/task-overview">
+          <el-icon><List /></el-icon>
+          <span>待办任务</span>
+        </el-menu-item>
         <el-menu-item index="/asset-profile">
           <el-icon><DataAnalysis /></el-icon>
           <span>资产画像</span>
@@ -264,6 +268,7 @@ const activeMenu = computed(() => {
 const pageTitle = computed(() => {
   const titles = {
     '/dashboard': '仪表盘',
+    '/task-overview': '待办任务',
     '/switches': '交换机管理',
     '/vcenters': 'vCenter 管理',
     '/f5': 'F5 管理',

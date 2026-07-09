@@ -471,6 +471,7 @@ npm run dev
 | GET | /api/backup/history/{id}/verify-progress | 验证进度轮询 |
 | POST | /api/backup/test-ftp | 测试 FTP 连接 |
 | GET | /api/backup/local-files | 浏览本地目录 |
+| GET | /api/task-overview | 待办任务概览（角色自适应聚合统计） |
 
 ### 交换机配置
 
@@ -513,6 +514,7 @@ Web 后端复用 `switchReader/switchReader.py` 的所有 SNMP 采集函数，�
 | ZDNS 管理 | REST API 采集 DNS 记录，域名→IP/别名映射(A/AAAA/CNAME)，反向解析过滤，IP 可达性扫描(IPv4容器直连+IPv6宿主机代理) | ✅ |
 | 椒图管理 | 云锁 REST API 采集服务器/端口/进程/软件，三级详情 | ✅ |
 | 仪表盘 | 多源统计卡片 + 环形图/饼图/地址段利用率 + 点击下探 | ✅ |
+| 待办任务 | 角色化资产概览（管理员/部门管理员/普通用户），VM/域名/IS/SC统计卡片+数据完整性进度，点击跳转预筛选 | ✅ |
 | 资产画像 | 五源关联（ZDNS→F5→vCenter→交换机→椒图），完整链路追踪，Excel 导出 | ✅ |
 | 扫描监控 | 6 类数据源实时进度卡片 + 步骤详情 + 终端输出 + Worker 执行追溯 | ✅ |
 | 扫描日志 | 统一多源扫描记录，按数据源/状态筛选，批量清除 | ✅ |

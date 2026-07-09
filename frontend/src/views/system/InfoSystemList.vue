@@ -316,6 +316,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Edit, Delete, DataBoard, UserFilled, Lock, Briefcase, UploadFilled, Phone, Iphone, OfficeBuilding } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/store/auth'
@@ -667,7 +668,13 @@ async function toggleLink(l){try{const r=await api.put('/shared-links/'+l.token+
 async function deleteLink(l){try{await ElMessageBox.confirm('确定删除此外链？','确认',{type:'warning'});await api.delete('/shared-links/'+l.token);ElMessage.success('已删除');await loadLinks()}catch{}}
 function copyLink(l){const url=origin+l.url;navigator.clipboard.writeText(url).then(()=>ElMessage.success('已复制')).catch(()=>ElMessage.warning('复制失败'))}
 
-onMounted(async()=>{fetchList();try{const r=await api.get('/info-systems/supply-chain/names');vendorNames.value=r.data.items}catch{};loadDepts()})
+onMounted(async()=>{
+  const route = useRoute()
+  if (route.query.claimed === 'yes') filterManager.value = 'has'
+  if (route.query.claimed === 'no') filterManager.value = 'none'
+  if (route.query.search) search.value = route.query.search
+  fetchList();try{const r=await api.get('/info-systems/supply-chain/names');vendorNames.value=r.data.items}catch{};loadDepts()
+})
 </script>
 <style scoped>
 .page{padding:20px}
