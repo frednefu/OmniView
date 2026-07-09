@@ -1123,6 +1123,7 @@ async function revokeDomains() {
 }
 
 watch(activeTab, (tab) => {
+  if (tab === 'domains' && selectedNode.value) loadDomains()
   if (tab === 'systems' && selectedNode.value) loadSystems()
 })
 
