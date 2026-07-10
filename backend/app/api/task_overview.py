@@ -134,16 +134,34 @@ def get_task_overview(
         {_w(vm_where)}
     """)[0] or 0
 
-    vm_qax = _exec_one(f"""
-        SELECT COUNT(DISTINCT v.id) FROM vm_inventory v
-        INNER JOIN qax_servers q ON q.intranet_ip = v.ip_address OR q.ipv4 = v.ip_address
-           OR v.ip_address LIKE CONCAT('%,', q.intranet_ip)
-           OR v.ip_address LIKE CONCAT(q.intranet_ip, ',%')
-           OR v.ip_address LIKE CONCAT('%,', q.ipv4)
-           OR v.ip_address LIKE CONCAT(q.ipv4, ',%')
-        {vm_join}
-        {_w(vm_where)}
-    """)[0] or 0
+    # 椒图统计：使用与 VM 清单一致的增强逻辑（含交换机 MAC→IP 回填）
+    qax_ips_set = {r[0] for r in db.execute(text(
+        "SELECT DISTINCT ipv4 FROM qax_servers WHERE ipv4 IS NOT NULL AND ipv4 != ''"
+    )).fetchall()}
+    # 交换机 MAC→IP 映射
+    switch_mac_ips = {}
+    for sr in db.execute(text(
+        "SELECT mac_address, ip_address FROM scan_results WHERE mac_address IS NOT NULL AND mac_address != ''"
+    )).fetchall():
+        ip = (sr.ip_address or "").strip()
+        if not ip or ":" in ip: continue
+        for mac in (sr.mac_address or "").split(","):
+            mac = mac.strip().lower()
+            if mac: switch_mac_ips.setdefault(mac, []).append(ip)
+    vm_qax = 0
+    vm_rows = db.execute(text(f"""
+        SELECT v.id, v.ip_address, v.mac_address FROM vm_inventory v
+        {vm_join} {_w(vm_where)}
+    """)).fetchall()
+    for v in vm_rows:
+        v_ips = [ip.strip() for ip in (v.ip_address or "").split(",") if ip.strip()]
+        v_macs = [mac.strip().lower() for mac in (v.mac_address or "").split(",") if mac.strip()]
+        if not v_ips:
+            for mac in v_macs:
+                if mac in switch_mac_ips:
+                    v_ips.extend(switch_mac_ips[mac])
+        if any(ip in qax_ips_set for ip in v_ips):
+            vm_qax += 1
 
     # 认领/待认领
     _cl_join = vm_join if vm_join else "JOIN asset_inventory a ON a.vm_name=v.vm_name"
