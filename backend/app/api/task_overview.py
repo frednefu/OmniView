@@ -295,7 +295,7 @@ def get_task_overview(
         if any(ip in qax_ips_set for ip in v_ips):
             vm_qax += 1
 
-    # 认领/待认领（认领=有 owner_user_id，与 VM 清单筛选逻辑一致）
+    # 认领/待认领（认领=有 owner_user_id，含 vm_inventory 直接 owner）
     _cl_join = vm_join if vm_join else "LEFT JOIN asset_inventory a ON a.vm_name=v.vm_name"
     _cl_where = vm_where if vm_where else "1=1"
     vm_cl = _exec_one(f"""
@@ -303,14 +303,14 @@ def get_task_overview(
                COALESCE(SUM(CASE WHEN v.power_state='poweredOff' THEN 1 ELSE 0 END),0)
         FROM vm_inventory v
         {_cl_join}
-        WHERE {_cl_where} AND a.owner_user_id IS NOT NULL
+        WHERE {_cl_where} AND COALESCE(a.owner_user_id, v.owner_user_id) IS NOT NULL
     """)
     vm_un = _exec_one(f"""
         SELECT COALESCE(SUM(CASE WHEN v.power_state='poweredOn' THEN 1 ELSE 0 END),0),
                COALESCE(SUM(CASE WHEN v.power_state='poweredOff' THEN 1 ELSE 0 END),0)
         FROM vm_inventory v
         {_cl_join}
-        WHERE {_cl_where} AND a.owner_user_id IS NULL
+        WHERE {_cl_where} AND (COALESCE(a.owner_user_id, v.owner_user_id) IS NULL)
     """)
 
     result["vm"] = {
