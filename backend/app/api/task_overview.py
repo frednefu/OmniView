@@ -61,12 +61,8 @@ def get_task_overview(
         """Wrap condition into WHERE clause."""
         return f"WHERE {cond}" if cond else ""
 
-    # ═══════════ 管理员：部门统计 ═══════════
+    # ═══════════ 管理员：部门统计（含开关机/备份/椒图） ═══════════
     if is_admin:
-        result["dept_count"] = db.execute(text(
-            "SELECT COUNT(*) FROM departments WHERE sfyx='是'"
-        )).scalar() or 0
-
         dept_rows = db.execute(text("""
             SELECT COALESCE(d.dwmc, '未分组') as dept_name, d.id as dept_id,
                    COUNT(DISTINCT v.id) as vm,
@@ -82,11 +78,57 @@ def get_task_overview(
             GROUP BY d.id, d.dwmc
             ORDER BY vm DESC
         """)).fetchall()
-        result["dept_details"] = [
-            {"dept_name": r[0], "dept_id": r[1], "vm": r[2], "domain": r[3],
-             "is_count": r[4], "admin_count": r[5]}
-            for r in dept_rows
-        ]
+
+        # 按部门统计 VM 详情（开关机/备份/椒图）
+        dept_vm_rows = db.execute(text("""
+            SELECT v.department_id, v.vm_name, v.power_state, v.ip_address, v.mac_address
+            FROM vm_inventory v WHERE v.department_id IS NOT NULL
+        """)).fetchall()
+        dept_vms = {}
+        for vr in dept_vm_rows:
+            dept_vms.setdefault(vr.department_id, []).append(vr)
+
+        # 交换机 MAC→IP + QAX IP + 鼎甲
+        sw_mac_ips = {}
+        for sr in db.execute(text(
+            "SELECT mac_address, ip_address FROM scan_results WHERE mac_address IS NOT NULL AND mac_address != ''"
+        )).fetchall():
+            ip = (sr.ip_address or "").strip()
+            if not ip or ":" in ip: continue
+            for mac in (sr.mac_address or "").split(","):
+                mac = mac.strip().lower()
+                if mac: sw_mac_ips.setdefault(mac, []).append(ip)
+        qax_ips = {r[0] for r in db.execute(text(
+            "SELECT DISTINCT ipv4 FROM qax_servers WHERE ipv4 IS NOT NULL AND ipv4 != ''"
+        )).fetchall()}
+        dj_vms = {r[0] for r in db.execute(text(
+            "SELECT DISTINCT vm_name FROM dingjia_backup_records WHERE vm_name IS NOT NULL AND vm_name != ''"
+        )).fetchall()}
+
+        dept_details = []
+        for r in dept_rows:
+            did = r[1]
+            vms = dept_vms.get(did, [])
+            vm_on = sum(1 for v in vms if v.power_state == 'poweredOn')
+            vm_off = sum(1 for v in vms if v.power_state == 'poweredOff')
+            backup = sum(1 for v in vms if v.vm_name in dj_vms)
+            qax = 0
+            for v in vms:
+                v_ips = [ip.strip() for ip in (v.ip_address or "").split(",") if ip.strip()]
+                v_macs = [mac.strip().lower() for mac in (v.mac_address or "").split(",") if mac.strip()]
+                if not v_ips:
+                    for mac in v_macs:
+                        if mac in sw_mac_ips:
+                            v_ips.extend(sw_mac_ips[mac])
+                if any(ip in qax_ips for ip in v_ips):
+                    qax += 1
+            dept_details.append({
+                "dept_name": r[0], "dept_id": did,
+                "vm": r[2], "vm_on": vm_on, "vm_off": vm_off,
+                "backup": backup, "qax": qax,
+                "domain": r[3], "is_count": r[4], "admin_count": r[5],
+            })
+        result["dept_details"] = dept_details
 
     # ═══════════ 部门管理员：人员清单 + 备份/椒图统计（含交换机IP增强） ═══════════
     if is_dept_admin and not is_admin:

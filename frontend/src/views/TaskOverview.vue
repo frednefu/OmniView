@@ -6,27 +6,30 @@
     </div>
 
     <div v-loading="loading">
-      <!-- ═══════════ 管理员：部门统计 ═══════════ -->
+      <!-- ═══════════ 管理员：各部门明细 ═══════════ -->
       <template v-if="authStore.isAdmin && data">
-        <h3 class="section-title">部门资产总览</h3>
-        <el-row :gutter="16" class="stat-row">
-          <el-col :span="4" v-for="c in deptCards" :key="c.key">
-            <div class="stat-card" @click="c.onClick">
-              <div class="stat-value">{{ c.value }}</div>
-              <div class="stat-label">{{ c.label }}</div>
-            </div>
-          </el-col>
-        </el-row>
-
-        <h3 class="section-title" style="margin-top:24px">各部门明细</h3>
-        <el-table :data="data.dept_details" stripe max-height="400" size="small">
-          <el-table-column prop="dept_name" label="部门" min-width="180" show-overflow-tooltip />
-          <el-table-column label="虚拟机" width="90" align="center">
+        <h3 class="section-title">各部门明细</h3>
+        <el-table :data="data.dept_details" stripe max-height="500" size="small">
+          <el-table-column prop="dept_name" label="部门" min-width="160" show-overflow-tooltip />
+          <el-table-column label="虚拟机" width="140" align="center">
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'vm')">{{ row.vm }}</el-link>
+              <span style="font-size:11px;color:#909399;white-space:nowrap">（<span style="color:#10b981">{{ row.vm_on || 0 }}开</span>/<span style="color:#ef4444">{{ row.vm_off || 0 }}关</span>）</span>
             </template>
           </el-table-column>
-          <el-table-column label="域名" width="90" align="center">
+          <el-table-column label="已备份" width="70" align="center">
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'backup')" v-if="row.backup">{{ row.backup }}</el-link>
+              <span v-else>0</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="已装椒图" width="80" align="center">
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'qax')" v-if="row.qax">{{ row.qax }}</el-link>
+              <span v-else>0</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="域名" width="80" align="center">
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'domains')">{{ row.domain }}</el-link>
             </template>
@@ -36,10 +39,7 @@
               <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'is')">{{ row.is_count }}</el-link>
             </template>
           </el-table-column>
-          <el-table-column label="供应链" width="90" align="center">
-            <template #default="{row}">{{ row.sc }}</template>
-          </el-table-column>
-          <el-table-column label="管理员" width="80" align="center">
+          <el-table-column label="管理员" width="70" align="center">
             <template #default="{row}">{{ row.admin_count }}</template>
           </el-table-column>
         </el-table>
@@ -237,21 +237,6 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const data = ref(null)
 
-const deptCards = computed(() => {
-  if (!data.value) return []
-  const allVm = data.value.dept_details.reduce((s, d) => s + d.vm, 0)
-  const allDomain = data.value.dept_details.reduce((s, d) => s + d.domain, 0)
-  const allIs = data.value.dept_details.reduce((s, d) => s + d.is_count, 0)
-  const allSc = data.value.dept_details.reduce((s, d) => s + d.sc, 0)
-  return [
-    { key: 'dept', value: data.value.dept_count, label: '部门总数' },
-    { key: 'vm', value: allVm, label: '虚拟机', onClick: () => go('/sys/assets') },
-    { key: 'domain', value: allDomain, label: '域名', onClick: () => go('/sys/assets', { tab: 'domains' }) },
-    { key: 'is', value: allIs, label: '信息系统', onClick: () => go('/sys/info-systems') },
-    { key: 'sc', value: allSc, label: '供应链' },
-  ]
-})
-
 const isCompItems = computed(() => {
   if (!data.value?.is_completeness) return []
   const map = { system_name: '系统名称', system_type: '系统类型', sub_type: '子类型', domain: '域名', manager: '负责人', dept: '部门', djdj: '等保', vendor: '厂商' }
@@ -284,6 +269,8 @@ function goDept(deptName, type) {
   if (type === 'vm') go('/sys/assets', query)
   else if (type === 'domains') go('/sys/assets', { ...query, tab: 'domains' })
   else if (type === 'is') go('/sys/info-systems', query)
+  else if (type === 'backup') go('/sys/assets', { search: deptName, has_backup: 'yes' })
+  else if (type === 'qax') go('/sys/assets', { search: deptName, has_qax: 'yes' })
 }
 
 async function refresh() {
