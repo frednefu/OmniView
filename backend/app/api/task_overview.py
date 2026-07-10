@@ -188,11 +188,11 @@ def get_task_overview(
         "unclaimed": {"on": vm_un[0] or 0, "off": vm_un[1] or 0},
     }
 
-    # ═══════════ 域名统计 ═══════════
+    # ═══════════ 域名统计（认领=有owner_user_id，与域名清单筛选逻辑一致） ═══════════
     dom = _exec_one(f"""
         SELECT COUNT(*),
-               COALESCE(SUM(CASE WHEN owner_user_id IS NOT NULL AND claim_status != 'unlinked' THEN 1 ELSE 0 END),0),
-               COALESCE(SUM(CASE WHEN owner_user_id IS NULL OR claim_status = 'unlinked' THEN 1 ELSE 0 END),0)
+               COALESCE(SUM(CASE WHEN owner_user_id IS NOT NULL THEN 1 ELSE 0 END),0),
+               COALESCE(SUM(CASE WHEN owner_user_id IS NULL THEN 1 ELSE 0 END),0)
         FROM domain_inventory
         {_w(domain_where)}
     """)
@@ -275,13 +275,24 @@ def pct(val, total):
 
 
 def _get_sub_dept_ids(db, dept_id):
-    """递归获取本部门及所有子部门的 ID 列表。"""
+    """获取部门及其所有下级部门 ID 列表（与 assets.py 逻辑一致）。"""
     if not dept_id:
         return []
-    ids = [dept_id]
-    rows = db.execute(text(
-        "SELECT id FROM departments WHERE lsdwh = (SELECT dwbm FROM departments WHERE id=:did) AND sfyx='是'"
-    ), {"did": dept_id}).fetchall()
-    for r in rows:
-        ids.extend(_get_sub_dept_ids(db, r[0]))
-    return ids
+    dept = db.execute(text("SELECT dwbm FROM departments WHERE id=:id"), {"id": dept_id}).fetchone()
+    if not dept:
+        return [dept_id]
+    all_depts = db.execute(text("SELECT id, dwbm, lsdwh FROM departments")).fetchall()
+    children_map = {}
+    for d in all_depts:
+        children_map.setdefault(d.lsdwh or "__root__", []).append(d.id)
+
+    result = [dept_id]
+    def collect(dwbm):
+        for cid in children_map.get(dwbm, []):
+            if cid not in result:
+                result.append(cid)
+                child = next((d for d in all_depts if d.id == cid), None)
+                if child:
+                    collect(child.dwbm)
+    collect(dept.dwbm)
+    return result
