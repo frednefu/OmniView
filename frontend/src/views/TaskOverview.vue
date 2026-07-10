@@ -17,6 +17,16 @@
               <span style="font-size:11px;color:#909399;white-space:nowrap">（<span style="color:#10b981">{{ row.vm_on || 0 }}开</span>/<span style="color:#ef4444">{{ row.vm_off || 0 }}关</span>）</span>
             </template>
           </el-table-column>
+          <el-table-column label="域名" width="80" align="center">
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'domains')">{{ row.domain }}</el-link>
+            </template>
+          </el-table-column>
+          <el-table-column label="信息系统" width="90" align="center">
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'is')">{{ row.is_count }}</el-link>
+            </template>
+          </el-table-column>
           <el-table-column label="已备份" width="70" align="center">
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'backup')" v-if="row.backup">{{ row.backup }}</el-link>
@@ -27,16 +37,6 @@
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'qax')" v-if="row.qax">{{ row.qax }}</el-link>
               <span v-else>0</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="域名" width="80" align="center">
-            <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'domains')">{{ row.domain }}</el-link>
-            </template>
-          </el-table-column>
-          <el-table-column label="信息系统" width="90" align="center">
-            <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'is')">{{ row.is_count }}</el-link>
             </template>
           </el-table-column>
           <el-table-column label="管理员" width="70" align="center">

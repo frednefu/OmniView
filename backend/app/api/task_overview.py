@@ -74,7 +74,7 @@ def get_task_overview(
             LEFT JOIN domain_inventory di ON di.department_id = d.id
             LEFT JOIN info_systems s ON s.dept_id = d.id
             LEFT JOIN users u ON u.department_id = d.id AND u.role IN ('admin','dept_admin')
-            WHERE d.sfyx = '是'
+            WHERE d.sfyx = '1'
             GROUP BY d.id, d.dwmc
             ORDER BY vm DESC
         """)).fetchall()
