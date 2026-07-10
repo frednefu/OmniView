@@ -88,35 +88,78 @@ def get_task_overview(
             for r in dept_rows
         ]
 
-    # ═══════════ 部门管理员：人员清单 + SC 统计 ═══════════
+    # ═══════════ 部门管理员：人员清单 + 备份/椒图统计（含交换机IP增强） ═══════════
     if is_dept_admin and not is_admin:
+        # 基础成员统计（VM/域名/IS/SC）
         members_sql = f"""
             SELECT u.id, u.name, u.gh,
                    COUNT(DISTINCT a.id) as vm,
                    COUNT(DISTINCT di.id) as domain,
                    COUNT(DISTINCT s.id) as is_count,
-                   COUNT(DISTINCT sc.id) as sc,
-                   COUNT(DISTINCT CASE WHEN db2.vm_name IS NOT NULL THEN a.id END) as backup,
-                   COUNT(DISTINCT CASE WHEN qax2.ipv4 IS NOT NULL THEN a.id END) as qax
+                   COUNT(DISTINCT sc.id) as sc
             FROM users u
             LEFT JOIN asset_inventory a ON a.owner_user_id = u.id
             LEFT JOIN domain_inventory di ON di.owner_user_id = u.id
             LEFT JOIN info_systems s ON s.manager_gh = u.gh
             LEFT JOIN supply_chains sc ON sc.company_name = s.vendor_name
-            LEFT JOIN vm_inventory v2 ON v2.vm_name = a.vm_name
-            LEFT JOIN dingjia_backup_records db2 ON db2.vm_name = v2.vm_name
-            LEFT JOIN qax_servers qax2 ON (qax2.ipv4 = v2.ip_address OR qax2.intranet_ip = v2.ip_address)
             {user_scope}
             GROUP BY u.id, u.name, u.gh
             ORDER BY vm DESC
         """
         member_rows = db.execute(text(members_sql)).fetchall()
-        result["members"] = [
-            {"user_id": r[0], "name": r[1], "gh": r[2],
-             "vm": r[3], "domain": r[4], "is_count": r[5], "sc": r[6],
-             "backup": r[7] or 0, "qax": r[8] or 0}
-            for r in member_rows
-        ]
+
+        # 加载成员资产 VM 详情用于备份/椒图统计
+        member_vm_names = {}
+        if member_rows:
+            user_ids = [r[0] for r in member_rows]
+            uid_str = ",".join(str(uid) for uid in user_ids)
+            vm_rows = db.execute(text(f"""
+                SELECT a.owner_user_id, v.vm_name, v.ip_address, v.mac_address
+                FROM asset_inventory a
+                JOIN vm_inventory v ON v.vm_name = a.vm_name
+                WHERE a.owner_user_id IN ({uid_str})
+            """)).fetchall()
+            for vr in vm_rows:
+                member_vm_names.setdefault(vr.owner_user_id, []).append(vr)
+
+        # 交换机 MAC→IP + QAX IP 集合 + 鼎甲 VM 集合
+        _switch_mac_ips = {}
+        for sr in db.execute(text(
+            "SELECT mac_address, ip_address FROM scan_results WHERE mac_address IS NOT NULL AND mac_address != ''"
+        )).fetchall():
+            ip = (sr.ip_address or "").strip()
+            if not ip or ":" in ip: continue
+            for mac in (sr.mac_address or "").split(","):
+                mac = mac.strip().lower()
+                if mac: _switch_mac_ips.setdefault(mac, []).append(ip)
+        _qax_ips = {r[0] for r in db.execute(text(
+            "SELECT DISTINCT ipv4 FROM qax_servers WHERE ipv4 IS NOT NULL AND ipv4 != ''"
+        )).fetchall()}
+        _dj_vms = {r[0] for r in db.execute(text(
+            "SELECT DISTINCT vm_name FROM dingjia_backup_records WHERE vm_name IS NOT NULL AND vm_name != ''"
+        )).fetchall()}
+
+        members = []
+        for r in member_rows:
+            uid = r[0]
+            vms = member_vm_names.get(uid, [])
+            backup_cnt = sum(1 for v in vms if v.vm_name in _dj_vms)
+            qax_cnt = 0
+            for v in vms:
+                v_ips = [ip.strip() for ip in (v.ip_address or "").split(",") if ip.strip()]
+                v_macs = [mac.strip().lower() for mac in (v.mac_address or "").split(",") if mac.strip()]
+                if not v_ips:
+                    for mac in v_macs:
+                        if mac in _switch_mac_ips:
+                            v_ips.extend(_switch_mac_ips[mac])
+                if any(ip in _qax_ips for ip in v_ips):
+                    qax_cnt += 1
+            members.append({
+                "user_id": uid, "name": r[1], "gh": r[2],
+                "vm": r[3], "domain": r[4], "is_count": r[5], "sc": r[6],
+                "backup": backup_cnt, "qax": qax_cnt,
+            })
+        result["members"] = members
 
     # ═══════════ VM 统计 ═══════════
     def _exec_one(sql):
