@@ -61,9 +61,9 @@ def get_task_overview(
         """Wrap condition into WHERE clause."""
         return f"WHERE {cond}" if cond else ""
 
-    # ═══════════ 管理员：部门统计（SQL聚合+Python椒图增强） ═══════════
+    # ═══════════ 管理员：部门统计（预加载+过滤零值） ═══════════
     if is_admin:
-        # 交换机 MAC→IP + QAX IP（只加载一次）
+        # 一次性加载：交换机MAC→IP、QAX IP、鼎甲VM
         sw_mac_ips = {}
         for sr in db.execute(text(
             "SELECT mac_address, ip_address FROM scan_results WHERE mac_address IS NOT NULL AND mac_address != ''"
@@ -76,34 +76,24 @@ def get_task_overview(
         qax_ips = {r[0] for r in db.execute(text(
             "SELECT DISTINCT ipv4 FROM qax_servers WHERE ipv4 IS NOT NULL AND ipv4 != ''"
         )).fetchall()}
+        dj_vms = {r[0] for r in db.execute(text(
+            "SELECT DISTINCT vm_name FROM dingjia_backup_records"
+        )).fetchall()}
 
-        # SQL 聚合：开关机 + 备份
-        dept_rows = db.execute(text("""
-            SELECT COALESCE(d.dwmc, '未分组') as dept_name, d.id as dept_id,
-                   COUNT(DISTINCT v.id) as vm,
-                   COALESCE(SUM(CASE WHEN v.power_state='poweredOn' THEN 1 ELSE 0 END),0) as vm_on,
-                   COALESCE(SUM(CASE WHEN v.power_state='poweredOff' THEN 1 ELSE 0 END),0) as vm_off,
-                   COUNT(DISTINCT CASE WHEN db.vm_name IS NOT NULL THEN v.id END) as backup,
-                   COUNT(DISTINCT di.id) as domain,
-                   COUNT(DISTINCT s.id) as is_count,
-                   COUNT(DISTINCT u.id) as admin_count
-            FROM departments d
-            LEFT JOIN vm_inventory v ON v.department_id = d.id
-            LEFT JOIN dingjia_backup_records db ON db.vm_name = v.vm_name
-            LEFT JOIN domain_inventory di ON di.department_id = d.id
-            LEFT JOIN info_systems s ON s.dept_id = d.id
-            LEFT JOIN users u ON u.department_id = d.id AND u.role IN ('admin','dept_admin')
-            WHERE d.sfyx = '1'
-            GROUP BY d.id, d.dwmc
-            ORDER BY vm DESC
-        """)).fetchall()
-
-        # Python：椒图统计（需要 MAC→IP 增强）
-        qax_dept = {}
+        # 按部门聚合 VM：总数/开关机/备份/椒图（Python 单次遍历）
+        dept_vm = {}  # did -> {total, on, off, backup, qax}
         vm_rows = db.execute(text(
-            "SELECT department_id, ip_address, mac_address FROM vm_inventory WHERE department_id IS NOT NULL"
+            "SELECT department_id, vm_name, power_state, ip_address, mac_address FROM vm_inventory WHERE department_id IS NOT NULL"
         )).fetchall()
         for vr in vm_rows:
+            did = vr.department_id
+            if did not in dept_vm:
+                dept_vm[did] = {"total": 0, "on": 0, "off": 0, "backup": 0, "qax": 0}
+            d = dept_vm[did]
+            d["total"] += 1
+            if vr.power_state == "poweredOn": d["on"] += 1
+            elif vr.power_state == "poweredOff": d["off"] += 1
+            if vr.vm_name in dj_vms: d["backup"] += 1
             v_ips = [ip.strip() for ip in (vr.ip_address or "").split(",") if ip.strip()]
             v_macs = [mac.strip().lower() for mac in (vr.mac_address or "").split(",") if mac.strip()]
             if not v_ips:
@@ -111,16 +101,35 @@ def get_task_overview(
                     if mac in sw_mac_ips:
                         v_ips.extend(sw_mac_ips[mac])
             if any(ip in qax_ips for ip in v_ips):
-                qax_dept[vr.department_id] = qax_dept.get(vr.department_id, 0) + 1
+                d["qax"] += 1
+
+        # 部门基础信息（只查有数据的）
+        dept_rows = db.execute(text("""
+            SELECT d.id, COALESCE(d.dwmc, '未分组') as dept_name,
+                   COUNT(DISTINCT di.id) as domain,
+                   COUNT(DISTINCT s.id) as is_count,
+                   COUNT(DISTINCT u.id) as admin_count
+            FROM departments d
+            LEFT JOIN domain_inventory di ON di.department_id = d.id
+            LEFT JOIN info_systems s ON s.dept_id = d.id
+            LEFT JOIN users u ON u.department_id = d.id AND u.role IN ('admin','dept_admin')
+            WHERE d.sfyx = '1'
+            GROUP BY d.id, d.dwmc
+        """)).fetchall()
 
         dept_details = []
         for r in dept_rows:
-            did = r[1]
+            did = r[0]
+            vm = dept_vm.get(did, {"total": 0, "on": 0, "off": 0, "backup": 0, "qax": 0})
+            total = vm["total"]
+            # 过滤全零部门
+            if total == 0 and r[2] == 0 and r[3] == 0:
+                continue
             dept_details.append({
-                "dept_name": r[0], "dept_id": did,
-                "vm": r[2], "vm_on": r[3], "vm_off": r[4],
-                "backup": r[5] or 0, "qax": qax_dept.get(did, 0),
-                "domain": r[6], "is_count": r[7], "admin_count": r[8],
+                "dept_name": r[1], "dept_id": did,
+                "vm": total, "vm_on": vm["on"], "vm_off": vm["off"],
+                "backup": vm["backup"], "qax": vm["qax"],
+                "domain": r[2], "is_count": r[3], "admin_count": r[4],
             })
         result["dept_details"] = dept_details
 
