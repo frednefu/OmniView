@@ -295,23 +295,25 @@ def get_task_overview(
         if any(ip in qax_ips_set for ip in v_ips):
             vm_qax += 1
 
-    # 认领/待认领：使用与 VM 清单一致的 Python 增强逻辑计算
+    # 认领/待认领：与 VM 清单一致，用 owner_name 判断
     vm_claim_power = {}  # vm_name -> power_state
-    vm_claim_owner = {}  # vm_name -> has_owner
+    vm_claim_owner = {}  # vm_name -> has_owner_name
     cl_rows = db.execute(text(f"""
-        SELECT v.vm_name, v.power_state, a.owner_user_id
+        SELECT v.vm_name, v.power_state, COALESCE(u.name, u.username) as owner_name
         FROM vm_inventory v
         LEFT JOIN asset_inventory a ON a.vm_name=v.vm_name
+        LEFT JOIN users u ON a.owner_user_id = u.id
         {vm_join.replace('JOIN ','') if vm_join else ''}
         {_w(vm_where)}
     """ if not is_admin else """
-        SELECT v.vm_name, v.power_state, a.owner_user_id
+        SELECT v.vm_name, v.power_state, COALESCE(u.name, u.username) as owner_name
         FROM vm_inventory v
         LEFT JOIN asset_inventory a ON a.vm_name=v.vm_name
+        LEFT JOIN users u ON a.owner_user_id = u.id
     """)).fetchall()
     for cr in cl_rows:
         vm_claim_power[cr.vm_name] = cr.power_state
-        vm_claim_owner[cr.vm_name] = cr.owner_user_id is not None
+        vm_claim_owner[cr.vm_name] = cr.owner_name is not None
 
     vm_cl_on = sum(1 for v in vm_claim_power if vm_claim_power[v] == 'poweredOn' and vm_claim_owner.get(v))
     vm_cl_off = sum(1 for v in vm_claim_power if vm_claim_power[v] == 'poweredOff' and vm_claim_owner.get(v))
