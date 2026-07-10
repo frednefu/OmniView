@@ -103,19 +103,35 @@ def get_task_overview(
             if any(ip in qax_ips for ip in v_ips):
                 d["qax"] += 1
 
-        # 部门基础信息（只查有数据的）
+        # 部门基础信息（只查有数据的）+ 认领管理员统计
         dept_rows = db.execute(text("""
             SELECT d.id, COALESCE(d.dwmc, '未分组') as dept_name,
                    COUNT(DISTINCT di.id) as domain,
-                   COUNT(DISTINCT s.id) as is_count,
-                   COUNT(DISTINCT u.id) as admin_count
+                   COUNT(DISTINCT s.id) as is_count
             FROM departments d
             LEFT JOIN domain_inventory di ON di.department_id = d.id
             LEFT JOIN info_systems s ON s.dept_id = d.id
-            LEFT JOIN users u ON u.department_id = d.id AND u.role IN ('admin','dept_admin')
             WHERE d.sfyx = '1'
             GROUP BY d.id, d.dwmc
         """)).fetchall()
+
+        # 按部门统计认领人：VM/域名/IS 的 owner/manager 去重
+        dept_claimers = {}  # did -> set of user_ids
+        # VM 认领人
+        for vr in db.execute(text(
+            "SELECT a.owner_user_id, v.department_id FROM asset_inventory a JOIN vm_inventory v ON v.vm_name=a.vm_name WHERE a.owner_user_id IS NOT NULL AND v.department_id IS NOT NULL"
+        )).fetchall():
+            dept_claimers.setdefault(vr.department_id, set()).add(vr.owner_user_id)
+        # 域名认领人
+        for dr in db.execute(text(
+            "SELECT owner_user_id, department_id FROM domain_inventory WHERE owner_user_id IS NOT NULL AND department_id IS NOT NULL"
+        )).fetchall():
+            dept_claimers.setdefault(dr.department_id, set()).add(dr.owner_user_id)
+        # IS 管理员
+        for ir in db.execute(text(
+            "SELECT u.id, s.dept_id FROM info_systems s JOIN users u ON u.gh=s.manager_gh WHERE s.manager_gh IS NOT NULL AND s.manager_gh != '' AND s.dept_id IS NOT NULL"
+        )).fetchall():
+            dept_claimers.setdefault(ir.dept_id, set()).add(ir.id)
 
         dept_details = []
         for r in dept_rows:
@@ -123,13 +139,14 @@ def get_task_overview(
             vm = dept_vm.get(did, {"total": 0, "on": 0, "off": 0, "backup": 0, "qax": 0})
             total = vm["total"]
             # 过滤全零部门
-            if total == 0 and r[2] == 0 and r[3] == 0:
+            if total == 0 and r[2] == 0 and r[3] == 0 and len(dept_claimers.get(did, set())) == 0:
                 continue
             dept_details.append({
                 "dept_name": r[1], "dept_id": did,
                 "vm": total, "vm_on": vm["on"], "vm_off": vm["off"],
                 "backup": vm["backup"], "qax": vm["qax"],
-                "domain": r[2], "is_count": r[3], "admin_count": r[4],
+                "domain": r[2], "is_count": r[3],
+                "admin_count": len(dept_claimers.get(did, set())),
             })
         result["dept_details"] = dept_details
 

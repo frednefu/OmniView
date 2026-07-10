@@ -43,6 +43,9 @@
             <template #default="{row}">{{ row.admin_count }}</template>
           </el-table-column>
         </el-table>
+        <div v-if="data.dept_details" style="text-align:right;margin-top:8px;color:#909399;font-size:13px">
+          共 {{ data.dept_details.length }} 个部门
+        </div>
       </template>
 
       <!-- ═══════════ 部门管理员：人员清单 ═══════════ -->
