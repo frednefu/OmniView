@@ -188,13 +188,18 @@ def get_task_overview(
         "unclaimed": {"on": vm_un[0] or 0, "off": vm_un[1] or 0},
     }
 
-    # ═══════════ 域名统计（认领=有owner_user_id，与域名清单筛选逻辑一致） ═══════════
+    # ═══════════ 域名统计（与域名清单 phys 补充逻辑一致） ═══════════
+    dom_where = domain_where
+    if dom_where:
+        dom_where += " AND NOT (owner_user_id IS NULL AND claim_status NOT IN ('unlinked',''))"
+    else:
+        dom_where = "NOT (owner_user_id IS NULL AND claim_status NOT IN ('unlinked',''))"
     dom = _exec_one(f"""
         SELECT COUNT(*),
                COALESCE(SUM(CASE WHEN owner_user_id IS NOT NULL THEN 1 ELSE 0 END),0),
                COALESCE(SUM(CASE WHEN owner_user_id IS NULL THEN 1 ELSE 0 END),0)
         FROM domain_inventory
-        {_w(domain_where)}
+        {_w(dom_where)}
     """)
     result["domain"] = {"total": dom[0] or 0, "claimed": dom[1] or 0, "unclaimed": dom[2] or 0}
 
