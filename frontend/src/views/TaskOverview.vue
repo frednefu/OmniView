@@ -8,13 +8,13 @@
     <div v-loading="loading">
       <!-- ═══════════ 管理员：各部门明细 ═══════════ -->
       <template v-if="authStore.isAdmin && data">
-        <h3 class="section-title">各部门明细</h3>
+        <h3 class="section-title">部门汇总信息</h3>
         <el-table :data="data.dept_details" stripe max-height="500" size="small" :default-sort="{prop:'vm',order:'descending'}">
           <el-table-column prop="dept_name" label="部门" min-width="160" show-overflow-tooltip sortable />
           <el-table-column label="虚拟机" width="140" align="center" prop="vm" sortable>
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'vm')">{{ row.vm }}</el-link>
-              <span style="font-size:11px;color:#909399;white-space:nowrap">（<span style="color:#10b981">{{ row.vm_on || 0 }}开</span>/<span style="color:#ef4444">{{ row.vm_off || 0 }}关</span>）</span>
+              <span style="font-size:11px;color:#909399;white-space:nowrap">（<el-link type="success" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'vm_on')" style="font-size:11px">{{ row.vm_on || 0 }}开</el-link>/<el-link type="danger" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'vm_off')" style="font-size:11px">{{ row.vm_off || 0 }}关</el-link>）</span>
             </template>
           </el-table-column>
           <el-table-column label="域名" width="80" align="center">
@@ -40,7 +40,20 @@
             </template>
           </el-table-column>
           <el-table-column label="管理员" width="70" align="center">
-            <template #default="{row}">{{ row.admin_count }}</template>
+            <template #default="{row}">
+              <el-popover v-if="row.admin_count" placement="right" :width="300" trigger="click">
+                <template #reference>
+                  <el-link type="primary" :underline="false">{{ row.admin_count }}</el-link>
+                </template>
+                <el-table :data="row.admins" size="small" max-height="300">
+                  <el-table-column prop="name" label="姓名" width="70" />
+                  <el-table-column prop="gh" label="工号" width="80" />
+                  <el-table-column prop="dept" label="单位" min-width="100" show-overflow-tooltip />
+                  <el-table-column prop="mobile" label="电话" width="100" />
+                </el-table>
+              </el-popover>
+              <span v-else>0</span>
+            </template>
           </el-table-column>
         </el-table>
         <div v-if="data.dept_details" style="text-align:right;margin-top:8px;color:#909399;font-size:13px">
@@ -270,6 +283,8 @@ function goMemberAssets(row, type) {
 function goDept(deptId, deptName, type) {
   const base = { dept_id: deptId }
   if (type === 'vm') go('/sys/assets', base)
+  else if (type === 'vm_on') go('/sys/assets', { ...base, power_state: 'poweredOn' })
+  else if (type === 'vm_off') go('/sys/assets', { ...base, power_state: 'poweredOff' })
   else if (type === 'domains') go('/sys/assets', { ...base, tab: 'domains' })
   else if (type === 'is') go('/sys/assets', { ...base, tab: 'systems' })
   else if (type === 'backup') go('/sys/assets', { ...base, has_backup: 'yes' })
