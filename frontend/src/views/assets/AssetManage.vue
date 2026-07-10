@@ -1149,13 +1149,11 @@ onMounted(async () => {
     domainSearch.value = route.query.search
     sysSearch.value = route.query.search
   }
-  // 如果 URL 指定了 dept_id，优先选中该部门节点
+  // 如果 URL 指定了 dept_id，优先选中该部门节点（即使被隐藏过滤也要选中）
   if (route.query.dept_id) {
     const targetId = parseInt(route.query.dept_id)
     const node = findTreeNode(treeData.value, targetId)
-    if (node) {
-      selectedNode.value = node
-    }
+    selectedNode.value = node || { id: targetId, label: '' }
   }
   // 默认自动选中部门节点（如果还没选中）
   if (!selectedNode.value) {
