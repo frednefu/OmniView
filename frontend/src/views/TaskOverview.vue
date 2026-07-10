@@ -10,32 +10,32 @@
       <template v-if="authStore.isAdmin && data">
         <h3 class="section-title">各部门明细</h3>
         <el-table :data="data.dept_details" stripe max-height="500" size="small">
-          <el-table-column prop="dept_name" label="部门" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="dept_name" label="部门" min-width="160" show-overflow-tooltip sortable />
           <el-table-column label="虚拟机" width="140" align="center">
             <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'vm')">{{ row.vm }}</el-link>
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'vm')">{{ row.vm }}</el-link>
               <span style="font-size:11px;color:#909399;white-space:nowrap">（<span style="color:#10b981">{{ row.vm_on || 0 }}开</span>/<span style="color:#ef4444">{{ row.vm_off || 0 }}关</span>）</span>
             </template>
           </el-table-column>
           <el-table-column label="域名" width="80" align="center">
             <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'domains')">{{ row.domain }}</el-link>
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'domains')">{{ row.domain }}</el-link>
             </template>
           </el-table-column>
           <el-table-column label="信息系统" width="90" align="center">
             <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'is')">{{ row.is_count }}</el-link>
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'is')">{{ row.is_count }}</el-link>
             </template>
           </el-table-column>
           <el-table-column label="已备份" width="70" align="center">
             <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'backup')" v-if="row.backup">{{ row.backup }}</el-link>
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'backup')" v-if="row.backup">{{ row.backup }}</el-link>
               <span v-else>0</span>
             </template>
           </el-table-column>
           <el-table-column label="已装椒图" width="80" align="center">
             <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goDept(row.dept_name, 'qax')" v-if="row.qax">{{ row.qax }}</el-link>
+              <el-link type="primary" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'qax')" v-if="row.qax">{{ row.qax }}</el-link>
               <span v-else>0</span>
             </template>
           </el-table-column>
@@ -264,13 +264,13 @@ function goMemberAssets(row, type) {
   else if (type === 'qax') go('/sys/assets', { search: row.name, has_qax: 'yes' })
 }
 
-function goDept(deptName, type) {
-  const query = { search: deptName }
+function goDept(deptId, deptName, type) {
+  const query = { dept_id: deptId, search: deptName }
   if (type === 'vm') go('/sys/assets', query)
   else if (type === 'domains') go('/sys/assets', { ...query, tab: 'domains' })
   else if (type === 'is') go('/sys/info-systems', query)
-  else if (type === 'backup') go('/sys/assets', { search: deptName, has_backup: 'yes' })
-  else if (type === 'qax') go('/sys/assets', { search: deptName, has_qax: 'yes' })
+  else if (type === 'backup') go('/sys/assets', { ...query, has_backup: 'yes' })
+  else if (type === 'qax') go('/sys/assets', { ...query, has_qax: 'yes' })
 }
 
 async function refresh() {

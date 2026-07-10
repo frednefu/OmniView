@@ -1149,13 +1149,23 @@ onMounted(async () => {
     domainSearch.value = route.query.search
     sysSearch.value = route.query.search
   }
-  // 默认自动选中部门节点
-  if (!authStore.isAdmin && authStore.user?.department_id) {
-    const myDeptId = authStore.user.department_id
-    const node = findTreeNode(treeData.value, myDeptId)
-    selectedNode.value = node || { id: myDeptId, label: '本单位' }
-  } else {
-    selectedNode.value = { id: 0, label: '全部' }
+  // 如果 URL 指定了 dept_id，优先选中该部门节点
+  if (route.query.dept_id) {
+    const targetId = parseInt(route.query.dept_id)
+    const node = findTreeNode(treeData.value, targetId)
+    if (node) {
+      selectedNode.value = node
+    }
+  }
+  // 默认自动选中部门节点（如果还没选中）
+  if (!selectedNode.value) {
+    if (!authStore.isAdmin && authStore.user?.department_id) {
+      const myDeptId = authStore.user.department_id
+      const node = findTreeNode(treeData.value, myDeptId)
+      selectedNode.value = node || { id: myDeptId, label: '本单位' }
+    } else {
+      selectedNode.value = { id: 0, label: '全部' }
+    }
   }
   // 加载当前选项卡数据
   await nextTick()
