@@ -1144,7 +1144,11 @@ onMounted(async () => {
   }
   if (route.query.has_backup === 'yes') vmBackupFilter.value = 'yes'
   if (route.query.has_qax === 'yes') vmQaxFilter.value = 'yes'
-  if (route.query.search) vmSearch.value = route.query.search
+  if (route.query.search) {
+    vmSearch.value = route.query.search
+    domainSearch.value = route.query.search
+    sysSearch.value = route.query.search
+  }
   // 默认自动选中部门节点
   if (!authStore.isAdmin && authStore.user?.department_id) {
     const myDeptId = authStore.user.department_id
