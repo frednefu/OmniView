@@ -1162,7 +1162,7 @@ onMounted(async () => {
       const node = findTreeNode(treeData.value, myDeptId)
       selectedNode.value = node || { id: myDeptId, label: '本单位' }
     } else {
-      selectedNode.value = { id: 0, label: '全部' }
+      selectedNode.value = { id: -2, label: '全部' }
     }
   }
   // 加载当前选项卡数据

@@ -976,7 +976,18 @@ def get_dept_vms(
             owner_filter = ""  # 部门管理员可见本部门及未认领
         else:
             owner_filter = f"AND (a.owner_user_id = {current_user.id} OR a.owner_user_id IS NULL)"
-    if dept_id == 0:
+    if dept_id == -2:
+        # 全部 VM（管理员视图）
+        q = db.execute(text(
+            f"SELECT v.*, a.department_id, a.owner_user_id, a.claim_status, a.claimed_by, a.claimed_at, "
+            "d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
+            "vc.name as vcenter_name FROM vm_inventory v "
+            "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            "LEFT JOIN departments d ON a.department_id = d.id "
+            "LEFT JOIN users u ON a.owner_user_id = u.id "
+            "LEFT JOIN vcenters vc ON v.vcenter_id = vc.id"
+        ))
+    elif dept_id == 0:
         q = db.execute(text(
             f"SELECT v.*, a.department_id, a.owner_user_id, a.claim_status, a.claimed_by, a.claimed_at, "
             "d.dwmc as dept_name, COALESCE(u.name, u.username) as owner_name, "
