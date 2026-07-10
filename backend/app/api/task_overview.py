@@ -95,12 +95,19 @@ def get_task_overview(
                    COUNT(DISTINCT a.id) as vm,
                    COUNT(DISTINCT di.id) as domain,
                    COUNT(DISTINCT s.id) as is_count,
-                   COUNT(DISTINCT sc.id) as sc
+                   COUNT(DISTINCT sc.id) as sc,
+                   COUNT(DISTINCT CASE WHEN db2.vm_name IS NOT NULL THEN a.id END) as backup,
+                   COUNT(DISTINCT CASE WHEN qax2.vm_name IS NOT NULL THEN a.id END) as qax
             FROM users u
             LEFT JOIN asset_inventory a ON a.owner_user_id = u.id
             LEFT JOIN domain_inventory di ON di.owner_user_id = u.id
             LEFT JOIN info_systems s ON s.manager_gh = u.gh
             LEFT JOIN supply_chains sc ON sc.company_name = s.vendor_name
+            LEFT JOIN vm_inventory v2 ON v2.vm_name = a.vm_name
+            LEFT JOIN dingjia_backup_records db2 ON db2.vm_name = v2.vm_name
+            LEFT JOIN qax_servers qax2 ON (qax2.ipv4 = v2.ip_address OR qax2.intranet_ip = v2.ip_address
+                OR v2.ip_address LIKE CONCAT('%,', qax2.ipv4) OR v2.ip_address LIKE CONCAT(qax2.ipv4, ',%')
+                OR v2.ip_address LIKE CONCAT('%,', qax2.intranet_ip) OR v2.ip_address LIKE CONCAT(qax2.intranet_ip, ',%'))
             {user_scope}
             GROUP BY u.id, u.name, u.gh
             ORDER BY vm DESC
@@ -108,7 +115,8 @@ def get_task_overview(
         member_rows = db.execute(text(members_sql)).fetchall()
         result["members"] = [
             {"user_id": r[0], "name": r[1], "gh": r[2],
-             "vm": r[3], "domain": r[4], "is_count": r[5], "sc": r[6]}
+             "vm": r[3], "domain": r[4], "is_count": r[5], "sc": r[6],
+             "backup": r[7] or 0, "qax": r[8] or 0}
             for r in member_rows
         ]
 

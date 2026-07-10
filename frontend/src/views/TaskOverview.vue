@@ -49,8 +49,8 @@
       <template v-if="authStore.isDeptAdmin && !authStore.isAdmin && data && data.members">
         <h3 class="section-title">本部门人员清单</h3>
         <el-table :data="data.members" stripe size="small">
-          <el-table-column prop="name" label="姓名" width="100" />
-          <el-table-column prop="gh" label="工号" width="100" />
+          <el-table-column prop="name" label="姓名" width="80" />
+          <el-table-column prop="gh" label="工号" width="90" />
           <el-table-column label="虚拟机" width="80" align="center">
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'vm')" v-if="row.vm">{{ row.vm }}</el-link>
@@ -72,6 +72,18 @@
           <el-table-column label="供应链" width="80" align="center">
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'sc')" v-if="row.sc">{{ row.sc }}</el-link>
+              <span v-else>0</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="已备份" width="70" align="center">
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'backup')" v-if="row.backup">{{ row.backup }}</el-link>
+              <span v-else>0</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="已装椒图" width="80" align="center">
+            <template #default="{row}">
+              <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'qax')" v-if="row.qax">{{ row.qax }}</el-link>
               <span v-else>0</span>
             </template>
           </el-table-column>
@@ -260,6 +272,8 @@ function goMemberAssets(row, type) {
   else if (type === 'domains') go('/sys/assets', { ...q, tab: 'domains' })
   else if (type === 'is') go('/sys/info-systems', q)
   else if (type === 'sc') go('/sys/supply-chain', q)
+  else if (type === 'backup') go('/sys/assets', { search: row.name, has_backup: 'yes' })
+  else if (type === 'qax') go('/sys/assets', { search: row.name, has_qax: 'yes' })
 }
 
 function goDept(deptName, type) {
