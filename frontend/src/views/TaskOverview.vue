@@ -51,9 +51,16 @@
         <el-table :data="data.members" stripe size="small">
           <el-table-column prop="name" label="姓名" width="80" />
           <el-table-column prop="gh" label="工号" width="90" />
-          <el-table-column label="虚拟机" width="80" align="center">
+          <el-table-column label="虚拟机" width="110" align="center">
             <template #default="{row}">
-              <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'vm')" v-if="row.vm">{{ row.vm }}</el-link>
+              <template v-if="row.vm">
+                <el-link type="primary" :underline="false" @click="goMemberAssets(row, 'vm')">{{ row.vm }}</el-link>
+                <div style="font-size:11px;color:#909399">
+                  <span style="color:#10b981">{{ row.vm_on || 0 }}开</span>
+                  <span style="margin:0 3px">/</span>
+                  <span style="color:#ef4444">{{ row.vm_off || 0 }}关</span>
+                </div>
+              </template>
               <span v-else>0</span>
             </template>
           </el-table-column>

@@ -114,7 +114,7 @@ def get_task_overview(
             user_ids = [r[0] for r in member_rows]
             uid_str = ",".join(str(uid) for uid in user_ids)
             vm_rows = db.execute(text(f"""
-                SELECT a.owner_user_id, v.vm_name, v.ip_address, v.mac_address
+                SELECT a.owner_user_id, v.vm_name, v.ip_address, v.mac_address, v.power_state
                 FROM asset_inventory a
                 JOIN vm_inventory v ON v.vm_name = a.vm_name
                 WHERE a.owner_user_id IN ({uid_str})
@@ -154,9 +154,12 @@ def get_task_overview(
                             v_ips.extend(_switch_mac_ips[mac])
                 if any(ip in _qax_ips for ip in v_ips):
                     qax_cnt += 1
+            vm_on = sum(1 for v in vms if v.power_state == 'poweredOn')
+            vm_off = sum(1 for v in vms if v.power_state == 'poweredOff')
             members.append({
                 "user_id": uid, "name": r[1], "gh": r[2],
-                "vm": r[3], "domain": r[4], "is_count": r[5], "sc": r[6],
+                "vm": r[3], "vm_on": vm_on, "vm_off": vm_off,
+                "domain": r[4], "is_count": r[5], "sc": r[6],
                 "backup": backup_cnt, "qax": qax_cnt,
             })
         result["members"] = members
