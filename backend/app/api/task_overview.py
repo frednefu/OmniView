@@ -295,15 +295,15 @@ def get_task_overview(
         if any(ip in qax_ips_set for ip in v_ips):
             vm_qax += 1
 
-    # 认领/待认领
-    _cl_join = vm_join if vm_join else "JOIN asset_inventory a ON a.vm_name=v.vm_name"
+    # 认领/待认领（LEFT JOIN 确保所有 VM 都计入）
+    _cl_join = vm_join if vm_join else "LEFT JOIN asset_inventory a ON a.vm_name=v.vm_name"
     _cl_where = vm_where if vm_where else "1=1"
     vm_cl = _exec_one(f"""
         SELECT COALESCE(SUM(CASE WHEN v.power_state='poweredOn' THEN 1 ELSE 0 END),0),
                COALESCE(SUM(CASE WHEN v.power_state='poweredOff' THEN 1 ELSE 0 END),0)
         FROM vm_inventory v
         {_cl_join}
-        WHERE {_cl_where} AND a.claim_status != 'unlinked'
+        WHERE {_cl_where} AND a.claim_status IS NOT NULL AND a.claim_status != 'unlinked'
     """)
     vm_un = _exec_one(f"""
         SELECT COALESCE(SUM(CASE WHEN v.power_state='poweredOn' THEN 1 ELSE 0 END),0),
