@@ -258,19 +258,19 @@ function goMemberAssets(row, type) {
   const q = { search: row.name }
   if (type === 'vm') go('/sys/assets', q)
   else if (type === 'domains') go('/sys/assets', { ...q, tab: 'domains' })
-  else if (type === 'is') go('/sys/info-systems', q)
+  else if (type === 'is') go('/sys/assets', { ...q, tab: 'systems' })
   else if (type === 'sc') go('/sys/supply-chain', q)
   else if (type === 'backup') go('/sys/assets', { search: row.name, has_backup: 'yes' })
   else if (type === 'qax') go('/sys/assets', { search: row.name, has_qax: 'yes' })
 }
 
 function goDept(deptId, deptName, type) {
-  const query = { dept_id: deptId, search: deptName }
-  if (type === 'vm') go('/sys/assets', query)
-  else if (type === 'domains') go('/sys/assets', { ...query, tab: 'domains' })
-  else if (type === 'is') go('/sys/info-systems', query)
-  else if (type === 'backup') go('/sys/assets', { ...query, has_backup: 'yes' })
-  else if (type === 'qax') go('/sys/assets', { ...query, has_qax: 'yes' })
+  const base = { dept_id: deptId }
+  if (type === 'vm') go('/sys/assets', base)
+  else if (type === 'domains') go('/sys/assets', { ...base, tab: 'domains' })
+  else if (type === 'is') go('/sys/assets', { ...base, tab: 'systems' })
+  else if (type === 'backup') go('/sys/assets', { ...base, has_backup: 'yes' })
+  else if (type === 'qax') go('/sys/assets', { ...base, has_qax: 'yes' })
 }
 
 async function refresh() {
