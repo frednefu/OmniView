@@ -97,7 +97,7 @@ def get_task_overview(
                    COUNT(DISTINCT s.id) as is_count,
                    COUNT(DISTINCT sc.id) as sc,
                    COUNT(DISTINCT CASE WHEN db2.vm_name IS NOT NULL THEN a.id END) as backup,
-                   COUNT(DISTINCT CASE WHEN qax2.vm_name IS NOT NULL THEN a.id END) as qax
+                   COUNT(DISTINCT CASE WHEN qax2.ipv4 IS NOT NULL THEN a.id END) as qax
             FROM users u
             LEFT JOIN asset_inventory a ON a.owner_user_id = u.id
             LEFT JOIN domain_inventory di ON di.owner_user_id = u.id
