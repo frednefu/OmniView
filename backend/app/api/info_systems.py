@@ -260,7 +260,7 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
                  search: str = Query(""), fill_type: str = Query(""),
                  system_type: str = Query(""), sub_type: str = Query(""),
                  manager_name: str = Query(""), owner_name: str = Query(""),
-                 url_status: str = Query(""),
+                 url_status: str = Query(""), claimed: str = Query(""),
                  sort_field: str = Query(""), sort_order: str = Query("desc"),
                  db: Session = Depends(get_db), user=Depends(get_current_user)):
     q = db.query(InfoSystem)
@@ -285,6 +285,10 @@ def list_systems(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100)
         q = q.filter(InfoSystem.manager_name.like(f"%{manager_name}%"))
     if owner_name:
         q = q.filter(InfoSystem.owner_name.like(f"%{owner_name}%"))
+    if claimed == "yes":
+        q = q.filter(InfoSystem.manager_gh.isnot(None), InfoSystem.manager_gh != "")
+    elif claimed == "no":
+        q = q.filter((InfoSystem.manager_gh == None) | (InfoSystem.manager_gh == ""))
     if url_status:
         q = q.filter(InfoSystem.url_status == url_status)
     total = q.count()
