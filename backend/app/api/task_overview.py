@@ -61,34 +61,9 @@ def get_task_overview(
         """Wrap condition into WHERE clause."""
         return f"WHERE {cond}" if cond else ""
 
-    # ═══════════ 管理员：部门统计（含开关机/备份/椒图） ═══════════
+    # ═══════════ 管理员：部门统计（SQL聚合+Python椒图增强） ═══════════
     if is_admin:
-        dept_rows = db.execute(text("""
-            SELECT COALESCE(d.dwmc, '未分组') as dept_name, d.id as dept_id,
-                   COUNT(DISTINCT v.id) as vm,
-                   COUNT(DISTINCT di.id) as domain,
-                   COUNT(DISTINCT s.id) as is_count,
-                   COUNT(DISTINCT u.id) as admin_count
-            FROM departments d
-            LEFT JOIN vm_inventory v ON v.department_id = d.id
-            LEFT JOIN domain_inventory di ON di.department_id = d.id
-            LEFT JOIN info_systems s ON s.dept_id = d.id
-            LEFT JOIN users u ON u.department_id = d.id AND u.role IN ('admin','dept_admin')
-            WHERE d.sfyx = '1'
-            GROUP BY d.id, d.dwmc
-            ORDER BY vm DESC
-        """)).fetchall()
-
-        # 按部门统计 VM 详情（开关机/备份/椒图）
-        dept_vm_rows = db.execute(text("""
-            SELECT v.department_id, v.vm_name, v.power_state, v.ip_address, v.mac_address
-            FROM vm_inventory v WHERE v.department_id IS NOT NULL
-        """)).fetchall()
-        dept_vms = {}
-        for vr in dept_vm_rows:
-            dept_vms.setdefault(vr.department_id, []).append(vr)
-
-        # 交换机 MAC→IP + QAX IP + 鼎甲
+        # 交换机 MAC→IP + QAX IP（只加载一次）
         sw_mac_ips = {}
         for sr in db.execute(text(
             "SELECT mac_address, ip_address FROM scan_results WHERE mac_address IS NOT NULL AND mac_address != ''"
@@ -101,32 +76,51 @@ def get_task_overview(
         qax_ips = {r[0] for r in db.execute(text(
             "SELECT DISTINCT ipv4 FROM qax_servers WHERE ipv4 IS NOT NULL AND ipv4 != ''"
         )).fetchall()}
-        dj_vms = {r[0] for r in db.execute(text(
-            "SELECT DISTINCT vm_name FROM dingjia_backup_records WHERE vm_name IS NOT NULL AND vm_name != ''"
-        )).fetchall()}
+
+        # SQL 聚合：开关机 + 备份
+        dept_rows = db.execute(text("""
+            SELECT COALESCE(d.dwmc, '未分组') as dept_name, d.id as dept_id,
+                   COUNT(DISTINCT v.id) as vm,
+                   COALESCE(SUM(CASE WHEN v.power_state='poweredOn' THEN 1 ELSE 0 END),0) as vm_on,
+                   COALESCE(SUM(CASE WHEN v.power_state='poweredOff' THEN 1 ELSE 0 END),0) as vm_off,
+                   COUNT(DISTINCT CASE WHEN db.vm_name IS NOT NULL THEN v.id END) as backup,
+                   COUNT(DISTINCT di.id) as domain,
+                   COUNT(DISTINCT s.id) as is_count,
+                   COUNT(DISTINCT u.id) as admin_count
+            FROM departments d
+            LEFT JOIN vm_inventory v ON v.department_id = d.id
+            LEFT JOIN dingjia_backup_records db ON db.vm_name = v.vm_name
+            LEFT JOIN domain_inventory di ON di.department_id = d.id
+            LEFT JOIN info_systems s ON s.dept_id = d.id
+            LEFT JOIN users u ON u.department_id = d.id AND u.role IN ('admin','dept_admin')
+            WHERE d.sfyx = '1'
+            GROUP BY d.id, d.dwmc
+            ORDER BY vm DESC
+        """)).fetchall()
+
+        # Python：椒图统计（需要 MAC→IP 增强）
+        qax_dept = {}
+        vm_rows = db.execute(text(
+            "SELECT department_id, ip_address, mac_address FROM vm_inventory WHERE department_id IS NOT NULL"
+        )).fetchall()
+        for vr in vm_rows:
+            v_ips = [ip.strip() for ip in (vr.ip_address or "").split(",") if ip.strip()]
+            v_macs = [mac.strip().lower() for mac in (vr.mac_address or "").split(",") if mac.strip()]
+            if not v_ips:
+                for mac in v_macs:
+                    if mac in sw_mac_ips:
+                        v_ips.extend(sw_mac_ips[mac])
+            if any(ip in qax_ips for ip in v_ips):
+                qax_dept[vr.department_id] = qax_dept.get(vr.department_id, 0) + 1
 
         dept_details = []
         for r in dept_rows:
             did = r[1]
-            vms = dept_vms.get(did, [])
-            vm_on = sum(1 for v in vms if v.power_state == 'poweredOn')
-            vm_off = sum(1 for v in vms if v.power_state == 'poweredOff')
-            backup = sum(1 for v in vms if v.vm_name in dj_vms)
-            qax = 0
-            for v in vms:
-                v_ips = [ip.strip() for ip in (v.ip_address or "").split(",") if ip.strip()]
-                v_macs = [mac.strip().lower() for mac in (v.mac_address or "").split(",") if mac.strip()]
-                if not v_ips:
-                    for mac in v_macs:
-                        if mac in sw_mac_ips:
-                            v_ips.extend(sw_mac_ips[mac])
-                if any(ip in qax_ips for ip in v_ips):
-                    qax += 1
             dept_details.append({
                 "dept_name": r[0], "dept_id": did,
-                "vm": r[2], "vm_on": vm_on, "vm_off": vm_off,
-                "backup": backup, "qax": qax,
-                "domain": r[3], "is_count": r[4], "admin_count": r[5],
+                "vm": r[2], "vm_on": r[3], "vm_off": r[4],
+                "backup": r[5] or 0, "qax": qax_dept.get(did, 0),
+                "domain": r[6], "is_count": r[7], "admin_count": r[8],
             })
         result["dept_details"] = dept_details
 
