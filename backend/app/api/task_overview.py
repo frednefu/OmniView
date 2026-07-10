@@ -103,18 +103,39 @@ def get_task_overview(
             if any(ip in qax_ips for ip in v_ips):
                 d["qax"] += 1
 
-        # 部门基础信息（只查有数据的）+ 认领管理员统计
-        # 域名统计与域名清单 phys 补充逻辑一致：排除无owner且非unlinked的自动记录
+        # 部门基础信息 + IS 计数
         dept_rows = db.execute(text("""
             SELECT d.id, COALESCE(d.dwmc, '未分组') as dept_name,
-                   COUNT(DISTINCT di.id) as domain,
                    COUNT(DISTINCT s.id) as is_count
             FROM departments d
-            LEFT JOIN domain_inventory di ON di.department_id = d.id
             LEFT JOIN info_systems s ON s.dept_id = d.id
             WHERE d.sfyx = '1'
             GROUP BY d.id, d.dwmc
         """)).fetchall()
+
+        # 按部门统计域名（使用与域名清单一致的 ZDNS→VM IP 匹配逻辑）
+        dept_domains = {}  # did -> set of domain names
+        # 加载所有 VM 的 IP→部门映射
+        vm_ip_dept = {}  # ip -> department_id
+        for vr in db.execute(text(
+            "SELECT department_id, ip_address FROM vm_inventory WHERE department_id IS NOT NULL AND ip_address IS NOT NULL AND ip_address != ''"
+        )).fetchall():
+            for ip in (vr.ip_address or "").split(","):
+                ip = ip.strip()
+                if ip and ":" not in ip:
+                    vm_ip_dept[ip] = vr.department_id
+        # ZDNS 域名匹配 VM IP
+        from app.api.assets import _collect_domains
+        all_domains = _collect_domains(db)
+        for d in all_domains:
+            ip = (d.get("ip_address") or "").strip()
+            if ip and ip in vm_ip_dept:
+                dept_domains.setdefault(vm_ip_dept[ip], set()).add(d["domain_name"].lower())
+        # 物理 domain_inventory 补充
+        for dr in db.execute(text(
+            "SELECT domain_name, department_id FROM domain_inventory WHERE department_id IS NOT NULL"
+        )).fetchall():
+            dept_domains.setdefault(dr.department_id, set()).add(dr.domain_name.lower())
 
         # 按部门统计认领人：VM/域名/IS 的 owner/manager 去重 + 用户详情
         dept_claimers = {}  # did -> set of user_ids
@@ -152,14 +173,14 @@ def get_task_overview(
             vm = dept_vm.get(did, {"total": 0, "on": 0, "off": 0, "backup": 0, "qax": 0})
             total = vm["total"]
             # 过滤全零部门
-            if total == 0 and r[2] == 0 and r[3] == 0 and len(dept_claimers.get(did, set())) == 0:
+            if total == 0 and len(dept_domains.get(did, set())) == 0 and r[2] == 0 and len(dept_claimers.get(did, set())) == 0:
                 continue
             claimer_ids = dept_claimers.get(did, set())
             dept_details.append({
                 "dept_name": r[1], "dept_id": did,
                 "vm": total, "vm_on": vm["on"], "vm_off": vm["off"],
                 "backup": vm["backup"], "qax": vm["qax"],
-                "domain": r[2], "is_count": r[3],
+                "domain": len(dept_domains.get(did, set())), "is_count": r[2],
                 "admin_count": len(claimer_ids),
                 "admins": [user_info[uid] for uid in claimer_ids if uid in user_info],
             })
