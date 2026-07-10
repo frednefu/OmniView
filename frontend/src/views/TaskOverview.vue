@@ -9,9 +9,9 @@
       <!-- ═══════════ 管理员：各部门明细 ═══════════ -->
       <template v-if="authStore.isAdmin && data">
         <h3 class="section-title">各部门明细</h3>
-        <el-table :data="data.dept_details" stripe max-height="500" size="small">
+        <el-table :data="data.dept_details" stripe max-height="500" size="small" :default-sort="{prop:'vm',order:'descending'}">
           <el-table-column prop="dept_name" label="部门" min-width="160" show-overflow-tooltip sortable />
-          <el-table-column label="虚拟机" width="140" align="center">
+          <el-table-column label="虚拟机" width="140" align="center" prop="vm" sortable>
             <template #default="{row}">
               <el-link type="primary" :underline="false" @click="goDept(row.dept_id, row.dept_name, 'vm')">{{ row.vm }}</el-link>
               <span style="font-size:11px;color:#909399;white-space:nowrap">（<span style="color:#10b981">{{ row.vm_on || 0 }}开</span>/<span style="color:#ef4444">{{ row.vm_off || 0 }}关</span>）</span>
