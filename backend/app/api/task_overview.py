@@ -105,9 +105,7 @@ def get_task_overview(
             LEFT JOIN supply_chains sc ON sc.company_name = s.vendor_name
             LEFT JOIN vm_inventory v2 ON v2.vm_name = a.vm_name
             LEFT JOIN dingjia_backup_records db2 ON db2.vm_name = v2.vm_name
-            LEFT JOIN qax_servers qax2 ON (qax2.ipv4 = v2.ip_address OR qax2.intranet_ip = v2.ip_address
-                OR v2.ip_address LIKE CONCAT('%,', qax2.ipv4) OR v2.ip_address LIKE CONCAT(qax2.ipv4, ',%')
-                OR v2.ip_address LIKE CONCAT('%,', qax2.intranet_ip) OR v2.ip_address LIKE CONCAT(qax2.intranet_ip, ',%'))
+            LEFT JOIN qax_servers qax2 ON (qax2.ipv4 = v2.ip_address OR qax2.intranet_ip = v2.ip_address)
             {user_scope}
             GROUP BY u.id, u.name, u.gh
             ORDER BY vm DESC
