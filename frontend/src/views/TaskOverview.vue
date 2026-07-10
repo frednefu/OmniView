@@ -281,7 +281,8 @@ function goMemberAssets(row, type) {
 }
 
 function goDept(deptId, deptName, type) {
-  const base = { dept_id: deptId }
+  // 管理员不传 dept_id（默认显示全部），非管理员传 dept_id 锁定部门
+  const base = authStore.isAdmin ? {} : { dept_id: deptId }
   if (type === 'vm') go('/sys/assets', base)
   else if (type === 'vm_on') go('/sys/assets', { ...base, power_state: 'poweredOn' })
   else if (type === 'vm_off') go('/sys/assets', { ...base, power_state: 'poweredOff' })
