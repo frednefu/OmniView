@@ -295,23 +295,30 @@ def get_task_overview(
         if any(ip in qax_ips_set for ip in v_ips):
             vm_qax += 1
 
-    # 认领/待认领（认领=有 owner_user_id，含 vm_inventory 直接 owner）
-    _cl_join = vm_join if vm_join else "LEFT JOIN asset_inventory a ON a.vm_name=v.vm_name"
-    _cl_where = vm_where if vm_where else "1=1"
-    vm_cl = _exec_one(f"""
-        SELECT COALESCE(SUM(CASE WHEN v.power_state='poweredOn' THEN 1 ELSE 0 END),0),
-               COALESCE(SUM(CASE WHEN v.power_state='poweredOff' THEN 1 ELSE 0 END),0)
+    # 认领/待认领：使用与 VM 清单一致的 Python 增强逻辑计算
+    vm_claim_power = {}  # vm_name -> power_state
+    vm_claim_owner = {}  # vm_name -> has_owner
+    cl_rows = db.execute(text(f"""
+        SELECT v.vm_name, v.power_state, a.owner_user_id
         FROM vm_inventory v
-        {_cl_join}
-        WHERE {_cl_where} AND COALESCE(a.owner_user_id, v.owner_user_id) IS NOT NULL
-    """)
-    vm_un = _exec_one(f"""
-        SELECT COALESCE(SUM(CASE WHEN v.power_state='poweredOn' THEN 1 ELSE 0 END),0),
-               COALESCE(SUM(CASE WHEN v.power_state='poweredOff' THEN 1 ELSE 0 END),0)
+        LEFT JOIN asset_inventory a ON a.vm_name=v.vm_name
+        {vm_join.replace('JOIN ','') if vm_join else ''}
+        {_w(vm_where)}
+    """ if not is_admin else """
+        SELECT v.vm_name, v.power_state, a.owner_user_id
         FROM vm_inventory v
-        {_cl_join}
-        WHERE {_cl_where} AND (COALESCE(a.owner_user_id, v.owner_user_id) IS NULL)
-    """)
+        LEFT JOIN asset_inventory a ON a.vm_name=v.vm_name
+    """)).fetchall()
+    for cr in cl_rows:
+        vm_claim_power[cr.vm_name] = cr.power_state
+        vm_claim_owner[cr.vm_name] = cr.owner_user_id is not None
+
+    vm_cl_on = sum(1 for v in vm_claim_power if vm_claim_power[v] == 'poweredOn' and vm_claim_owner.get(v))
+    vm_cl_off = sum(1 for v in vm_claim_power if vm_claim_power[v] == 'poweredOff' and vm_claim_owner.get(v))
+    vm_un_on = sum(1 for v in vm_claim_power if vm_claim_power[v] == 'poweredOn' and not vm_claim_owner.get(v))
+    vm_un_off = sum(1 for v in vm_claim_power if vm_claim_power[v] == 'poweredOff' and not vm_claim_owner.get(v))
+    vm_cl = (vm_cl_on, vm_cl_off)
+    vm_un = (vm_un_on, vm_un_off)
 
     result["vm"] = {
         "total": vm_total, "power_on": vm_on, "power_off": vm_off,
