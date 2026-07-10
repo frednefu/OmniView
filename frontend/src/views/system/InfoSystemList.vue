@@ -24,14 +24,14 @@
       </el-select>
       <el-input v-model="filterManager" placeholder="管理员" clearable style="width:100px" @keyup.enter="fetchList" @clear="fetchList"/>
       <el-input v-model="filterOwner" placeholder="负责人" clearable style="width:100px" @keyup.enter="fetchList" @clear="fetchList"/>
+      <el-select v-model="filterClaimed" placeholder="认领状态" clearable style="width:100px" @change="fetchList">
+        <el-option label="已认领" value="yes"/><el-option label="待认领" value="no"/>
+      </el-select>
       <el-select v-model="filterFillType" placeholder="填报状态" clearable style="width:110px" @change="fetchList">
         <el-option v-for="t in ['导入','手动','自动','注销','申请注销','离线','失效']" :key="t" :label="t" :value="t"/>
       </el-select>
       <el-select v-model="filterUrlStatus" placeholder="验证状态" clearable style="width:110px" @change="fetchList">
         <el-option v-for="t in ['在线','离线']" :key="t" :label="t" :value="t"/>
-      </el-select>
-      <el-select v-model="filterClaimed" placeholder="认领状态" clearable style="width:100px" @change="fetchList">
-        <el-option label="已认领" value="yes"/><el-option label="待认领" value="no"/>
       </el-select>
       <span style="color:#909399;font-size:13px;line-height:32px;white-space:nowrap">共 {{total}} 条</span>
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
@@ -328,7 +328,6 @@ import api from '@/api/index'
 const authStore=useAuthStore()
 const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
 const filterSysType=ref(''),filterSubType=ref(''),filterManager=ref(''),filterOwner=ref(''),filterFillType=ref(''),filterUrlStatus=ref(''),filterClaimed=ref('')
-let initClaimed = ''
 const selectedIds=ref([]),dlg=ref(false),isEdit=ref(false),editId=ref(null),fileInput=ref(null),syncLoading=ref(false),saving=ref(false)
 const sortField=ref(''),sortOrder=ref('')
 function onSort({prop,order}){sortField.value=prop||'';sortOrder.value=order==='ascending'?'asc':'desc';page.value=1;fetchList()}
@@ -396,7 +395,7 @@ function resetForm(){
   djdjOptions.value=[]
 }
 
-async function fetchList(){loading.value=true;try{const p={page:page.value,size:size.value,search:search.value,system_type:filterSysType.value,sub_type:filterSubType.value,manager_name:filterManager.value,owner_name:filterOwner.value,fill_type:filterFillType.value,url_status:filterUrlStatus.value,claimed:filterClaimed.value||initClaimed};initClaimed='';if(sortField.value){p.sort_field=sortField.value;p.sort_order=sortOrder.value}const r=await api.get('/info-systems',{params:p});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
+async function fetchList(){loading.value=true;try{const p={page:page.value,size:size.value,search:search.value,system_type:filterSysType.value,sub_type:filterSubType.value,manager_name:filterManager.value,owner_name:filterOwner.value,fill_type:filterFillType.value,url_status:filterUrlStatus.value,claimed:filterClaimed.value};if(sortField.value){p.sort_field=sortField.value;p.sort_order=sortOrder.value}const r=await api.get('/info-systems',{params:p});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
 function openEdit(r){
   resetForm()  // 先清空所有字段，防止上次编辑/新建的残留数据泄漏
@@ -674,8 +673,8 @@ function copyLink(l){const url=origin+l.url;navigator.clipboard.writeText(url).t
 
 onMounted(async()=>{
   const route = useRoute()
-  if (route.query.claimed === 'yes') initClaimed = 'yes'
-  if (route.query.claimed === 'no') initClaimed = 'no'
+  if (route.query.claimed === 'yes') filterClaimed.value = 'yes'
+  if (route.query.claimed === 'no') filterClaimed.value = 'no'
   if (route.query.search) search.value = route.query.search
   fetchList();try{const r=await api.get('/info-systems/supply-chain/names');vendorNames.value=r.data.items}catch{};loadDepts()
 })
