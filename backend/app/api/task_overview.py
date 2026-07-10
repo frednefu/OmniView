@@ -104,12 +104,14 @@ def get_task_overview(
                 d["qax"] += 1
 
         # 部门基础信息（只查有数据的）+ 认领管理员统计
+        # 域名统计与域名清单 phys 补充逻辑一致：排除无owner且非unlinked的自动记录
         dept_rows = db.execute(text("""
             SELECT d.id, COALESCE(d.dwmc, '未分组') as dept_name,
                    COUNT(DISTINCT di.id) as domain,
                    COUNT(DISTINCT s.id) as is_count
             FROM departments d
             LEFT JOIN domain_inventory di ON di.department_id = d.id
+                AND NOT (di.owner_user_id IS NULL AND di.claim_status NOT IN ('unlinked',''))
             LEFT JOIN info_systems s ON s.dept_id = d.id
             WHERE d.sfyx = '1'
             GROUP BY d.id, d.dwmc
