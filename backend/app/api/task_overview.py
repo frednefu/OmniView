@@ -139,6 +139,8 @@ def get_task_overview(
         INNER JOIN qax_servers q ON q.intranet_ip = v.ip_address OR q.ipv4 = v.ip_address
            OR v.ip_address LIKE CONCAT('%,', q.intranet_ip)
            OR v.ip_address LIKE CONCAT(q.intranet_ip, ',%')
+           OR v.ip_address LIKE CONCAT('%,', q.ipv4)
+           OR v.ip_address LIKE CONCAT(q.ipv4, ',%')
         {vm_join}
         {_w(vm_where)}
     """)[0] or 0
