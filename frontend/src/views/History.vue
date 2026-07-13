@@ -311,7 +311,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { getHistory, getHistoryByIp, getHistoryByMac } from '@/api/history'
+import { getHistory, getHistoryByMac } from '@/api/history'
 import api from '@/api'
 
 const activeTab = ref('switch')
@@ -419,14 +419,12 @@ function onTabChange() {
 async function fetchData() {
   loading.value = true
   try {
-    if (filters.ip && !filters.vm_name) {
-      const data = await getHistoryByIp(filters.ip, { source_type: activeTab.value })
-      items.value = data; total.value = 0
-    } else if (filters.mac && !filters.vm_name) {
+    if (filters.mac && !filters.vm_name) {
       const data = await getHistoryByMac(filters.mac, { source_type: activeTab.value })
       items.value = data; total.value = 0
     } else {
       const params = { page: page.value, size: size.value, source_type: activeTab.value }
+      if (filters.ip) params.ip = filters.ip
       if (filters.change_type) params.change_type = filters.change_type
       if (filters.vm_name) params.vm_name = filters.vm_name
       if (filters.switch_id && activeTab.value === 'switch') params.switch_id = filters.switch_id
