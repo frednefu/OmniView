@@ -195,8 +195,8 @@
       <!-- ═══════════ ZDNS 历史 Tab ═══════════ -->
       <el-tab-pane label="ZDNS 历史" name="zdns">
         <el-form :inline="true" class="filter-bar">
-          <el-form-item label="IP 地址">
-            <el-input v-model="filters.ip" placeholder="输入 IP" clearable style="width:150px" />
+          <el-form-item label="搜索">
+            <el-input v-model="filters.ip" placeholder="IP 或域名" clearable style="width:180px" />
           </el-form-item>
           <el-form-item label="变更类型">
             <el-select v-model="filters.change_type" placeholder="全部" clearable style="width:110px">

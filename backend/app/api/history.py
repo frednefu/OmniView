@@ -55,7 +55,11 @@ def list_history(
     if change_type:
         base = base.filter(History.change_type == change_type)
     if ip:
-        base = base.filter(History.ip_address.contains(ip))
+        # IP 搜索同时匹配 ip_address 和 change_detail（含域名信息）
+        base = base.filter(
+            History.ip_address.contains(ip) |
+            History.change_detail.contains(ip)
+        )
     if mac:
         base = base.filter(History.mac_address.contains(mac))
     if vm_name:
