@@ -1,6 +1,7 @@
 """系统备份执行引擎 — 数据库导出、文件收集、镜像导出、FTP 上传、验证、清理"""
 import os
 import re
+import time
 import io
 import shutil
 import tarfile
@@ -710,40 +711,80 @@ def verify_backup(history_id: int, local_path: str = None) -> dict:
 
 
 def _cleanup_retention(job, log: LogCapture = None) -> None:
-    """清理超过保留期的旧备份文件。"""
+    """清理超过保留期的旧备份文件（本地和FTP）。"""
     if job.retention_days <= 0:
         if log:
             log.write("保留天数=0，跳过清理")
         return
 
-    local_path = job.local_path
-    if not local_path or not os.path.isdir(local_path):
-        return
-
-    import time
     cutoff = time.time() - job.retention_days * 86400
     pattern = re.compile(r"^backup_.*\.tar\.gz$")
 
+    local_path = job.local_path
     deleted = 0
-    for fname in os.listdir(local_path):
-        if not pattern.match(fname):
-            continue
-        fpath = os.path.join(local_path, fname)
+
+    # 本地清理
+    if local_path and os.path.isdir(local_path):
+        for fname in os.listdir(local_path):
+            if not pattern.match(fname):
+                continue
+            fpath = os.path.join(local_path, fname)
+            try:
+                if os.path.getmtime(fpath) < cutoff:
+                    os.remove(fpath)
+                    deleted += 1
+                    if log: log.write(f"清理过期本地备份：{fname}")
+            except OSError:
+                pass
+
+    # FTP 远程清理
+    if job.mode == "ftp" and job.ftp_host:
         try:
-            if os.path.getmtime(fpath) < cutoff:
-                os.remove(fpath)
-                deleted += 1
-                msg = f"清理过期备份：{fname}"
-                if log:
-                    log.write(msg)
-                else:
-                    logger.info(msg)
-        except OSError:
-            pass
+            ftp = ftplib.FTP()
+            ftp.connect(job.ftp_host, job.ftp_port, timeout=30)
+            ftp.login(job.ftp_user, job.ftp_password)
+            ftp.set_pasv(True)
+            remote_dir = (job.ftp_remote_path or "").strip("/")
+            if remote_dir:
+                for part in remote_dir.split("/"):
+                    if not part: continue
+                    try:
+                        ftp.cwd(part)
+                    except ftplib.error_perm:
+                        break
+
+            ftp_files = []
+            ftp.retrlines("LIST", ftp_files.append)
+            for line in ftp_files:
+                parts = line.split()
+                if len(parts) < 9:
+                    continue
+                fname = parts[-1]
+                if not pattern.match(fname):
+                    continue
+                # 解析 FTP LIST 的日期时间
+                try:
+                    month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+                                "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+                    m = month_map.get(parts[5], 0)
+                    d = int(parts[6])
+                    y_or_t = parts[7]
+                    if ":" in y_or_t:
+                        y = time.localtime().tm_year
+                    else:
+                        y = int(y_or_t)
+                    ft = time.mktime((y, m, d, 0, 0, 0, 0, 0, 0))
+                    if ft < cutoff:
+                        ftp.delete(fname)
+                        deleted += 1
+                        if log: log.write(f"清理过期 FTP 备份：{fname}")
+                except (ValueError, IndexError):
+                    pass
+            ftp.quit()
+        except Exception as e:
+            if log: log.write(f"FTP 清理失败：{e}")
 
     if deleted > 0:
         msg = f"保留策略清理完成：删除 {deleted} 个过期备份"
-        if log:
-            log.write(msg)
-        else:
-            logger.info(msg)
+        if log: log.write(msg)
+        else: logger.info(msg)
