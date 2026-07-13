@@ -23,6 +23,7 @@ config.json
 
 # Docker
 mysql_data/
+backup_data/
 
 # Frontend
 frontend/node_modules/
