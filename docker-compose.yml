@@ -58,6 +58,7 @@ services:
       - ./backend:/app
       - ./switchReader:/app/switchReader
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data/backup:/data/backup
 
   frontend:
     build:
