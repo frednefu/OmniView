@@ -473,6 +473,11 @@ def batch_cancel(body: dict, db: Session = Depends(get_db), user=Depends(get_cur
         if allowed:
             update_in = f"({allowed[0]})" if len(allowed) == 1 else str(allowed)
             db.execute(text(f"UPDATE vm_inventory SET claim_status='申请注销' WHERE id IN {update_in}"))
+            # 同步更新 asset_inventory（VM 清单展示的是 asset_inventory.claim_status）
+            db.execute(text(
+                f"UPDATE asset_inventory a JOIN vm_inventory v ON a.vm_name=v.vm_name "
+                f"SET a.claim_status='申请注销' WHERE v.id IN {update_in}"
+            ))
             count = len(allowed)
     elif typ == "domain":
         # 域名：直接操作 domain_inventory，本人认领的才能申请注销
@@ -626,6 +631,11 @@ def batch_uncancel(body: dict, db: Session = Depends(get_db), user=Depends(get_c
         if allowed:
             up = f"({allowed[0]})" if len(allowed) == 1 else str(allowed)
             db.execute(text(f"UPDATE vm_inventory SET claim_status='manual' WHERE id IN {up}"))
+            # 同步更新 asset_inventory
+            db.execute(text(
+                f"UPDATE asset_inventory a JOIN vm_inventory v ON a.vm_name=v.vm_name "
+                f"SET a.claim_status='manual' WHERE v.id IN {up}"
+            ))
             count = len(allowed)
     elif typ == "domain":
         # 域名：直接操作 domain_inventory，状态为"申请注销"且是本人认领的才能恢复
