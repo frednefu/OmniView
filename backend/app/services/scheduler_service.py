@@ -713,9 +713,9 @@ def register_all_backup_jobs():
 
 
 _JOB_NAMES = {
-    "cleanup_stale_workers": "清理过期Worker",
+    "cleanup_stale_workers": "清理过期工作进程",
     "asset_sync": "资产同步",
-    "info_system_sync": "信息系统数据同步",
+    "info_system_sync": "信息系统同步",
     "cleanup_expired_links": "清理过期外链",
 }
 
@@ -730,7 +730,7 @@ def _job_label(job_id: str) -> str:
     if job_id.startswith("f5_"):
         return f"F5扫描-{job_id.split('_',1)[1]}"
     if job_id.startswith("zdns_ip_"):
-        return f"ZDNS IP扫描-{job_id.split('_',2)[2] if job_id.count('_')>=2 else job_id.split('_',1)[1]}"
+        return f"IP扫描-{job_id.split('_',2)[2] if job_id.count('_')>=2 else job_id.split('_',1)[1]}"
     if job_id.startswith("zdns_"):
         return f"ZDNS扫描-{job_id.split('_',1)[1]}"
     if job_id.startswith("qax_"):

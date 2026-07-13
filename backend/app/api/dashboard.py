@@ -419,7 +419,7 @@ def dashboard_stats(db: Session = Depends(get_db), current_user=Depends(get_curr
     source_rows = db.query(
         ScanLog.source_type, func.count(ScanLog.id)
     ).group_by(ScanLog.source_type).all()
-    source_labels = {"switch": "交换机", "vcenter": "vCenter", "f5": "F5", "zdns": "ZDNS", "zdns_ip": "IP扫描", "qax": "椒图"}
+    source_labels = {"switch": "交换机", "vcenter": "vCenter", "f5": "F5", "zdns": "ZDNS", "zdns_ip": "IP扫描", "qax": "椒图", "dingjia": "鼎甲备份", "asset_sync": "资产同步", "info_system_sync": "信息系统同步"}
     scan_by_source = [
         SourceScanStat(source_type=row[0], source_label=source_labels.get(row[0], row[0]), count=row[1])
         for row in source_rows
