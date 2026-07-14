@@ -69,6 +69,17 @@
           </el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu index="/sys/ops" v-if="authStore.isAdmin">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>系统运维</span>
+          </template>
+          <el-menu-item index="/sys/ops/f5">
+            <el-icon><Connection /></el-icon>
+            <span>F5运维</span>
+          </el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu index="/sys/asset-mgmt" v-if="authStore.isAdmin">
           <template #title>
             <el-icon><Monitor /></el-icon>
@@ -295,6 +306,7 @@ const pageTitle = computed(() => {
     '/sys/workers': 'Worker 管理',
     '/sys/backup': '系统备份',
     '/sys/scheduler': '定时任务监控',
+    '/sys/ops/f5': 'F5运维',
   }
   return titles[route.path] || ''
 })

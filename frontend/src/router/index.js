@@ -224,6 +224,12 @@ const routes = [
         meta: { title: '定时任务', admin: true },
       },
       {
+        path: 'sys/ops/f5',
+        name: 'F5Ops',
+        component: () => import('@/views/ops/F5Ops.vue'),
+        meta: { title: 'F5运维', admin: true },
+      },
+      {
         path: 'asset-profile',
         name: 'AssetProfile',
         component: () => import('@/views/AssetProfile.vue'),
