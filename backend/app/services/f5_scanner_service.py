@@ -22,7 +22,10 @@ logger = logging.getLogger(__name__)
 _DOMAIN_POOL_PATTERNS = [
     re.compile(r'HTTP::host\]\s+equals\s+"([^"]+)"\s*\}\s*\{\s*pool\s+(\S+)', re.IGNORECASE),
     re.compile(r'HTTP::host\s+eq\s+"([^"]+)"\s*\}\s*\{\s*pool\s+(\S+)', re.IGNORECASE),
+    # 场景A: pool 与域名同行: "domain*" { pool pool_name }
     re.compile(r'"([^"]+?)(?:\*|\.\*)?"\s*\{\s*pool\s+(\S+)', re.IGNORECASE),
+    # 场景B: pool 在下一行（跨注释）: "domain*" {\n  # comment\n  pool pool_name }
+    re.compile(r'"([^"]+?)(?:\*|\.\*)?"\s*\{.*?(?:^|\n)\s*pool\s+(\S+)', re.IGNORECASE | re.DOTALL | re.MULTILINE),
 ]
 
 

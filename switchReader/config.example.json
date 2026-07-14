@@ -8,5 +8,5 @@
     "snmp_timeout": 3,
     "snmp_retries": 2,
     "max_workers": 5,
-    "walk_limit": 10000
+    "walk_limit": 50000
 }

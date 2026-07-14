@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>F5 系统运维</h2>
-        <p class="page-desc">虚拟服务器 · 资源池 · iRules 配置视图</p>
+        <p class="page-desc">虚拟服务器 · 规则 · 成员池</p>
       </div>
       <div class="header-actions">
         <el-select v-model="selectedDevice" placeholder="选择 F5 设备" style="width:260px" @change="onDeviceChange"
@@ -66,6 +66,9 @@
                     <div class="sg-tags">
                       <el-tag type="primary" size="small" v-if="sg.pool_name">Pool: {{ sg.pool_name }}</el-tag>
                       <el-tag type="success" size="small" v-if="sg.rule_name">iRule: {{ sg.rule_name }}</el-tag>
+                      <el-tag size="small" :type="sg.source === 'irule' ? 'warning' : 'info'" v-if="sg.source">
+                        {{ sg.source === 'irule' ? 'iRule引用' : '默认Pool' }}
+                      </el-tag>
                       <span class="sg-domain" v-if="sg.domain">{{ sg.domain }}</span>
                     </div>
                     <div class="sg-members">
@@ -89,11 +92,52 @@
 
           <el-pagination v-if="vsTotal > 0" v-model:current-page="vsPage" v-model:page-size="vsSize"
             :page-sizes="[20, 50, 100]" :total="vsTotal" layout="total, sizes, prev, pager, next"
-            @current-change="fetchVS" @size-change="fetchVS" style="justify-content:center;margin-top:16px" />
+            @current-change="vsPageChange" @size-change="vsPageChange" style="justify-content:center;margin-top:16px" />
         </el-tab-pane>
 
-        <!-- ═══════════ 资源池 ═══════════ -->
-        <el-tab-pane label="资源池 (Pools)" name="pools">
+        <!-- ═══════════ 规则 ═══════════ -->
+        <el-tab-pane label="规则 (iRules)" name="rules">
+          <div class="filter-bar">
+            <el-input v-model="ruleSearch" placeholder="搜索 iRule 名称或域名..." clearable style="width:260px"
+              @keyup.enter="rulePage=1;fetchRules()" @clear="rulePage=1;fetchRules()" />
+            <el-select v-model="ruleStatusFilter" placeholder="全部状态" clearable style="width:120px" @change="rulePage=1;fetchRules()">
+              <el-option label="正常" value="active" />
+              <el-option label="部分注销" value="partial" />
+              <el-option label="注销" value="deregistered" />
+              <el-option label="无域名" value="no_domain" />
+            </el-select>
+            <span class="total-hint">共 {{ ruleTotal }} 条</span>
+          </div>
+
+          <el-table :data="ruleItems" stripe size="small" v-loading="loadingRule" class="ops-table">
+            <el-table-column prop="rule_name" label="iRule 名称" width="220" show-overflow-tooltip />
+            <el-table-column label="域名 → Pool" min-width="320">
+              <template #default="{ row }">
+                <div v-if="row.domain_pool_mappings && row.domain_pool_mappings.length > 0" class="mapping-list">
+                  <div v-for="(m, idx) in row.domain_pool_mappings" :key="idx" class="mapping-row">
+                    <el-tag size="small" :type="m.zdns_exists ? '' : 'danger'">{{ m.domain }}</el-tag>
+                    <span class="mapping-arrow">→</span>
+                    <el-tag size="small" type="primary">{{ m.pool }}</el-tag>
+                  </div>
+                </div>
+                <span v-else class="text-muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="mapping_count" label="映射数" width="70" align="center" />
+          </el-table>
+
+          <el-pagination v-if="ruleTotal > 0" v-model:current-page="rulePage" v-model:page-size="ruleSize"
+            :page-sizes="[20, 50, 100]" :total="ruleTotal" layout="total, sizes, prev, pager, next"
+            @current-change="rulePageChange" @size-change="rulePageChange" style="justify-content:center;margin-top:16px" />
+        </el-tab-pane>
+
+        <!-- ═══════════ 成员池 ═══════════ -->
+        <el-tab-pane label="成员池 (Pools)" name="pools">
           <div class="filter-bar">
             <el-input v-model="poolSearch" placeholder="搜索 Pool 名称..." clearable style="width:260px"
               @keyup.enter="poolPage=1;fetchPools()" @clear="poolPage=1;fetchPools()" />
@@ -154,48 +198,7 @@
 
           <el-pagination v-if="poolTotal > 0" v-model:current-page="poolPage" v-model:page-size="poolSize"
             :page-sizes="[20, 50, 100]" :total="poolTotal" layout="total, sizes, prev, pager, next"
-            @current-change="fetchPools" @size-change="fetchPools" style="justify-content:center;margin-top:16px" />
-        </el-tab-pane>
-
-        <!-- ═══════════ 规则 ═══════════ -->
-        <el-tab-pane label="规则 (iRules)" name="rules">
-          <div class="filter-bar">
-            <el-input v-model="ruleSearch" placeholder="搜索 iRule 名称或域名..." clearable style="width:260px"
-              @keyup.enter="rulePage=1;fetchRules()" @clear="rulePage=1;fetchRules()" />
-            <el-select v-model="ruleStatusFilter" placeholder="全部状态" clearable style="width:120px" @change="rulePage=1;fetchRules()">
-              <el-option label="正常" value="active" />
-              <el-option label="部分注销" value="partial" />
-              <el-option label="注销" value="deregistered" />
-              <el-option label="无域名" value="no_domain" />
-            </el-select>
-            <span class="total-hint">共 {{ ruleTotal }} 条</span>
-          </div>
-
-          <el-table :data="ruleItems" stripe size="small" v-loading="loadingRule" class="ops-table">
-            <el-table-column prop="rule_name" label="iRule 名称" width="220" show-overflow-tooltip />
-            <el-table-column label="域名 → Pool" min-width="320">
-              <template #default="{ row }">
-                <div v-if="row.domain_pool_mappings && row.domain_pool_mappings.length > 0" class="mapping-list">
-                  <div v-for="(m, idx) in row.domain_pool_mappings" :key="idx" class="mapping-row">
-                    <el-tag size="small" :type="m.zdns_exists ? '' : 'danger'">{{ m.domain }}</el-tag>
-                    <span class="mapping-arrow">→</span>
-                    <el-tag size="small" type="primary">{{ m.pool }}</el-tag>
-                  </div>
-                </div>
-                <span v-else class="text-muted">—</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="statusTag(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="mapping_count" label="映射数" width="70" align="center" />
-          </el-table>
-
-          <el-pagination v-if="ruleTotal > 0" v-model:current-page="rulePage" v-model:page-size="ruleSize"
-            :page-sizes="[20, 50, 100]" :total="ruleTotal" layout="total, sizes, prev, pager, next"
-            @current-change="fetchRules" @size-change="fetchRules" style="justify-content:center;margin-top:16px" />
+            @current-change="poolPageChange" @size-change="poolPageChange" style="justify-content:center;margin-top:16px" />
         </el-tab-pane>
       </el-tabs>
     </template>
@@ -273,60 +276,61 @@ function fetchAll() {
   fetchRules()
 }
 
+// ── 客户端分页 ──
+function paginate(allItems, page, size) {
+  const start = (page - 1) * size
+  return allItems.slice(start, start + size)
+}
+function vsPageChange() { vsItems.value = paginate(vsAll, vsPage.value, vsSize.value) }
+function poolPageChange() { poolItems.value = paginate(poolAll, poolPage.value, poolSize.value) }
+function rulePageChange() { ruleItems.value = paginate(ruleAll, rulePage.value, ruleSize.value) }
+
 // ── 获取虚拟服务器 ──
+let vsAll = []
 async function fetchVS() {
   if (!selectedDevice.value) return
   loadingVS.value = true
   try {
     const r = await api.get('/ops/f5/virtual-servers', {
-      params: { f5_device_id: selectedDevice.value, page: vsPage.value, size: vsSize.value, search: vsSearch.value }
+      params: { f5_device_id: selectedDevice.value, search: vsSearch.value }
     })
-    let items = r.data.items || []
-    if (vsStatusFilter.value) {
-      items = items.filter(i => i.status === vsStatusFilter.value)
-    }
-    vsItems.value = items
-    vsTotal.value = items.length
+    vsAll = (r.data.items || []).filter(i => !vsStatusFilter.value || i.status === vsStatusFilter.value)
+    vsTotal.value = vsAll.length
+    vsItems.value = paginate(vsAll, vsPage.value, vsSize.value)
   } catch { /* handled */ }
   finally { loadingVS.value = false }
 }
 
 // ── 获取资源池 ──
+let poolAll = []
 async function fetchPools() {
   if (!selectedDevice.value) return
   loadingPool.value = true
   try {
     const r = await api.get('/ops/f5/pools', {
-      params: { f5_device_id: selectedDevice.value, page: poolPage.value, size: poolSize.value, search: poolSearch.value }
+      params: { f5_device_id: selectedDevice.value, search: poolSearch.value }
     })
-    let items = r.data.items || []
-    if (poolStatusFilter.value) {
-      items = items.filter(i => i.status === poolStatusFilter.value)
-    }
-    if (poolRefFilter.value) {
-      items = items.filter(i => i.ref_status === poolRefFilter.value)
-    }
-    poolItems.value = items
-    poolTotal.value = items.length
+    poolAll = (r.data.items || [])
+      .filter(i => !poolStatusFilter.value || i.status === poolStatusFilter.value)
+      .filter(i => !poolRefFilter.value || i.ref_status === poolRefFilter.value)
+    poolTotal.value = poolAll.length
+    poolItems.value = paginate(poolAll, poolPage.value, poolSize.value)
   } catch { /* handled */ }
   finally { loadingPool.value = false }
 }
 
 // ── 获取规则 ──
+let ruleAll = []
 async function fetchRules() {
   if (!selectedDevice.value) return
   loadingRule.value = true
   try {
     const r = await api.get('/ops/f5/rules', {
-      params: { f5_device_id: selectedDevice.value, page: rulePage.value, size: ruleSize.value, search: ruleSearch.value }
+      params: { f5_device_id: selectedDevice.value, search: ruleSearch.value }
     })
-    // 客户端状态筛选
-    let items = r.data.items || []
-    if (ruleStatusFilter.value) {
-      items = items.filter(i => i.status === ruleStatusFilter.value)
-    }
-    ruleItems.value = items
-    ruleTotal.value = items.length
+    ruleAll = (r.data.items || []).filter(i => !ruleStatusFilter.value || i.status === ruleStatusFilter.value)
+    ruleTotal.value = ruleAll.length
+    ruleItems.value = paginate(ruleAll, rulePage.value, ruleSize.value)
   } catch { /* handled */ }
   finally { loadingRule.value = false }
 }

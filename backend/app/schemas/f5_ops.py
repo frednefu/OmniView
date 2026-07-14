@@ -19,10 +19,11 @@ class F5OpsMemberItem(BaseModel):
 
 
 class F5OpsInternalServer(BaseModel):
-    """内网服务器分组（按 Pool + Rule + 域名 分组）"""
+    """内网服务器分组（按 Pool + Rule 分组，合并相同成员的重复条目）"""
     pool_name: str
     rule_name: str
-    domain: str  # rule 中声明的域名
+    domain: str = ""  # rule 中声明的域名
+    source: str = ""  # "irule" | "pool"（标注来源）
     members: list[F5OpsMemberItem] = []
 
 

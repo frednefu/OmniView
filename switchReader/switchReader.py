@@ -34,7 +34,7 @@ def _load_config():
         'snmp_timeout': cfg.get('snmp_timeout', 3),
         'snmp_retries': cfg.get('snmp_retries', 2),
         'max_workers': cfg.get('max_workers', 5),
-        'walk_limit': cfg.get('walk_limit', 10000),
+        'walk_limit': cfg.get('walk_limit', 50000),
     }
 
 _config = _load_config()
@@ -73,6 +73,10 @@ OID_HW_L2MAC_ENTRY      = '1.3.6.1.4.1.2011.5.25.42.2.1'      # hwL2MacDynamicEn
 OID_HW_L2MAC_IFINDEX    = '1.3.6.1.4.1.2011.5.25.42.2.1.3'    # hwL2MacIfIndex
 OID_HW_L2MAC_VLAN_TYPE  = '1.3.6.1.4.1.2011.5.25.42.2.1.5'    # hwL2MacVlanType
 
+# 华为 SDN 交换机候选路径（部分SDN设备使用多一层 .1 子节点）
+OID_HW_L2MAC_IFINDEX_SDN = '1.3.6.1.4.1.2011.5.25.42.2.1.1.3'
+OID_HW_L2MAC_VLAN_TYPE_SDN = '1.3.6.1.4.1.2011.5.25.42.2.1.1.5'
+
 # -- 华为私有 MIB: ARP 表 (HUAWEI-ARP-MIB) --
 OID_HW_ARP_ENTRY   = '1.3.6.1.4.1.2011.5.25.38.2'            # hwARPDynEntry
 OID_HW_ARP_IPADDR  = '1.3.6.1.4.1.2011.5.25.38.2.1.2'        # hwARPDynIPAddr
@@ -85,6 +89,14 @@ OID_ROUTE_NEXTHOP = '1.3.6.1.2.1.4.21.1.7'   # ipRouteNextHop
 OID_ROUTE_IFINDEX = '1.3.6.1.2.1.4.21.1.2'   # ipRouteIfIndex
 OID_ROUTE_TYPE    = '1.3.6.1.2.1.4.21.1.8'   # ipRouteType
 OID_ROUTE_PROTO   = '1.3.6.1.2.1.4.21.1.9'   # ipRouteProto
+
+# -- 路由表 (IP-FORWARD-MIB, fallback/补充) --
+OID_FORWARD_DEST    = '1.3.6.1.2.1.4.24.1.1'   # ipForwardDest
+OID_FORWARD_MASK    = '1.3.6.1.2.1.4.24.1.2'   # ipForwardMask
+OID_FORWARD_NEXTHOP = '1.3.6.1.2.1.4.24.1.4'   # ipForwardNextHop
+OID_FORWARD_IFINDEX = '1.3.6.1.2.1.4.24.1.5'   # ipForwardIfIndex
+OID_FORWARD_TYPE    = '1.3.6.1.2.1.4.24.1.6'   # ipForwardType
+OID_FORWARD_PROTO   = '1.3.6.1.2.1.4.24.1.7'   # ipForwardProto
 
 # 路由协议常量
 _ROUTE_TYPE = {3: '直连', 4: '非直连'}
@@ -328,30 +340,50 @@ async def _get_fdb_standard(slim, ip, community):
 
 
 async def _get_fdb_huawei(slim, ip, community):
-    """读取华为私有 MIB FDB（HUAWEI-L2MAM），返回 {mac: {vlan, 虚拟端口, vlan_type}}。"""
-    ifindex_data = await _snmp_walk(slim, ip, community, OID_HW_L2MAC_IFINDEX)
+    """读取华为私有 MIB FDB（HUAWEI-L2MAM），支持 SDN 多路径回退。
+    返回 {mac: {vlan, 虚拟端口, vlan_type}}。"""
+    # 尝试多个候选路径（SDN 交换机可能用不同的 OID 子节点）
+    ifindex_candidates = [OID_HW_L2MAC_IFINDEX, OID_HW_L2MAC_IFINDEX_SDN]
+    vlan_type_candidates = [OID_HW_L2MAC_VLAN_TYPE, OID_HW_L2MAC_VLAN_TYPE_SDN]
+
+    ifindex_data = None
+    ifindex_oid = None
+    for oid in ifindex_candidates:
+        data = await _snmp_walk(slim, ip, community, oid)
+        if data:
+            ifindex_data = data
+            ifindex_oid = oid
+            break
     if not ifindex_data:
         return None
 
-    vlan_type_data = await _snmp_walk(slim, ip, community, OID_HW_L2MAC_VLAN_TYPE)
+    vlan_type_data = {}
+    vlan_type_oid = None
+    for oid in vlan_type_candidates:
+        data = await _snmp_walk(slim, ip, community, oid)
+        if data:
+            vlan_type_data = data
+            vlan_type_oid = oid
+            break
+
     ifindex_names = await _build_ifindex_names(slim, ip, community)
+
+    # 构建 (vlan_id, mac) → vlan_type_label 索引，O(1) 查找
+    vlan_type_index = {}
+    for vt_oid, vt_val in vlan_type_data.items():
+        vt_vlan, vt_mac = _parse_hw_fdb_index(vt_oid, vlan_type_oid)
+        if vt_vlan is not None and vt_mac is not None:
+            vlan_type_index[(vt_vlan, vt_mac)] = _hw_vlan_type_label(vt_val)
 
     fdb = {}
     for oid_str, val in ifindex_data.items():
-        vlan_id, mac = _parse_hw_fdb_index(oid_str, OID_HW_L2MAC_IFINDEX)
+        vlan_id, mac = _parse_hw_fdb_index(oid_str, ifindex_oid)
         if mac is None:
             continue
         ifidx = _safe_str(val)
-
-        vlan_type_tag = ''
-        for vt_oid, vt_val in vlan_type_data.items():
-            vt_vlan, vt_mac = _parse_hw_fdb_index(vt_oid, OID_HW_L2MAC_VLAN_TYPE)
-            if vt_vlan == vlan_id and vt_mac == mac:
-                vlan_type_tag = _hw_vlan_type_label(vt_val)
-                break
-
+        vlan_type_tag = vlan_type_index.get((vlan_id, mac), '')
         port_name = ifindex_names.get(ifidx, f"ifIndex{ifidx}")
-        fdb[mac] = {"vlan": vlan_id, "虚拟端口": port_name, "vlan_type": vlan_type_tag}
+        fdb[mac] = {"vlan": vlan_id, "虚拟端口": port_name, "vlan_type": vlan_type_tag, "ifindex": ifidx}
     return fdb
 
 
@@ -390,11 +422,13 @@ async def _get_fdb_merged(slim, ip, community, mib_pref='standard'):
 
         # VLAN: 标准 MIB 优先，华为 MIB 补充
         vlan = std.get("vlan") if std.get("vlan") is not None else hw.get("vlan")
+        # 物理端口: 标准MIB优先；SDN交换机标准MIB常为空，用华为MIB补充
+        phys_port = std.get("物理端口", "") or hw.get("虚拟端口", "")
 
         merged[mac] = {
             "VLAN/BD": vlan,
             "VLAN类型": hw.get("vlan_type", ""),
-            "物理端口": std.get("物理端口", ""),
+            "物理端口": phys_port,
             "虚拟端口": hw.get("虚拟端口", ""),
         }
 
@@ -470,51 +504,75 @@ async def _get_arp_merged(slim, ip, community):
 # ============================================================
 
 async def _get_route_table(slim, ip, community):
-    """读取路由表 (ipRouteTable) 并返回结构化数据。
+    """读取路由表 (ipRouteTable + ipForwardTable) 并返回结构化数据。
+    SDN 交换机优先使用 ipForwardTable，标准交换机用 ipRouteTable，
+    两者合并去重取并集。
 
     返回: [{目标网络, 子网掩码, CIDR, 网关, 接口, 路由类型, 协议}, ...]
     """
-    dest_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_DEST)
-    if not dest_raw:
-        return []
+    # 尝试 ipForwardTable（SDN/新版交换机），失败则回退到 ipRouteTable
+    dest_raw = await _snmp_walk(slim, ip, community, OID_FORWARD_DEST)
+    if dest_raw:
+        print(f"  {ip}: 使用 ipForwardTable 路由表")
+        dest_oid = OID_FORWARD_DEST
+        mask_oid = OID_FORWARD_MASK
+        nexthop_oid = OID_FORWARD_NEXTHOP
+        ifindex_oid = OID_FORWARD_IFINDEX
+        type_oid = OID_FORWARD_TYPE
+        proto_oid = OID_FORWARD_PROTO
+    else:
+        dest_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_DEST)
+        if not dest_raw:
+            return []
+        print(f"  {ip}: 使用 ipRouteTable 路由表")
+        dest_oid = OID_ROUTE_DEST
+        mask_oid = OID_ROUTE_MASK
+        nexthop_oid = OID_ROUTE_NEXTHOP
+        ifindex_oid = OID_ROUTE_IFINDEX
+        type_oid = OID_ROUTE_TYPE
+        proto_oid = OID_ROUTE_PROTO
 
-    mask_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_MASK)
-    nexthop_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_NEXTHOP)
-    ifindex_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_IFINDEX)
-    type_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_TYPE)
-    proto_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_PROTO)
+    mask_raw = await _snmp_walk(slim, ip, community, mask_oid)
+    nexthop_raw = await _snmp_walk(slim, ip, community, nexthop_oid)
+    ifindex_raw = await _snmp_walk(slim, ip, community, ifindex_oid)
+    type_raw = await _snmp_walk(slim, ip, community, type_oid)
+    proto_raw = await _snmp_walk(slim, ip, community, proto_oid)
 
     ifindex_names = await _build_ifindex_names(slim, ip, community)
 
     routes = []
+    seen_cidr = set()  # 去重
     for oid_str, dest_val in dest_raw.items():
         net = _bytes_to_ip(dest_val)
-        idx = _route_oid_index_to_net(oid_str, OID_ROUTE_DEST)
+        idx = _route_oid_index_to_net(oid_str, dest_oid)
         if idx is None:
             continue
 
-        mask_oid = f'{OID_ROUTE_MASK}.{idx}'
-        mask_val = mask_raw.get(mask_oid)
+        m_oid = f'{mask_oid}.{idx}'
+        mask_val = mask_raw.get(m_oid)
         mask_str = _bytes_to_ip(mask_val) if mask_val is not None else ''
         cidr = _subnet_mask_to_cidr(mask_str) if mask_str else None
 
-        nexthop_oid = f'{OID_ROUTE_NEXTHOP}.{idx}'
-        nexthop_val = nexthop_raw.get(nexthop_oid)
+        n_oid = f'{nexthop_oid}.{idx}'
+        nexthop_val = nexthop_raw.get(n_oid)
         nexthop_str = _bytes_to_ip(nexthop_val) if nexthop_val is not None else ''
 
-        ifindex_oid = f'{OID_ROUTE_IFINDEX}.{idx}'
-        ifidx_val = ifindex_raw.get(ifindex_oid)
+        if_oid = f'{ifindex_oid}.{idx}'
+        ifidx_val = ifindex_raw.get(if_oid)
         iface = ifindex_names.get(_safe_str(ifidx_val), '') if ifidx_val is not None else ''
 
-        type_oid = f'{OID_ROUTE_TYPE}.{idx}'
-        type_val = type_raw.get(type_oid)
+        t_oid = f'{type_oid}.{idx}'
+        type_val = type_raw.get(t_oid)
         route_type = _ROUTE_TYPE.get(int(type_val), _ROUTE_TYPE_DEFAULT) if type_val is not None else ''
 
-        proto_oid = f'{OID_ROUTE_PROTO}.{idx}'
-        proto_val = proto_raw.get(proto_oid)
+        p_oid = f'{proto_oid}.{idx}'
+        proto_val = proto_raw.get(p_oid)
         protocol = _ROUTE_PROTO.get(int(proto_val), _ROUTE_PROTO_DEFAULT) if proto_val is not None else ''
 
         cidr_str = f'{net}/{cidr}' if cidr is not None else net
+        if cidr_str in seen_cidr:
+            continue
+        seen_cidr.add(cidr_str)
 
         routes.append({
             "交换机IP": ip,
@@ -526,6 +584,52 @@ async def _get_route_table(slim, ip, community):
             "路由类型": route_type,
             "协议": protocol,
         })
+
+    # 如果 ipForwardTable 有数据，也尝试 ipRouteTable 补充
+    if dest_oid != OID_ROUTE_DEST:
+        rt_raw = await _snmp_walk(slim, ip, community, OID_ROUTE_DEST)
+        if rt_raw:
+            for oid_str, dest_val in rt_raw.items():
+                net2 = _bytes_to_ip(dest_val)
+                idx2 = _route_oid_index_to_net(oid_str, OID_ROUTE_DEST)
+                if idx2 is None:
+                    continue
+                m2_oid = f'{OID_ROUTE_MASK}.{idx2}'
+                mask2 = mask_raw.get(m2_oid)
+                # 如果 ipForwardTable 中没有此 mask 数据，从 ipRouteTable 补充
+                mask_str2 = _bytes_to_ip(mask2) if mask2 is not None else ''
+                cidr2 = _subnet_mask_to_cidr(mask_str2) if mask_str2 else None
+                cidr_str2 = f'{net2}/{cidr2}' if cidr2 is not None else net2
+                if cidr_str2 in seen_cidr:
+                    continue
+                seen_cidr.add(cidr_str2)
+
+                n2_oid = f'{OID_ROUTE_NEXTHOP}.{idx2}'
+                n2_val = nexthop_raw.get(n2_oid)
+                n2_str = _bytes_to_ip(n2_val) if n2_val is not None else ''
+
+                if2_oid = f'{OID_ROUTE_IFINDEX}.{idx2}'
+                if2_val = ifindex_raw.get(if2_oid)
+                iface2 = ifindex_names.get(_safe_str(if2_val), '') if if2_val is not None else ''
+
+                t2_oid = f'{OID_ROUTE_TYPE}.{idx2}'
+                t2_val = type_raw.get(t2_oid)
+                rt2 = _ROUTE_TYPE.get(int(t2_val), _ROUTE_TYPE_DEFAULT) if t2_val is not None else ''
+
+                p2_oid = f'{OID_ROUTE_PROTO}.{idx2}'
+                p2_val = proto_raw.get(p2_oid)
+                proto2 = _ROUTE_PROTO.get(int(p2_val), _ROUTE_PROTO_DEFAULT) if p2_val is not None else ''
+
+                routes.append({
+                    "交换机IP": ip,
+                    "目标网络": net2,
+                    "子网掩码": mask_str2,
+                    "CIDR": cidr_str2,
+                    "网关": n2_str,
+                    "接口": iface2,
+                    "路由类型": rt2,
+                    "协议": proto2,
+                })
 
     if routes:
         print(f"  {ip}: 路由表 {len(routes)} 条")
