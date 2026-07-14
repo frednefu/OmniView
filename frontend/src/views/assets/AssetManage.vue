@@ -117,9 +117,9 @@
                 <el-button v-if="authStore.isDeptAdmin" type="primary" size="small" :disabled="selectedVMs.length===0" @click="showAssignDialog(selectedVMs)">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ vmTotal }} 条，已选 {{ selectedVMs.length }} 条</div>
-              <el-table :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}" :row-class-name="rowClass">
-                <el-table-column type="selection" width="35" />
-                <el-table-column prop="vm_name" label="名称" width="150" show-overflow-tooltip sortable="custom" />
+              <el-table ref="vmTableRef" :data="vmList" v-loading="vmLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onVMSelect" @row-click="onVMRowClick" @sort-change="onVMSort" :default-sort="{prop:'resource_pool',order:'ascending'}" :row-class-name="rowClass">
+                <el-table-column type="selection" width="35" fixed />
+                <el-table-column prop="vm_name" label="名称" width="150" show-overflow-tooltip sortable="custom" fixed />
                 <el-table-column prop="power_state" label="电源" width="65" sortable="custom">
                   <template #default="{ row }">
                     <el-tag :type="row.power_state === 'poweredOn' ? 'success' : 'info'" size="small">{{ row.power_state === 'poweredOn' ? '开' : '关' }}</el-tag>
@@ -214,9 +214,9 @@
                 <el-button v-if="authStore.isDeptAdmin" type="primary" size="small" :disabled="selectedDomains.length===0" @click="assignDomains">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ domainTotal }} 条，已选 {{ selectedDomains.length }} 条</div>
-              <el-table :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect" @sort-change="onDomainSort" :default-sort="{prop:'domain_name',order:'ascending'}">
-                <el-table-column type="selection" width="35" />
-                <el-table-column prop="domain_name" label="域名" min-width="200" show-overflow-tooltip sortable="custom" />
+              <el-table ref="domainTableRef" :data="domainList" v-loading="domainLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onDomainSelect" @row-click="onDomainRowClick" @sort-change="onDomainSort" :default-sort="{prop:'domain_name',order:'ascending'}">
+                <el-table-column type="selection" width="35" fixed />
+                <el-table-column prop="domain_name" label="域名" width="200" show-overflow-tooltip sortable="custom" fixed />
                 <el-table-column prop="record_type" label="类型" width="70" sortable="custom" />
                 <el-table-column prop="ip_address" label="IP" width="140" sortable="custom" />
                 <el-table-column prop="source" label="来源" width="60" sortable="custom">
@@ -273,9 +273,9 @@
                 <el-button v-if="authStore.isDeptAdmin" type="primary" size="small" :disabled="selectedSys.length===0" @click="handleSysAssign">指派选中</el-button>
               </div>
               <div class="total-info">共 {{ sysTotal }} 条</div>
-              <el-table :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onSysSelect" @sort-change="onSysSort" :default-sort="{prop:'system_name',order:'ascending'}">
-                <el-table-column type="selection" width="35" />
-                <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip sortable="custom" />
+              <el-table ref="sysTableRef" :data="sysList" v-loading="sysLoading" stripe size="small" max-height="calc(100vh - 400px)" @selection-change="onSysSelect" @row-click="onSysRowClick" @sort-change="onSysSort" :default-sort="{prop:'system_name',order:'ascending'}">
+                <el-table-column type="selection" width="35" fixed />
+                <el-table-column prop="system_name" label="系统名称" width="160" show-overflow-tooltip sortable="custom" fixed />
                 <el-table-column prop="system_type" label="资产类型" width="120" sortable="custom" />
                 <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip sortable="custom" />
                 <el-table-column prop="dept_name" label="所属部门" width="120" show-overflow-tooltip sortable="custom" />
@@ -527,12 +527,16 @@ const domainSize = ref(50)
 const domainTotal = ref(0)
 const selectedDomains = ref([])
 function onDomainSelect(val) { selectedDomains.value = val }
+const domainTableRef = ref(null)
+function onDomainRowClick(row) { domainTableRef.value?.toggleRowSelection(row) }
 
 const sysList = ref([]), sysLoading = ref(false), sysPage = ref(1), sysSize = ref(20), sysTotal = ref(0), sysSearch = ref('')
 const sysFillTypeFilter = ref('')
 const sysClaimedFilter = ref('')
 const selectedSys = ref([])
 function onSysSelect(v){selectedSys.value=v.map(r=>r.id)}
+const sysTableRef = ref(null)
+function onSysRowClick(row) { sysTableRef.value?.toggleRowSelection(row) }
 
 // 申请注销（VM/域名/信息系统通用）
 async function handleCancelClaim(){
@@ -617,6 +621,8 @@ const claimSubmitting = ref(false)
 const selectedVMs = ref([])
 function rowClass({row}) { return selectedVMs.value.some(v => v.id === row.id) ? 'vm-row-selected' : '' }
 function onVMSelect(val) { selectedVMs.value = val; highlightFolderNode(val) }
+const vmTableRef = ref(null)
+function onVMRowClick(row) { vmTableRef.value?.toggleRowSelection(row) }
 
 function findFolderNodeId(folderPath) {
   // 遍历 folderTree 查找包含此路径的节点

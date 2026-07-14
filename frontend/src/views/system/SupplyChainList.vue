@@ -20,9 +20,9 @@
       <el-button v-if="selectedIds.length>0" type="warning" size="small" @click="handleBatchRevoke">撤销认领 ({{selectedIds.length}})</el-button>
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
     </div>
-    <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @sort-change="onSort" :default-sort="{prop:'id',order:'descending'}">
-      <el-table-column type="selection" width="40" />
-      <el-table-column prop="company_name" label="单位名称" min-width="200" show-overflow-tooltip sortable="custom">
+    <el-table ref="tableRef" :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @row-click="onRowClick" @sort-change="onSort" :default-sort="{prop:'id',order:'descending'}">
+      <el-table-column type="selection" width="40" fixed />
+      <el-table-column prop="company_name" label="单位名称" width="200" show-overflow-tooltip sortable="custom" fixed>
         <template #default="{row}">
           <span>{{ row.company_name }}</span>
           <el-tag v-if="row.is_mine" type="success" size="small" style="margin-left:4px">我的</el-tag>
@@ -328,6 +328,8 @@ const form=reactive({
 
 function resetForm(){Object.assign(form,{company_name:'',credit_code:'',address:'',security_dept:'',security_contact:'',security_phone:'',company_type:'',has_foreign_capital:'',industry:'',service_type:'',importance:'',url_ip_range:'',data_level:'',data_location:'',data_storage:'',db_type:'',remark:'',industryArr:[],serviceTypeArr:[],dataLocationArr:[],dataStorageArr:[],dbTypeArr:[]});addressArr.value=[]}
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
+const tableRef = ref(null)
+function onRowClick(row) { tableRef.value?.toggleRowSelection(row) }
 
 function onSort({prop,order}){sortField.value=prop||'';sortOrder.value=order==='ascending'?'asc':'desc';fetchList()}
 async function fetchList(){loading.value=true;try{const params={page:page.value,size:size.value,search:search.value};if(sortField.value){params.sort_field=sortField.value;params.sort_order=sortOrder.value}const r=await api.get('/info-systems/supply-chain',{params});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}

@@ -44,9 +44,9 @@
       <el-button type="warning" @click="handleBatchDisable">批量禁用 ({{ selectedIds.length }})</el-button>
       <el-button type="success" @click="handleBatchEnable">批量启用 ({{ selectedIds.length }})</el-button>
     </div>
-    <el-table :data="users" v-loading="loading" stripe @selection-change="onSelect">
-      <el-table-column type="selection" width="45" />
-      <el-table-column prop="id" label="ID" width="60" />
+    <el-table ref="tableRef" :data="users" v-loading="loading" stripe @selection-change="onSelect" @row-click="onRowClick">
+      <el-table-column type="selection" width="45" fixed />
+      <el-table-column prop="id" label="ID" width="60" fixed />
       <el-table-column prop="username" label="用户名" width="120" />
       <el-table-column prop="name" label="姓名" width="100" />
       <el-table-column prop="gh" label="工号" width="120" />
@@ -547,6 +547,8 @@ async function handleToggleActive(row) {
 
 const selectedIds = ref([])
 function onSelect(val) { selectedIds.value = val.map(v => v.id) }
+const tableRef = ref(null)
+function onRowClick(row) { tableRef.value?.toggleRowSelection(row) }
 
 async function handleBatchDelete() {
   try {

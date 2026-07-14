@@ -40,9 +40,9 @@
       <el-button v-if="selectedIds.length>0" type="danger" size="small" @click="handleBatchCancel">申请注销 ({{selectedIds.length}})</el-button>
       <el-button v-if="selectedIds.length>0" size="small" @click="handleBatchUncancel">撤销注销 ({{selectedIds.length}})</el-button>
     </div>
-    <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @sort-change="onSort" :default-sort="{prop:'id',order:'descending'}">
-      <el-table-column type="selection" width="40" />
-      <el-table-column prop="system_name" label="系统名称" min-width="160" show-overflow-tooltip sortable/>
+    <el-table ref="tableRef" :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @row-click="onRowClick" @sort-change="onSort" :default-sort="{prop:'id',order:'descending'}">
+      <el-table-column type="selection" width="40" fixed />
+      <el-table-column prop="system_name" label="系统名称" width="160" show-overflow-tooltip sortable fixed />
       <el-table-column prop="system_type" label="资产类型" width="120" sortable/>
       <el-table-column prop="sub_type" label="信息系统类型" width="140" show-overflow-tooltip sortable/>
       <el-table-column prop="ip_address" label="IP" width="130" show-overflow-tooltip sortable/>
@@ -387,6 +387,8 @@ const INT_FIELDS = ['dept_id']
 const DATE_FIELDS = ['djdj_date','icp_date']
 
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
+const tableRef = ref(null)
+function onRowClick(row) { tableRef.value?.toggleRowSelection(row) }
 
 function resetForm(){
   Object.assign(form, baseForm())

@@ -18,9 +18,9 @@
       <el-button v-if="authStore.isAdmin && selectedIds.length>0" type="danger" @click="handleBatchDelete">批量删除 ({{selectedIds.length}})</el-button>
       <span style="color:#909399;font-size:13px;line-height:32px">共 {{total}} 条</span>
     </div>
-    <el-table :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect">
-      <el-table-column type="selection" width="40" />
-      <el-table-column prop="record_no" label="备案编号" width="200" />
+    <el-table ref="tableRef" :data="items" v-loading="loading" stripe size="small" @selection-change="onSelect" @row-click="onRowClick">
+      <el-table-column type="selection" width="40" fixed />
+      <el-table-column prop="record_no" label="备案编号" width="200" fixed />
       <el-table-column prop="system_name" label="系统名称" min-width="180" show-overflow-tooltip>
         <template #default="{row}">
           <span>{{ row.system_name }}</span>
@@ -85,6 +85,8 @@ const form=reactive({record_no:'',system_name:'',org_name:'',eval_org:'',level:'
 
 function resetForm(){Object.assign(form,{record_no:'',system_name:'',org_name:'',eval_org:'',level:'',record_date:'',remark:'',image_path:''})}
 function onSelect(v){selectedIds.value=v.map(r=>r.id)}
+const tableRef = ref(null)
+function onRowClick(row) { tableRef.value?.toggleRowSelection(row) }
 async function fetchList(){loading.value=true;try{const r=await api.get('/info-systems/djdj',{params:{page:page.value,size:size.value,search:search.value}});items.value=r.data.items;total.value=r.data.total}catch{}finally{loading.value=false}}
 function openCreate(){resetForm();isEdit.value=false;dlg.value=true}
 function openEdit(r){editId.value=r.id;isEdit.value=true;Object.keys(form).forEach(k=>{if(r[k]!==undefined)form[k]=r[k]||''});form.image_path=r.image_path||null;form.eval_org=r.eval_org||r.dept_name||'';dlg.value=true}
