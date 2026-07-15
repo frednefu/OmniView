@@ -177,9 +177,6 @@ def build_pool_view(db: Session, f5_device_id: int) -> list[dict]:
         F5PoolMember.f5_device_id == f5_device_id
     ).all()
 
-    if not members:
-        return []
-
     # 按 pool_name 分组成员
     pool_members: dict[str, list] = defaultdict(list)
     for m in members:
@@ -190,7 +187,7 @@ def build_pool_view(db: Session, f5_device_id: int) -> list[dict]:
             "state": m.member_state or "",
         })
 
-    # 2. 全部 VS（用于查找 pool 引用）
+    # 2. 全部 VS（用于查找 pool 引用，同时收集 VS 引用的 pool）
     vs_rows = db.query(F5VirtualServer).filter(
         F5VirtualServer.f5_device_id == f5_device_id
     ).all()
@@ -200,8 +197,10 @@ def build_pool_view(db: Session, f5_device_id: int) -> list[dict]:
         pool_short = _short(vs.pool_name)
         if pool_short:
             pool_vs_refs[pool_short].append(vs.name)
+            if pool_short not in pool_members:
+                pool_members[pool_short] = []  # 确保空成员池也显示
 
-    # 3. ApplicationMap (source=irule) 用于查找 rule 引用
+    # 3. ApplicationMap (source=irule) 用于查找 rule 引用和收集 iRule 引用的 pool
     app_rows = db.query(F5ApplicationMap).filter(
         F5ApplicationMap.f5_device_id == f5_device_id,
         F5ApplicationMap.source == "irule",
@@ -213,6 +212,26 @@ def build_pool_view(db: Session, f5_device_id: int) -> list[dict]:
         rule_short = _short(a.rule_name)
         if pool_short and rule_short:
             pool_rule_refs[pool_short].add(rule_short)
+            if pool_short not in pool_members:
+                pool_members[pool_short] = []  # 确保空成员池也显示
+
+    # 3b. 构建 rule_name → VS 名称 映射（从 VS rules JSON 字段反向溯源）
+    rule_to_vs: dict[str, set] = defaultdict(set)
+    for vs in vs_rows:
+        if vs.rules:
+            try:
+                vs_rules = json.loads(vs.rules)
+                for r in vs_rules:
+                    rule_to_vs[_short(r)].add(vs.name)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # 3c. 通过 iRule 溯源：pool → rules → VS（iRule 引用的 VS 也算引用）
+    pool_vs_via_irule: dict[str, set] = defaultdict(set)
+    for pool_short, rule_names in pool_rule_refs.items():
+        for rn in rule_names:
+            for vs_name in rule_to_vs.get(rn, set()):
+                pool_vs_via_irule[pool_short].add(vs_name)
 
     # 4. 构建结果
     result = []
@@ -231,8 +250,17 @@ def build_pool_view(db: Session, f5_device_id: int) -> list[dict]:
         else:
             status = "mixed"
 
+        # 合并 VS 引用（默认 Pool + iRule 溯源），带来源标签
+        vs_default = set(pool_vs_refs.get(pool_name, []))
+        vs_from_irule = pool_vs_via_irule.get(pool_name, set())
+        all_vs_refs: list[dict] = []
+        for v in sorted(vs_default):
+            all_vs_refs.append({"name": v, "source": "default"})
+        for v in sorted(vs_from_irule - vs_default):
+            all_vs_refs.append({"name": v, "source": "irule"})
+
         # 引用状态：VS 和 iRules 都有 → full，有一个 → partial，都没有 → none
-        has_vs = bool(pool_vs_refs.get(pool_name))
+        has_vs = bool(all_vs_refs)
         has_rule = bool(pool_rule_refs.get(pool_name))
         if has_vs and has_rule:
             ref_status = "full"
@@ -247,7 +275,7 @@ def build_pool_view(db: Session, f5_device_id: int) -> list[dict]:
             "status": status,
             "ref_status": ref_status,
             "members": member_list,
-            "referenced_vs": sorted(pool_vs_refs.get(pool_name, [])),
+            "referenced_vs": all_vs_refs,
             "referenced_rules": sorted(pool_rule_refs.get(pool_name, [])),
             "member_count": len(member_list),
         })

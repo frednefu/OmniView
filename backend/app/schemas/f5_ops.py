@@ -47,6 +47,12 @@ class F5OpsPoolMember(BaseModel):
     state: str
 
 
+class F5OpsPoolRef(BaseModel):
+    """池引用项（含来源标记）"""
+    name: str
+    source: str = ""  # "default" | "irule"
+
+
 class F5OpsPoolItem(BaseModel):
     """资源池视图项"""
     f5_device_id: int
@@ -54,7 +60,7 @@ class F5OpsPoolItem(BaseModel):
     status: str = "mixed"  # up / down / mixed
     ref_status: str = "none"  # none / partial / full（引用状态：无引用 / 部分引用 / 引用）
     members: list[F5OpsPoolMember] = []
-    referenced_vs: list[str] = []    # 直接引用此 Pool 的 VS 名称
+    referenced_vs: list[F5OpsPoolRef] = []  # 引用此 Pool 的 VS（含来源标记）
     referenced_rules: list[str] = []  # 引用此 Pool 的 iRule 名称
     member_count: int = 0
 

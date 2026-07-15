@@ -202,8 +202,9 @@ def _do_f5_scan(host: str, username: str, password: str, port: int) -> dict:
 
     # 2. 获取所有 Pool 及成员 — 使用 /mgmt/tm/ltm/pool 列表并用 fullPath 构造成员 URL
     pool_members = []
-    pools_data = _make_request(host, username, password, port, "/mgmt/tm/ltm/pool")
+    pools_data = _make_request(host, username, password, port, "/mgmt/tm/ltm/pool?expandSubcollections=true")
     pool_items = pools_data.get("items", []) if isinstance(pools_data, dict) else []
+    logger.info("F5 API 返回 %d 个 Pool", len(pool_items))
     for pool_item in pool_items:
         if not isinstance(pool_item, dict):
             continue
@@ -271,6 +272,17 @@ def _do_f5_scan(host: str, username: str, password: str, port: int) -> dict:
                 "member_port": mport,
                 "member_state": member_item.get("state", "") or "",
                 "raw_config": json.dumps(member_item, ensure_ascii=False),
+            })
+
+        # 空成员池也记录一条占位行，确保池列表完整
+        if not member_items:
+            pool_members.append({
+                "pool_name": pn,
+                "member_name": "",
+                "member_ip": "",
+                "member_port": None,
+                "member_state": "",
+                "raw_config": "",
             })
 
     # 3. 获取所有 iRule 内容 — 使用完整 ref 路径
@@ -468,7 +480,9 @@ async def _run_f5_scan_async(f5_device_id: int, scan_log_id: int | None = None):
             vs_with_pool = sum(1 for vs in vs_list if vs.get("pool_name"))
             vs_with_rules = sum(1 for vs in vs_list if vs.get("rules") and vs["rules"] != "[]")
             vs_ips = set(vs.get("vs_ip", "") for vs in vs_list if vs.get("vs_ip"))
-            append_log(scan_log_id, f"数据采集完成: VS={len(vs_list)} (关联Pool {vs_with_pool}/关联iRule {vs_with_rules}), 成员={len(scan_result['pool_members'])}, iRules={len(scan_result['rules'])}")
+            # 统计不重复的池名称
+            distinct_pools = len(set(pm["pool_name"] for pm in scan_result["pool_members"]) if scan_result["pool_members"] else [])
+            append_log(scan_log_id, f"数据采集完成: VS={len(vs_list)} (关联Pool {vs_with_pool}/关联iRule {vs_with_rules}), Pool={distinct_pools}个, 成员={len(scan_result['pool_members'])}, iRules={len(scan_result['rules'])}")
             append_log(scan_log_id, f"VS IP 分布: {len(vs_ips)} 个独立 IP")
 
             # Pool member 状态分布

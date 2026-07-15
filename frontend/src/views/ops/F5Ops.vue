@@ -177,10 +177,13 @@
                 <span v-else class="text-muted">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="引用 VS" min-width="160">
+            <el-table-column label="引用 VS" min-width="180">
               <template #default="{ row }">
                 <div v-if="row.referenced_vs && row.referenced_vs.length > 0" class="ref-list">
-                  <el-tag v-for="v in row.referenced_vs" :key="v" size="small" type="primary" class="ref-tag">{{ v }}</el-tag>
+                  <span v-for="v in row.referenced_vs" :key="v.name" class="ref-item">
+                    <el-tag size="small" :type="v.source === 'irule' ? 'warning' : 'primary'" class="ref-tag">{{ v.name }}</el-tag>
+                    <span class="ref-source">{{ v.source === 'irule' ? 'iRule' : '默认' }}</span>
+                  </span>
                 </div>
                 <span v-else class="text-muted">—</span>
               </template>
@@ -402,7 +405,9 @@ onMounted(() => { loadDevices() })
 
 /* ── 引用列表 ── */
 .ref-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.ref-item { display: inline-flex; align-items: center; gap: 2px; }
 .ref-tag { margin: 0; }
+.ref-source { font-size: 10px; color: var(--color-text-muted); }
 
 /* ── 映射列表 ── */
 .mapping-list { display: flex; flex-direction: column; gap: 4px; }
