@@ -201,7 +201,7 @@
         <div class="navbar-right">
           <el-input
             v-model="searchText"
-            placeholder="搜索 IP 或 MAC 地址..."
+            placeholder="搜索域名 / IP / MAC / 信息系统..."
             class="search-input"
             clearable
             @keyup.enter="handleSearch"
@@ -313,8 +313,17 @@ const pageTitle = computed(() => {
 
 function handleSearch() {
   const q = searchText.value.trim()
-  if (q) {
-    router.push({ path: '/search', query: { q } })
+  if (!q) return
+  const ipRe = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/
+  const macRe = /^[0-9a-fA-F:]{12,17}$/
+  if (ipRe.test(q)) {
+    router.push({ path: '/results', query: { ip: q, _t: Date.now() } })
+  } else if (macRe.test(q) || q.includes(':')) {
+    router.push({ path: '/results', query: { mac: q, _t: Date.now() } })
+  } else if (q.includes('.') && !q.includes(' ')) {
+    router.push({ path: '/asset-profile', query: { search: q, _t: Date.now() } })
+  } else {
+    router.push({ path: '/sys/info-systems', query: { search: q, _t: Date.now() } })
   }
 }
 

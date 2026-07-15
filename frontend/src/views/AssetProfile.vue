@@ -224,8 +224,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { getAssetProfile, exportAssetProfile } from '@/api/asset'
+
+const route = useRoute()
 
 const loading = ref(false)
 const exporting = ref(false)
@@ -481,7 +484,12 @@ async function exportExcel() {
   finally { exporting.value = false }
 }
 
-onMounted(fetchData)
+async function loadFromRoute() {
+  if (route.query.search) search.value = route.query.search
+  await fetchData()
+}
+onMounted(loadFromRoute)
+watch(() => route.query.search, loadFromRoute)
 </script>
 
 <style scoped>

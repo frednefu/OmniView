@@ -56,9 +56,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/api'
 import { formatTime } from '@/utils/format'
+
+const route = useRoute()
 
 const items = ref([])
 const loading = ref(false)
@@ -99,7 +102,13 @@ async function exportExcel() {
   }
 }
 
-onMounted(fetchData)
+function loadFromRoute() {
+  if (route.query.ip) filters.ip = route.query.ip
+  if (route.query.mac) filters.mac = route.query.mac
+  fetchData()
+}
+onMounted(loadFromRoute)
+watch(() => route.query, loadFromRoute)
 </script>
 
 <style scoped>
