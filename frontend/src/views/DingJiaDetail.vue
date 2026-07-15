@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="page">
     <div class="page-header">
       <h2>备份记录</h2>
@@ -70,6 +70,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { Search } from '@element-plus/icons-vue'
 import api from '@/api/index'
+import { formatTime } from '@/utils/format'
 
 const route = useRoute()
 const items = ref([]), loading = ref(false), page = ref(1), size = ref(20), total = ref(0), search = ref('')
@@ -85,7 +86,6 @@ function parseVersions(detail) {
   } catch { return [] }
 }
 
-function formatTime(t) { return t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function formatDuration(s) {
   if (s == null) return '-'
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60

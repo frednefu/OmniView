@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="switch-list">
     <div class="page-header">
       <h2>交换机管理</h2>
@@ -143,6 +143,7 @@ import { useAuthStore } from '@/store/auth'
 import { getSwitches, triggerScan, deleteSwitch, downloadTemplate, importSwitches, scanAllSwitches, deleteAllSwitches } from '@/api/switches'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SwitchFormDialog from '@/components/SwitchFormDialog.vue'
+import { formatTime } from '@/utils/format'
 
 const authStore = useAuthStore()
 const switches = ref([])
@@ -155,12 +156,6 @@ const editData = ref(null)
 const importDialogVisible = ref(false)
 const importResult = ref(null)
 
-function formatTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
 
 async function fetchList() {
   loading.value = true

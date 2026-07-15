@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="scan-logs-page">
     <div class="page-header">
       <h2>扫描日志</h2>
@@ -110,6 +110,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { getScanLogs, clearScanLogs } from '@/api/scanLogs'
 import { ElMessage } from 'element-plus'
+import { formatTime } from '@/utils/format'
 
 const items = ref([])
 const loading = ref(false)
@@ -120,12 +121,6 @@ const total = ref(0)
 const clearDialogVisible = ref(false)
 const filters = reactive({ source_type: '', status: '' })
 
-function formatTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
 
 function sourceColor(type) {
   const map = { switch: '#06b6d4', vcenter: '#f59e0b', f5: '#10b981', zdns: '#6366f1', zdns_ip: '#8b5cf6', qax: '#ef4444', dingjia: '#ec4899', asset_sync: '#14b8a6' }

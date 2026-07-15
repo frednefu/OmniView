@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="routes-page">
     <h2>路由表</h2>
 
@@ -48,6 +48,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import api from '@/api'
+import { formatTime } from '@/utils/format'
 
 const items = ref([])
 const loading = ref(false)
@@ -56,12 +57,6 @@ const size = ref(50)
 const total = ref(0)
 const filters = reactive({ cidr: '' })
 
-function formatTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
 
 async function fetchData() {
   loading.value = true

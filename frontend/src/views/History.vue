@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="history-page">
     <h2>历史记录</h2>
 
@@ -313,6 +313,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { getHistory, getHistoryByMac } from '@/api/history'
 import api from '@/api'
+import { formatTime } from '@/utils/format'
 
 const activeTab = ref('switch')
 const items = ref([])
@@ -330,12 +331,6 @@ const filters = reactive({ ip: '', mac: '', change_type: '', switch_id: null, so
 
 const isPaginated = computed(() => !filters.ip && !filters.mac && !filters.vm_name)
 
-function formatTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
 
 function changeTag(type) {
   return type === 'added' ? 'success' : type === 'deleted' ? 'danger' : 'warning'

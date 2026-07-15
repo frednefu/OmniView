@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="worker-manage">
     <div class="page-header">
       <h2>Worker 管理</h2>
@@ -124,6 +124,7 @@ import { reactive, ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { getWorkers, registerWorker, deleteWorker } from '@/api/workers'
 import { getVersion } from '@/api/version'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatTime } from '@/utils/format'
 
 const workers = ref([])
 const loading = ref(false)
@@ -191,12 +192,6 @@ function relativeTime(t) {
   return `${Math.floor(diff / 86400)}天前`
 }
 
-function formatTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
 
 async function fetchList() {
   loading.value = true

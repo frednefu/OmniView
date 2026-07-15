@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="search-result">
     <div class="page-header">
       <h2>搜索结果：{{ query }}</h2>
@@ -66,6 +66,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api'
+import { formatTime } from '@/utils/format'
 
 const route = useRoute()
 const query = ref(route.query.q || '')
@@ -90,12 +91,6 @@ function onAssetPageChange() {
 // 扫描结果
 const scanResults = ref([])
 
-function formatTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
 
 async function doSearch(q) {
   if (!q || q.length < 2) return

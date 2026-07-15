@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="account-page">
     <div class="page-header">
       <h2>账号管理</h2>
@@ -264,6 +264,7 @@ import { Search } from '@element-plus/icons-vue'
 import { getUsers, createUser, updateUser, deleteUser, batchDeleteUsers, batchDisableUsers, resetUserPassword } from '@/api/users'
 import { lookupStaff } from '@/api/staff'
 import { getDepartmentTree } from '@/api/departments'
+import { formatTime } from '@/utils/format'
 
 const loading = ref(false)
 const users = ref([])
@@ -334,12 +335,6 @@ const passwordDialogVisible = ref(false)
 const passwordTarget = ref(null)
 const resetting = ref(false)
 const passwordForm = reactive({ new_password: '' })
-
-function formatTime(t) {
-  if (!t) return '-'
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
-
 async function loadDeptOptions() {
   try {
     const tree = await getDepartmentTree(true)

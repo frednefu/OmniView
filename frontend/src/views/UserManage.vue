@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="user-manage">
     <div class="page-header">
       <h2>用户管理</h2>
@@ -113,6 +113,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { getUsers, createUser, updateUser, deleteUser, resetUserPassword } from '@/api/users'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatTime } from '@/utils/format'
 
 const users = ref([])
 const loading = ref(false)
@@ -142,12 +143,6 @@ const passwordRules = {
   new_password: [{ required: true, message: '请输入新密码', trigger: 'blur' }],
 }
 
-function formatTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', { hour12: false })
-}
 
 async function fetchList() {
   loading.value = true

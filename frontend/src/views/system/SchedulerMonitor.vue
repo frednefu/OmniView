@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="scheduler-page">
     <div class="page-header">
       <h2>定时任务监控</h2>
@@ -43,6 +43,7 @@ import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Edit } from '@element-plus/icons-vue'
 import api from '@/api/index'
+import { formatTime } from '@/utils/format'
 
 const loading = ref(false)
 const status = reactive({ running: false, jobs: [], total: 0 })
@@ -50,10 +51,6 @@ const editingId = ref(null)
 const editSecs = ref(0)
 let timer = null
 
-function formatTime(t) {
-  if (!t) return '-'
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
 function formatSecs(s) {
   if (s < 60) return s + '秒'
   if (s < 3600) return Math.floor(s/60) + '分钟'

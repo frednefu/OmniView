@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="backup-manage">
     <div class="page-header">
       <h2>系统备份</h2>
@@ -377,6 +377,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'v
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, VideoPlay, Download, CircleCheckFilled, CircleCheck, Document, Loading, Refresh, Edit, Delete } from '@element-plus/icons-vue'
 import api from '@/api'
+import { formatTime } from '@/utils/format'
 import {
   getBackupJobs, createBackupJob, updateBackupJob, deleteBackupJob, runBackupJob,
   getBackupHistory, deleteBackupHistory, verifyBackup as verifyBackupApi,
@@ -859,13 +860,6 @@ function contentTags(contents) {
     label: (contentTypeMap[c] || { label: c }).label,
     type: (contentTypeMap[c] || { type: '' }).type,
   }))
-}
-
-function formatTime(t) {
-  if (!t) return '—'
-  const d = new Date(t)
-  const pad = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function formatSize(bytes) {

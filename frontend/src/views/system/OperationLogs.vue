@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="page">
     <div class="page-header">
       <h2>操作日志</h2>
@@ -68,13 +68,13 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import api from '@/api/index'
+import { formatTime } from '@/utils/format'
 
 const items=ref([]),loading=ref(false),page=ref(1),size=ref(20),total=ref(0),search=ref('')
 const filterMethod=ref(''),filterStatus=ref('')
 const sortField=ref('created_at'),sortOrder=ref('desc')
 const showCleanDlg=ref(false),cleanDays=ref(30),cleaning=ref(false)
 
-function formatTime(t){return t?new Date(t).toLocaleString('zh-CN',{hour12:false}):'-'}
 function methodTag(m){return {GET:'',POST:'warning',PUT:'primary',DELETE:'danger'}[m]||''}
 function onSort({prop,order}){sortField.value=prop||'created_at';sortOrder.value=order==='ascending'?'asc':'desc';page.value=1;fetchList()}
 

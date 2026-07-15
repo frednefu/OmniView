@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="switch-detail">
     <el-page-header @back="$router.push('/switches')" :title="sw?.name || '交换机详情'">
       <template #content>
@@ -78,6 +78,7 @@ import { useAuthStore } from '@/store/auth'
 import { getSwitch, triggerScan } from '@/api/switches'
 import { getResults, getRoutes } from '@/api/results'
 import { ElMessage } from 'element-plus'
+import { formatTime } from '@/utils/format'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -94,7 +95,6 @@ const rtPage = ref(1); const rtSize = ref(50); const routesTotal = ref(0)
 
 const switchId = () => route.params.id
 
-function formatTime(t) { if (!t) return ''; const d = new Date(t); if (isNaN(d.getTime())) return t; return d.toLocaleString('zh-CN', { hour12: false }) }
 
 async function fetchSwitch() {
   sw.value = await getSwitch(switchId())
