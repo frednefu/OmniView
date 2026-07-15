@@ -128,6 +128,12 @@ def build_asset_profile(db: Session) -> list[dict]:
             if ip and ip not in domain_public_ips[domain]:
                 domain_public_ips[domain].append(ip)
 
+    # 收集真实域名（ZDNS）关联的所有 IP，用于后续排除已被覆盖的伪域名
+    real_domain_ips: set[str] = set()
+    for d in zdns_domain_set:
+        for ip in domain_public_ips.get(d, []):
+            real_domain_ips.add(ip)
+
     # 全局公网 IP 集合
     all_public_ips = set()
     for ips in domain_public_ips.values():
@@ -370,6 +376,12 @@ def build_asset_profile(db: Session) -> list[dict]:
             rows.append(row)
 
     for domain in all_domains:
+        # 伪域名：若其所有 IP 已由真实 ZDNS 域名覆盖，则跳过（避免重复显示）
+        if domain in vs_pseudo_domains:
+            public_ips = domain_public_ips.get(domain, [])
+            if public_ips and all(ip in real_domain_ips for ip in public_ips):
+                continue
+
         public_ips = domain_public_ips.get(domain, [])
         if not public_ips:
             _emit_row(domain, "", "", "", "", None)
