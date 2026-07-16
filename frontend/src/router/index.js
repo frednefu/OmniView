@@ -236,6 +236,24 @@ const routes = [
         meta: { title: '资产画像' },
       },
       {
+        path: 'monitor/overview',
+        name: 'MonitorOverview',
+        component: () => import('@/views/monitor/MonitorOverview.vue'),
+        meta: { title: '监控总览' },
+      },
+      {
+        path: 'monitor/link',
+        name: 'SystemLink',
+        component: () => import('@/views/monitor/SystemLink.vue'),
+        meta: { title: '资产关联' },
+      },
+      {
+        path: 'monitor/:id',
+        name: 'SystemMonitor',
+        component: () => import('@/views/monitor/SystemMonitor.vue'),
+        meta: { title: '系统监控' },
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: () => import('@/views/Profile.vue'),

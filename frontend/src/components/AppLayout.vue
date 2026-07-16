@@ -38,6 +38,21 @@
           <el-icon><DataAnalysis /></el-icon>
           <span>资产画像</span>
         </el-menu-item>
+
+        <el-sub-menu index="/monitor">
+          <template #title>
+            <el-icon><Monitor /></el-icon>
+            <span>系统监控</span>
+          </template>
+          <el-menu-item index="/monitor/overview">
+            <el-icon><DataBoard /></el-icon>
+            <span>监控总览</span>
+          </el-menu-item>
+          <el-menu-item index="/monitor/link">
+            <el-icon><Connection /></el-icon>
+            <span>资产关联</span>
+          </el-menu-item>
+        </el-sub-menu>
         <el-sub-menu index="/sys/info">
           <template #title>
             <el-icon><DataBoard /></el-icon>
@@ -307,6 +322,8 @@ const pageTitle = computed(() => {
     '/sys/backup': '系统备份',
     '/sys/scheduler': '定时任务监控',
     '/sys/ops/f5': 'F5运维',
+    '/monitor/overview': '监控总览',
+    '/monitor/link': '资产关联',
   }
   return titles[route.path] || ''
 })
