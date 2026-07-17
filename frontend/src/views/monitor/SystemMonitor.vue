@@ -16,7 +16,12 @@
       <!-- 拓扑图 -->
       <el-col :span="16">
         <el-card shadow="hover">
-          <template #header><strong>拓扑结构</strong></template>
+          <template #header>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <strong>拓扑结构</strong>
+              <el-button size="small" :loading="savingPos" @click="savePositions">保存位置</el-button>
+            </div>
+          </template>
           <div v-if="topoNodes.length > 0" ref="graphRef" class="graph-container"></div>
           <el-empty v-else description="暂无关联资产，请先关联" :image-size="80">
             <el-button type="primary" size="small" @click="goLink">去关联资产</el-button>
@@ -33,7 +38,7 @@
             <div class="status-item"><span class="dot down"></span>异常: {{ stats.down }}</div>
             <div class="status-item"><span class="dot unknown"></span>未知: {{ stats.unknown }}</div>
           </div>
-          <el-table :data="assets" stripe size="small" max-height="400" style="margin-top:12px">
+          <el-table :data="assets" stripe size="small" style="margin-top:12px;flex:1">
             <el-table-column label="类型" width="75">
               <template #default="{row}">{{ typeLabel(row.asset_type) }}</template>
             </el-table-column>
@@ -59,6 +64,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import api from '@/api/index'
 
@@ -107,30 +113,64 @@ async function loadSystem() {
 
   // 加载拓扑
   try {
-    const { data } = await api.get(`/monitor/systems/${systemId.value}/topology`)
-    topoNodes.value = data.nodes || []
+    const topoRes = await api.get(`/monitor/systems/${systemId.value}/topology`)
+    const topoData = topoRes.data
+    topoNodes.value = topoData.nodes || []
+    // 加载已保存位置（在 renderGraph 外部加载）
+    let savedPos = {}
+    try {
+      const posRes = await api.get(`/monitor/systems/${systemId.value}/topo-positions`)
+      if (posRes.data && posRes.data.positions) savedPos = posRes.data.positions
+    } catch (e) { console.error('load positions error', e) }
     await nextTick()
-    renderGraph(data)
-  } catch {}
+    renderGraph(topoData, savedPos)
+  } catch (e) { console.error('topology error', e) }
 }
 
-function renderGraph(data) {
+// 节点位置（渲染时生成，拖动时更新）
+let currentPositions = {}
+const savingPos = ref(false)
+async function savePositions() {
+  if (!systemId.value) return
+  // 优先从图表读取，失败则用内存缓存
+  let pos = {}
+  if (graphChart) {
+    try {
+      const opt = graphChart.getOption()
+      const ns = opt.series[0]?.data || []
+      ns.forEach(n => { if (n.name && n.x != null && n.y != null) pos[n.name] = { x: Math.round(n.x), y: Math.round(n.y) } })
+    } catch {}
+  }
+  // 图表读不到则用内存缓存
+  if (Object.keys(pos).length === 0) pos = { ...currentPositions }
+  if (Object.keys(pos).length === 0) { ElMessage.warning('无位置数据可保存'); return }
+  currentPositions = pos
+
+  savingPos.value = true
+  try {
+    await api.put(`/monitor/systems/${systemId.value}/topo-positions`, { positions: currentPositions })
+    ElMessage.success(`已保存 ${Object.keys(currentPositions).length} 个节点位置`)
+  } catch { ElMessage.error('保存失败') }
+  finally { savingPos.value = false }
+}
+
+function renderGraph(data, savedPos = {}) {
   const el = graphRef.value
   if (!el || !(data.nodes && data.nodes.length > 0)) return
   if (graphChart) graphChart.dispose()
   graphChart = echarts.init(el)
 
   const catColorMap = {
-    system: '#6366f1', domain: '#f59e0b', ip: '#0ea5e9', f5_vs: '#06b6d4',
+    system: '#6366f1', domain: '#f59e0b', f5_vs: '#06b6d4',
     f5_member: '#14b8a6', vm: '#f97316', backup: '#8b5cf6', qax: '#ec4899',
   }
   const catCN = {
-    system: '信息系统', domain: '域名', ip: 'IP地址', f5_vs: 'F5 VS',
+    system: '信息系统', domain: '域名', f5_vs: 'F5 VS',
     f5_member: 'F5成员', vm: '虚拟机', backup: '备份', qax: '椒图',
   }
 
-  // 层次Y坐标
-  const layerY = { system: 0, domain: 120, ip: 240, f5_vs: 360, f5_member: 480, vm: 600, backup: 720, qax: 840 }
+  // 分层Y坐标
+  const layerY = { system: 0, domain: 130, f5_vs: 280, f5_member: 420, vm: 560, backup: 700, qax: 840 }
   const layerNodes = {}
   for (const n of (data.nodes || [])) {
     const l = layerY[n.category] !== undefined ? n.category : 'other'
@@ -141,32 +181,30 @@ function renderGraph(data) {
     layerNodes[k].sort((a, b) => (a.label || a.name).localeCompare(b.label || b.name))
   }
 
-  // 系统状态=子节点交集
+  // 系统状态：异常优先
   const childStatuses = (data.nodes || []).filter(n => n.category !== 'system').map(n => n.status)
   let sysStatus = 'up'
-  if (childStatuses.includes('down')) sysStatus = 'down'
-  else if (childStatuses.includes('unknown')) sysStatus = 'unknown'
-
-  // 记忆位置
-  const storageKey = `topo_pos_${systemId.value}`
-  let savedPos = {}
-  try { savedPos = JSON.parse(localStorage.getItem(storageKey) || '{}') } catch {}
+  if (childStatuses.some(s => s === 'down')) sysStatus = 'down'
+  else if (childStatuses.some(s => s === 'unknown')) sysStatus = 'unknown'
 
   const gapX = 150
   const nodes = []
+  currentPositions = {}  // 重置
   for (const cat of Object.keys(layerY)) {
     const items = layerNodes[cat] || []
     const y = layerY[cat] || 0
     const totalW = (items.length - 1) * gapX
     items.forEach((n, i) => {
       const saved = savedPos[n.name]
-      const hasSaved = saved && saved.x != null && saved.y != null
+      const hasSaved = saved && typeof saved.x === 'number' && typeof saved.y === 'number'
+      const nx = hasSaved ? saved.x : (i * gapX - totalW / 2)
+      const ny = hasSaved ? saved.y : y
+      // 保存到内存变量
+      currentPositions[n.name] = { x: Math.round(nx), y: Math.round(ny) }
       nodes.push({
         name: n.name, category: n.category,
-        symbolSize: n.category === 'system' ? 48 : 30,
-        x: hasSaved ? saved.x : (i * gapX - totalW / 2),
-        y: hasSaved ? saved.y : y,
-        fixed: true,  // 全部固定，拖动后通过 mouseup 更新记忆位置
+        symbolSize: n.category === 'system' ? 48 : 28,
+        x: nx, y: ny,
         itemStyle: {
           color: catColorMap[n.category] || '#94a3b8',
           borderColor: n.category === 'system'
@@ -185,26 +223,16 @@ function renderGraph(data) {
     lineStyle: { color: '#cbd5e1', width: 1, curveness: 0.15 },
   }))
 
-  // 图例使用英文key匹配节点category，显示中文标签
-  const legendData = Object.entries(catCN).map(([k, v]) => k)
-
-  graphChart.off('mouseup')
-  graphChart.on('mouseup', () => {
-    try {
-      const opt = graphChart.getOption()
-      const ns = opt.series[0]?.data || []
-      const pos = {}
-      ns.forEach(n => { if (n.name && n.x != null && n.y != null) pos[n.name] = { x: n.x, y: n.y } })
-      localStorage.setItem(storageKey, JSON.stringify(pos))
-    } catch {}
-  })
+  const legendData = Object.entries(catCN).map(([k]) => k)
 
   graphChart.setOption({
     tooltip: {
       formatter: p => {
         if (p.dataType === 'node') {
           const cn = catCN[p.data.category] || p.data.category
-          return `${p.name}<br/>类型: ${cn}`
+          const sc = p.data.itemStyle?.borderColor
+          const st = sc === '#10b981' ? '正常' : sc === '#ef4444' ? '异常' : '未知'
+          return `${p.name}<br/>类型: ${cn}<br/>状态: ${st}`
         }
         return ''
       }
@@ -212,13 +240,12 @@ function renderGraph(data) {
     legend: {
       data: legendData,
       bottom: 0,
-      textStyle: { fontSize: 10 },
+      textStyle: { fontSize: 13 },
       formatter: name => catCN[name] || name,
-      itemWidth: 12, itemHeight: 12,
+      itemWidth: 16, itemHeight: 16,
     },
     series: [{
-      type: 'graph', layout: 'force',
-      force: { repulsion: 200, edgeLength: [80, 200], gravity: 0.05 },
+      type: 'graph', layout: 'none',
       roam: true, draggable: true,
       categories: Object.entries(catColorMap).map(([k, v]) => ({
         name: k, itemStyle: { color: v }
@@ -248,6 +275,7 @@ onBeforeUnmount(() => { graphChart?.dispose() })
 .graph-container { height: 520px; }
 
 .status-panel { height: 100%; }
+.status-panel :deep(.el-card__body) { display: flex; flex-direction: column; height: calc(100% - 56px); overflow: hidden; }
 .status-summary { display: flex; gap: 16px; margin-bottom: 8px; font-size: 13px; color: var(--color-text-secondary); }
 .status-item { display: flex; align-items: center; gap: 6px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }

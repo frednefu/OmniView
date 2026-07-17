@@ -23,6 +23,49 @@ from app.schemas.system_monitor import (
 
 router = APIRouter(prefix="/monitor", tags=["系统监控"])
 
+
+# ══════════════════════════════════════════════════════════════════
+# 拓扑位置记忆
+# ══════════════════════════════════════════════════════════════════
+
+from app.models.topo_position import TopoPosition
+
+
+@router.get("/systems/{system_id}/topo-positions")
+def get_topo_positions(
+    system_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """获取该系统拓扑图的节点位置"""
+    rows = db.query(TopoPosition).filter(TopoPosition.system_id == system_id).all()
+    return {"positions": {r.node_name: {"x": r.x, "y": r.y} for r in rows}}
+
+
+@router.put("/systems/{system_id}/topo-positions")
+def save_topo_positions(
+    system_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """保存该系统拓扑图的节点位置"""
+    positions = body.get("positions", {})
+    if not positions:
+        return {"message": "无位置数据"}
+    # 先删后插
+    db.query(TopoPosition).filter(TopoPosition.system_id == system_id).delete()
+    for name, pos in positions.items():
+        db.add(TopoPosition(
+            system_id=system_id,
+            node_name=name,
+            x=pos.get("x", 0),
+            y=pos.get("y", 0),
+            created_by=current_user.id,
+        ))
+    db.commit()
+    return {"message": f"已保存 {len(positions)} 个节点位置"}
+
 _ASSET_LABELS = ["前端", "中间件", "数据库", "负载均衡", "存储", "安全", "备份", "监控", "其他"]
 
 _ROLE_KEYWORDS = {
@@ -512,9 +555,6 @@ def get_topology(
         ).distinct().all()
 
         for (ip,) in zdns_ips:
-            ipn = f"ip:{ip}"
-            _add_node(ipn, "ip", ip, "up", ip)
-
             # ── 第3层A：IP → F5 VS → 成员 ──
             vs_list = db.query(F5VirtualServer).filter(F5VirtualServer.vs_ip == ip).all()
             for vs in vs_list:
@@ -539,10 +579,10 @@ def get_topology(
 
                     # ── 第4层：成员IP → VM ──
                     if m.member_ip:
-                        _link_ip_to_vm(m.member_ip, mkey, db, _add_node, _add_edge)
+                        _link_ip_to_vm(m.member_ip, mkey, db, _add_node, _add_edge, linked_backups, linked_qax)
 
-            # ── 第3层B：IP → VM (直接匹配，非F5) ──
-            _link_ip_to_vm(ip, dn, db, _add_node, _add_edge)
+            # ── 第3层B：域名 → VM (直接匹配，非F5) ──
+            _link_ip_to_vm(ip, dn, db, _add_node, _add_edge, linked_backups, linked_qax)
 
     # ── 已绑定的 VM → 备份 + 椒图 ──
     for vm_name in linked_vms:
@@ -560,6 +600,43 @@ def get_topology(
             _add_node(bn, "backup", vm_name, item_b["status"], item_b["status_label"])
             _add_edge(vmn, bn, "备份")
 
+    # ── 独立关联的 QAX 节点：优先查找归属 VM ──
+    for qkey in linked_qax:
+        qn = f"qax:{qkey}"
+        if qn in node_seen:
+            continue
+        item_q = {"asset_type": "qax", "asset_key": qkey}
+        _fill_status(item_q, db)
+        # 尝试找到此 QAX 对应的 VM（通过 IP 匹配）
+        srv = db.query(QianXinServer).filter(
+            (QianXinServer.machine_name == qkey) | (QianXinServer.ipv4 == qkey)
+        ).first()
+        parent_found = False
+        if srv:
+            for ip in filter(None, [srv.ipv4, srv.intranet_ip]):
+                for vm in db.query(VMInventory).filter(VMInventory.ip_address.contains(ip)).all():
+                    ips = [x.strip() for x in (vm.ip_address or "").split(",")]
+                    if ip in ips:
+                        vmn = f"vm:{vm.vm_name}"
+                        if vmn in node_seen:
+                            _add_node(qn, "qax", qkey[:40], item_q["status"], item_q["status_label"])
+                            _add_edge(vmn, qn, "椒图")
+                            parent_found = True
+                            break
+                if parent_found:
+                    break
+        if not parent_found:
+            _add_node(qn, "qax", qkey[:40], item_q["status"], item_q["status_label"])
+            _add_edge(sys_name, qn, "椒图")
+
+    for vm_name in linked_vms:
+        vmn = f"vm:{vm_name}"
+        if vmn not in node_seen:
+            item_v = {"asset_type": "vm", "asset_key": vm_name}
+            _fill_status(item_v, db)
+            _add_node(vmn, "vm", vm_name, item_v["status"], item_v["status_label"])
+            _add_edge(sys_name, vmn, "VM")
+
     # ── 兜底：孤立节点（无父连接的）统一挂到系统节点 ──
     all_linked_nodes = {e.target for e in edges}
     all_linked_nodes.add(sys_name)
@@ -571,7 +648,7 @@ def get_topology(
 
 
 def _link_ip_to_vm(ip: str, parent_node: str, db: Session,
-                    _add_node, _add_edge):
+                    _add_node, _add_edge, linked_backups=None, linked_qax=None):
     """辅助：IP → VM 匹配（VM清单IP + 交换机扫描结果MAC反查兜底）"""
     vm_found = set()
     # 方式1：直接IP匹配
@@ -579,7 +656,7 @@ def _link_ip_to_vm(ip: str, parent_node: str, db: Session,
         ips = [x.strip() for x in (vm.ip_address or "").split(",")]
         if ip in ips and vm.vm_name not in vm_found:
             vm_found.add(vm.vm_name)
-            _emit_vm_node(vm.vm_name, ip, parent_node, db, _add_node, _add_edge)
+            _emit_vm_node(vm.vm_name, ip, parent_node, db, _add_node, _add_edge, linked_backups, linked_qax)
 
     # 方式2：交换机扫描结果 IP→MAC→VM 兜底（VM清单IP未补全时）
     if not vm_found:
@@ -593,35 +670,39 @@ def _link_ip_to_vm(ip: str, parent_node: str, db: Session,
             for vm in db.query(VMInventory).filter(VMInventory.mac_address.contains(mac)).all():
                 if vm.vm_name not in vm_found:
                     vm_found.add(vm.vm_name)
-                    _emit_vm_node(vm.vm_name, ip, parent_node, db, _add_node, _add_edge)
+                    _emit_vm_node(vm.vm_name, ip, parent_node, db, _add_node, _add_edge, linked_backups, linked_qax)
 
 
 def _emit_vm_node(vm_name: str, ip: str, parent_node: str, db: Session,
-                  _add_node, _add_edge):
-    """辅助：生成 VM 节点及下属备份/椒图节点"""
+                  _add_node, _add_edge, linked_backups=None, linked_qax=None):
+    """辅助：生成 VM 节点及下属备份/椒图节点（仅已关联的）"""
+    linked_backups = linked_backups or {}
+    linked_qax = linked_qax or {}
     vmn = f"vm:{vm_name}"
     item = {"asset_type": "vm", "asset_key": vm_name}
     _fill_status(item, db)
     _add_node(vmn, "vm", vm_name, item["status"], item["status_label"])
     _add_edge(parent_node, vmn, "VM")
 
-    # VM → 备份
-    for b in db.query(DingJiaBackupRecord).filter(DingJiaBackupRecord.vm_name == vm_name).all():
+    # VM → 备份（仅已关联的）
+    if vm_name in linked_backups:
         bn = f"backup:{vm_name}"
         item_b = {"asset_type": "backup", "asset_key": vm_name}
         _fill_status(item_b, db)
         _add_node(bn, "backup", vm_name, item_b["status"], item_b["status_label"])
         _add_edge(vmn, bn, "备份")
 
-    # VM → 椒图(通过IP)
-    for q in db.query(QianXinServer).filter(
-        (QianXinServer.ipv4 == ip) | (QianXinServer.intranet_ip == ip)
-    ).all():
-        qn = f"qax:{q.machine_name or q.ipv4 or ip}"
-        item_q = {"asset_type": "qax", "asset_key": q.machine_name or q.ipv4 or ip}
-        _fill_status(item_q, db)
-        _add_node(qn, "qax", q.machine_name or q.ipv4 or "", item_q["status"], item_q["status_label"])
-        _add_edge(vmn, qn, "椒图")
+    # VM → 椒图（仅已关联的，通过IP匹配找到对应QAX key）
+    for qkey in linked_qax:
+        srv = db.query(QianXinServer).filter(
+            (QianXinServer.machine_name == qkey) | (QianXinServer.ipv4 == qkey)
+        ).first()
+        if srv and (srv.ipv4 == ip or srv.intranet_ip == ip):
+            qn = f"qax:{qkey}"
+            item_q = {"asset_type": "qax", "asset_key": qkey}
+            _fill_status(item_q, db)
+            _add_node(qn, "qax", qkey[:40], item_q["status"], item_q["status_label"])
+            _add_edge(vmn, qn, "椒图")
 
 
 # ══════════════════════════════════════════════════════════════════
