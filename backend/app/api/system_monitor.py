@@ -323,14 +323,17 @@ def _fill_status(item: dict, db: Session):
             item["status_label"] = "异常"
 
     elif at == "qax":
+        # key 格式: "machine_name@@ip" 或 "machine_name"
+        qax_key = key.split("@@")[0]
+        qax_ip = key.split("@@")[1] if "@@" in key else ""
         srv = db.query(QianXinServer).filter(
-            (QianXinServer.machine_name == key) | (QianXinServer.ipv4 == key)
+            (QianXinServer.machine_name == qax_key) | (QianXinServer.ipv4 == qax_key)
         ).first()
         if srv:
             online = srv.online_status == 1
             item["status"] = "up" if online else "down"
             item["status_label"] = "在线" if online else "离线"
-            item["asset_ip"] = srv.ipv4 or ""
+            item["asset_ip"] = qax_ip or srv.ipv4 or ""
         else:
             item["asset_ip"] = ""
 
@@ -398,7 +401,7 @@ def link_assets(
                 for q in db.query(QianXinServer).filter(
                     (QianXinServer.ipv4 == ip) | (QianXinServer.intranet_ip == ip)
                 ).all():
-                    qk = q.machine_name or q.ipv4 or ""
+                    qk = (q.machine_name or q.ipv4 or "") + "@@" + ip
                     exists = db.query(SystemAssetLink).filter(
                         SystemAssetLink.info_system_id == system_id,
                         SystemAssetLink.asset_type == "qax",
@@ -584,6 +587,61 @@ def get_topology(
             # ── 第3层B：域名 → VM (直接匹配，非F5) ──
             _link_ip_to_vm(ip, dn, db, _add_node, _add_edge, linked_backups, linked_qax)
 
+    # ── 独立关联的 F5 成员：未在链路中发现时挂到域名/IP下，优先匹配 VM ──
+    for ip, mkey in list(linked_members.items()):
+        mn = f"f5_member:{mkey}"
+        if mn in node_seen:
+            continue
+        item_m = {"asset_type": "f5_member", "asset_key": mkey}
+        _fill_status(item_m, db)
+        parent_found = False
+        for domain in linked_domains:
+            dn = f"domain:{domain}"
+            if dn in node_seen:
+                zdns_ips = db.query(ZDNSDomainMap.ip_address).filter(
+                    ZDNSDomainMap.domain_name == domain, ZDNSDomainMap.ip_address != "",
+                ).distinct().all()
+                for (dip,) in zdns_ips:
+                    if dip == ip:
+                        _add_node(mn, "f5_member", mkey[:40], item_m["status"], item_m["status_label"])
+                        _add_edge(dn, mn, "成员")
+                        parent_found = True
+                        break
+                if parent_found:
+                    break
+        if not parent_found:
+            _add_node(mn, "f5_member", mkey[:40], item_m["status"], item_m["status_label"])
+            _add_edge(sys_name, mn, "成员")
+        # 成员下挂 VM（IP 匹配 + ScanResult MAC 兜底）
+        from app.models.scan_result import ScanResult
+        member_mac_set = set()
+        for (mac,) in db.query(ScanResult.mac_address).filter(
+            ScanResult.ip_address == ip, ScanResult.mac_address != "",
+            ScanResult.mac_address.isnot(None),
+        ).distinct().all():
+            member_mac_set.add(mac)
+        for vm_name in list(linked_vms):
+            vmn = f"vm:{vm_name}"
+            if vmn in node_seen:
+                continue
+            vm_row = db.query(VMInventory).filter(VMInventory.vm_name == vm_name).first()
+            if not vm_row:
+                continue
+            vips = [x.strip() for x in (vm_row.ip_address or "").split(",")]
+            if ip in vips:
+                item_v2 = {"asset_type": "vm", "asset_key": vm_name}
+                _fill_status(item_v2, db)
+                _add_node(vmn, "vm", vm_name, item_v2["status"], item_v2["status_label"])
+                _add_edge(mn, vmn, "VM")
+            elif vm_row.mac_address and member_mac_set:
+                for mac_short in vm_row.mac_address.split(",")[:1]:
+                    if mac_short.strip() in member_mac_set:
+                        item_v2 = {"asset_type": "vm", "asset_key": vm_name}
+                        _fill_status(item_v2, db)
+                        _add_node(vmn, "vm", vm_name, item_v2["status"], item_v2["status_label"])
+                        _add_edge(mn, vmn, "VM")
+                        break
+
     # ── 已绑定的 VM → 备份 + 椒图 ──
     for vm_name in linked_vms:
         vmn = f"vm:{vm_name}"
@@ -602,23 +660,25 @@ def get_topology(
 
     # ── 独立关联的 QAX 节点：优先查找归属 VM ──
     for qkey in linked_qax:
+        qax_name = qkey.split("@@")[0]
+        qax_ip = qkey.split("@@")[1] if "@@" in qkey else ""
         qn = f"qax:{qkey}"
         if qn in node_seen:
             continue
         item_q = {"asset_type": "qax", "asset_key": qkey}
         _fill_status(item_q, db)
-        # 尝试找到此 QAX 对应的 VM（通过 IP 匹配）
-        srv = db.query(QianXinServer).filter(
-            (QianXinServer.machine_name == qkey) | (QianXinServer.ipv4 == qkey)
-        ).first()
+        # 尝试找到此 QAX 对应的 VM（通过匹配IP查ScanResult→MAC→VM）
         parent_found = False
-        if srv:
-            for ip in filter(None, [srv.ipv4, srv.intranet_ip]):
-                for vm in db.query(VMInventory).filter(VMInventory.ip_address.contains(ip)).all():
-                    ips = [x.strip() for x in (vm.ip_address or "").split(",")]
-                    if ip in ips:
-                        vmn = f"vm:{vm.vm_name}"
-                        if vmn in node_seen:
+        if qax_ip:
+            from app.models.scan_result import ScanResult
+            macs = db.query(ScanResult.mac_address).filter(
+                ScanResult.ip_address == qax_ip, ScanResult.mac_address != "",
+                ScanResult.mac_address.isnot(None),
+            ).distinct().all()
+            for (mac,) in macs:
+                for vm in db.query(VMInventory).filter(VMInventory.mac_address.contains(mac)).all():
+                    vmn = f"vm:{vm.vm_name}"
+                    if vmn in node_seen:
                             _add_node(qn, "qax", qkey[:40], item_q["status"], item_q["status_label"])
                             _add_edge(vmn, qn, "椒图")
                             parent_found = True
@@ -629,13 +689,45 @@ def get_topology(
             _add_node(qn, "qax", qkey[:40], item_q["status"], item_q["status_label"])
             _add_edge(sys_name, qn, "椒图")
 
+        # ── 独立关联的 F5 VS：未在链路中发现时挂到域名/IP下 ──
+    for vs_name in linked_vs:
+        vsn = f"f5_vs:{vs_name}"
+        if vsn in node_seen:
+            continue
+        item_vs = {"asset_type": "f5_vs", "asset_key": vs_name}
+        _fill_status(item_vs, db)
+        # 查 VS 的 IP，尝试挂到相同 IP 的域名下
+        vs_row = db.query(F5VirtualServer).filter(F5VirtualServer.name == vs_name).first()
+        vs_ip = vs_row.vs_ip if vs_row else ""
+        parent_found = False
+        if vs_ip:
+            for domain in linked_domains:
+                dn = f"domain:{domain}"
+                if dn in node_seen:
+                    zdns_ips = db.query(ZDNSDomainMap.ip_address).filter(
+                        ZDNSDomainMap.domain_name == domain, ZDNSDomainMap.ip_address != "",
+                    ).distinct().all()
+                    for (dip,) in zdns_ips:
+                        if dip == vs_ip:
+                            _add_node(vsn, "f5_vs", vs_name[:40], item_vs["status"], item_vs["status_label"])
+                            _add_edge(dn, vsn, f"VS {vs_ip}")
+                            parent_found = True
+                            break
+                    if parent_found:
+                        break
+        if not parent_found:
+            _add_node(vsn, "f5_vs", vs_name[:40], item_vs["status"], item_vs["status_label"])
+            _add_edge(sys_name, vsn, "F5 VS")
+
+    # ── 独立关联的 VM：不在成员下的挂到系统 ──
     for vm_name in linked_vms:
         vmn = f"vm:{vm_name}"
-        if vmn not in node_seen:
-            item_v = {"asset_type": "vm", "asset_key": vm_name}
-            _fill_status(item_v, db)
-            _add_node(vmn, "vm", vm_name, item_v["status"], item_v["status_label"])
-            _add_edge(sys_name, vmn, "VM")
+        if vmn in node_seen:
+            continue
+        item_v = {"asset_type": "vm", "asset_key": vm_name}
+        _fill_status(item_v, db)
+        _add_node(vmn, "vm", vm_name, item_v["status"], item_v["status_label"])
+        _add_edge(sys_name, vmn, "VM")
 
     # ── 兜底：孤立节点（无父连接的）统一挂到系统节点 ──
     all_linked_nodes = {e.target for e in edges}
@@ -694,14 +786,16 @@ def _emit_vm_node(vm_name: str, ip: str, parent_node: str, db: Session,
 
     # VM → 椒图（仅已关联的，通过IP匹配找到对应QAX key）
     for qkey in linked_qax:
+        qax_name = qkey.split("@@")[0]
+        qax_ip = qkey.split("@@")[1] if "@@" in qkey else ip
         srv = db.query(QianXinServer).filter(
-            (QianXinServer.machine_name == qkey) | (QianXinServer.ipv4 == qkey)
+            (QianXinServer.machine_name == qax_name) | (QianXinServer.ipv4 == qax_name)
         ).first()
-        if srv and (srv.ipv4 == ip or srv.intranet_ip == ip):
+        if srv and (srv.ipv4 == ip or srv.intranet_ip == ip or qax_ip == ip):
             qn = f"qax:{qkey}"
             item_q = {"asset_type": "qax", "asset_key": qkey}
             _fill_status(item_q, db)
-            _add_node(qn, "qax", qkey[:40], item_q["status"], item_q["status_label"])
+            _add_node(qn, "qax", qax_name[:40], item_q["status"], item_q["status_label"])
             _add_edge(vmn, qn, "椒图")
 
 
@@ -906,19 +1000,13 @@ def auto_link_assets(
                     _link("vm", vm_name, "", vm.remark if vm else "")
                     vm_names_found.add(vm_name)
 
-    # ── 4. 成员IP → 虚拟机（精确匹配 + 逗号分隔多IP）─
+    # ── 4. 成员IP → 虚拟机（使用 _find_vms_by_ip 双路匹配含ScanResult兜底）─
     for ip in all_member_ips:
-        # 精确匹配单IP
-        for vm in db.query(VMInventory).filter(VMInventory.ip_address == ip).all():
-            _link("vm", vm.vm_name, "", vm.remark or "")
-            vm_names_found.add(vm.vm_name)
-        # 逗号分隔多IP
-        for vm in db.query(VMInventory).filter(VMInventory.ip_address.contains(ip)).all():
-            if vm.vm_name not in vm_names_found:
-                ips = [x.strip() for x in (vm.ip_address or "").split(",")]
-                if ip in ips:
-                    _link("vm", vm.vm_name, "", vm.remark or "")
-                    vm_names_found.add(vm.vm_name)
+        for vm_name in _find_vms_by_ip(ip):
+            if vm_name not in vm_names_found:
+                vm = db.query(VMInventory).filter(VMInventory.vm_name == vm_name).first()
+                _link("vm", vm_name, "", vm.remark if vm else "")
+                vm_names_found.add(vm_name)
 
     # ── 5. VM → 备份 + IP收集 → 椒图 ──
     all_ips_for_qax = set(all_member_ips)
@@ -942,7 +1030,7 @@ def auto_link_assets(
         for q in db.query(QianXinServer).filter(
             (QianXinServer.ipv4 == ip) | (QianXinServer.intranet_ip == ip)
         ).all():
-            _link("qax", q.machine_name or q.ipv4 or "", "安全")
+            _link("qax", f"{q.machine_name or q.ipv4 or ''}@@{ip}", "安全")
 
     # ── 7. 已绑定VM补充（无成员IP兜底）─
     for l in db.query(SystemAssetLink).filter(
@@ -965,7 +1053,7 @@ def auto_link_assets(
                         for q in db.query(QianXinServer).filter(
                             (QianXinServer.ipv4 == ip) | (QianXinServer.intranet_ip == ip)
                         ).all():
-                            _link("qax", q.machine_name or q.ipv4 or "", "安全")
+                            _link("qax", f"{q.machine_name or q.ipv4 or ''}@@{ip}", "安全")
 
     db.commit()
     return {"added": added, "message": f"自动关联完成，新增 {added} 个资产"}

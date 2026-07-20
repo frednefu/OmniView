@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="page">
     <div class="page-header">
       <div>
@@ -34,11 +34,11 @@
         <el-card shadow="hover" class="status-panel">
           <template #header><strong>组件状态</strong></template>
           <div class="status-summary">
-            <div class="status-item"><span class="dot up"></span>正常: {{ stats.up }}</div>
-            <div class="status-item"><span class="dot down"></span>异常: {{ stats.down }}</div>
-            <div class="status-item"><span class="dot unknown"></span>未知: {{ stats.unknown }}</div>
+            <div class="status-item clickable" :class="{active: statusFilter==='up'}" @click="toggleFilter('up')"><span class="dot up"></span>正常: {{ stats.up }}</div>
+            <div class="status-item clickable" :class="{active: statusFilter==='down'}" @click="toggleFilter('down')"><span class="dot down"></span>异常: {{ stats.down }}</div>
+            <div class="status-item clickable" :class="{active: statusFilter==='unknown'}" @click="toggleFilter('unknown')"><span class="dot unknown"></span>未知: {{ stats.unknown }}</div>
           </div>
-          <el-table :data="assets" stripe size="small" style="margin-top:12px;flex:1">
+          <el-table :data="filteredAssets" stripe size="small" style="margin-top:12px;flex:1">
             <el-table-column label="类型" width="75">
               <template #default="{row}">{{ typeLabel(row.asset_type) }}</template>
             </el-table-column>
@@ -51,7 +51,7 @@
             </el-table-column>
             <el-table-column label="状态" width="80">
               <template #default="{row}">
-                <el-tag :type="row.status==='up'?'success':row.status==='down'?'danger':'info'" size="small">{{ row.status_label || '未知' }}</el-tag>
+                <el-tag :type="row.status==='up'?'success':row.status==='warning'||row.status==='remind'?'warning':row.status==='down'?'danger':'info'" size="small">{{ row.status_label || '未知' }}</el-tag>
               </template>
             </el-table-column>
           </el-table>
@@ -78,15 +78,23 @@ const topoNodes = ref([])
 const graphRef = ref(null)
 let graphChart = null
 
+const statusFilter = ref('')
+const filteredAssets = computed(() => {
+  if (!statusFilter.value) return assets.value
+  return assets.value.filter(a => { const s = (a.status === 'up' || a.status === 'warning' || a.status === 'remind') ? 'up' : a.status === 'down' ? 'down' : 'unknown'; return s === statusFilter.value })
+})
 const stats = computed(() => {
   let up = 0, down = 0, unknown = 0
   for (const a of assets.value) {
-    if (a.status === 'up') up++
+    if (a.status === 'up' || a.status === 'warning' || a.status === 'remind') up++
     else if (a.status === 'down') down++
     else unknown++
   }
   return { up, down, unknown }
 })
+function toggleFilter(val) {
+  statusFilter.value = statusFilter.value === val ? '' : val
+}
 
 const catColors = {
   system: '#6366f1', domain: '#10b981', vm: '#f59e0b', f5_vs: '#06b6d4',
@@ -182,10 +190,12 @@ function renderGraph(data, savedPos = {}) {
   }
 
   // 系统状态：异常优先
-  const childStatuses = (data.nodes || []).filter(n => n.category !== 'system').map(n => n.status)
+  // 系统状态：使用资产表数据（比拓扑节点更全面）
   let sysStatus = 'up'
-  if (childStatuses.some(s => s === 'down')) sysStatus = 'down'
-  else if (childStatuses.some(s => s === 'unknown')) sysStatus = 'unknown'
+  for (const a of assets.value) {
+    if (a.status === 'down' || a.status === 'remind') { sysStatus = 'down'; break }
+    if (a.status === 'unknown') sysStatus = 'unknown'
+  }
 
   const gapX = 150
   const nodes = []
@@ -278,8 +288,12 @@ onBeforeUnmount(() => { graphChart?.dispose() })
 .status-panel :deep(.el-card__body) { display: flex; flex-direction: column; height: calc(100% - 56px); overflow: hidden; }
 .status-summary { display: flex; gap: 16px; margin-bottom: 8px; font-size: 13px; color: var(--color-text-secondary); }
 .status-item { display: flex; align-items: center; gap: 6px; }
+.status-item.clickable { cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: background .15s; }
+.status-item.clickable:hover { background: var(--color-bg); }
+.status-item.clickable.active { background: var(--color-primary-light-9, #ecf5ff); font-weight: 600; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .dot.up { background: #10b981; }
 .dot.down { background: #ef4444; }
 .dot.unknown { background: #94a3b8; }
 </style>
+
