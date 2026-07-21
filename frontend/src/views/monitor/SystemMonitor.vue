@@ -140,19 +140,16 @@ let currentPositions = {}
 const savingPos = ref(false)
 async function savePositions() {
   if (!systemId.value) return
-  // 优先从图表读取，失败则用内存缓存
-  let pos = {}
-  if (graphChart) {
-    try {
-      const opt = graphChart.getOption()
-      const ns = opt.series[0]?.data || []
-      ns.forEach(n => { if (n.name && n.x != null && n.y != null) pos[n.name] = { x: Math.round(n.x), y: Math.round(n.y) } })
-    } catch {}
+  // 过滤无效位置
+  const clean = {}
+  for (const [name, pos] of Object.entries(currentPositions)) {
+    if (pos && typeof pos.x === 'number' && typeof pos.y === 'number' && isFinite(pos.x) && isFinite(pos.y)) {
+      clean[name] = { x: Math.round(pos.x), y: Math.round(pos.y) }
+    }
   }
-  // 图表读不到则用内存缓存
-  if (Object.keys(pos).length === 0) pos = { ...currentPositions }
-  if (Object.keys(pos).length === 0) { ElMessage.warning('无位置数据可保存'); return }
-  currentPositions = pos
+  const keys = Object.keys(clean)
+  if (keys.length === 0) { ElMessage.warning('无有效位置数据可保存'); return }
+  currentPositions = clean
 
   savingPos.value = true
   try {
@@ -263,6 +260,26 @@ function renderGraph(data, savedPos = {}) {
       nodes, links,
     }],
   })
+  // 拖动节点后更新位置缓存
+  function capturePositions() {
+    try {
+      const graph = graphChart.getModel().getSeries()[0]?.getGraph()
+      if (!graph) return
+      const nodes = graph.getNodes()
+      if (!nodes) return
+      for (const node of nodes) {
+        const name = node.getName()
+        const layout = node.getLayout()
+        if (name && layout && typeof layout.x === 'number' && typeof layout.y === 'number' && isFinite(layout.x) && isFinite(layout.y)) {
+          currentPositions[name] = { x: Math.round(layout.x), y: Math.round(layout.y) }
+        }
+      }
+    } catch {}
+  }
+  graphChart.off('mouseup')
+  graphChart.on('mouseup', capturePositions)
+  graphChart.off('graphroam')
+  graphChart.on('graphroam', capturePositions)
 }
 
 function goLink() { router.push('/monitor/link') }

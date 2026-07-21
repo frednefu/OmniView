@@ -24,15 +24,18 @@ def _run_match_owner():
         from app.services.external_api_service import fetch_staff
         _task_status["owner"] = {"running": True, "message": "正在查询外部API..."}
 
-        # 清理
+        # 清理上次运行残留的临时账号
         db.execute(text("DELETE FROM users WHERE username LIKE 'user_%'"))
         db.commit()
 
+        # 只处理已自动分组（claim_status='auto'）且未认领（owner_user_id IS NULL）的 VM
+        # 已手动认领或已有负责人的 VM 跳过，避免重复设置造成混乱
         vms = db.execute(text(
             "SELECT v.id, v.vm_name, v.remark, a.department_id, d.dwmc, d.dwbm FROM vm_inventory v "
-            "LEFT JOIN asset_inventory a ON v.vm_name = a.vm_name "
+            "INNER JOIN asset_inventory a ON v.vm_name = a.vm_name "
             "LEFT JOIN departments d ON a.department_id = d.id "
             "WHERE a.department_id IS NOT NULL AND a.owner_user_id IS NULL "
+            "AND a.claim_status = 'auto' "
             "AND v.remark IS NOT NULL AND v.remark != ''"
         )).fetchall()
 
@@ -137,7 +140,7 @@ def _run_match_owner():
                     db.commit()
                     matched += 1
                     break
-        msg = f"匹配负责人完成：共 {len(vms)} 个 VM，成功匹配 {matched} 人，API 查询 {len(name_list)} 人"
+        msg = f"匹配负责人完成：处理 {len(vms)} 个未认领 VM，成功匹配 {matched} 人，API 查询 {len(name_list)} 人"
         if api_errors:
             msg += f"，API 异常 {len(api_errors)} 个"
         _task_status["owner"] = {"running": False, "message": msg}

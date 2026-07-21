@@ -56,11 +56,14 @@ def save_topo_positions(
     # 先删后插
     db.query(TopoPosition).filter(TopoPosition.system_id == system_id).delete()
     for name, pos in positions.items():
+        x = pos.get("x")
+        y = pos.get("y")
+        if x is None or y is None or not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            continue
         db.add(TopoPosition(
             system_id=system_id,
             node_name=name,
-            x=pos.get("x", 0),
-            y=pos.get("y", 0),
+            x=x, y=y,
             created_by=current_user.id,
         ))
     db.commit()
